@@ -623,9 +623,21 @@ objects' bodies, forging a wrapped key — and require an error rather than plai
 every case.
 
 If you find a weakness in [docs/FORMAT.md](docs/FORMAT.md), in the reasoning in
-[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), or an attack the tests miss, please open an
-issue — that is the most valuable contribution this project can receive.
+[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), or an attack the tests miss, that is the most
+valuable contribution this project can receive. A weakness in the *reasoning* belongs in a
+public issue, where it can be argued with. Anything that gets at plaintext, at key material,
+or past an authentication check goes through [SECURITY.md](SECURITY.md) first — GitHub's
+private reporting, not an issue.
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) has the setup, what CI checks, and the two conventions
+that are not visible from the code: how commits are written, and when a change needs an ADR.
+Issues labelled [`good first issue`](https://github.com/LennardGeissler/blindbucket/labels/good%20first%20issue)
+are scoped to be finishable without reading the whole codebase.
 
 ## License
+
+Copyright 2026 Lennard Geißler
 
 Apache License 2.0 — see [LICENSE](LICENSE).
