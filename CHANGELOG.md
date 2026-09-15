@@ -65,14 +65,14 @@ for the active key and for the last one — nothing here can see the bucket, so
 whether an object still references the key is the operator's to establish, with
 a `--dry-run` rotation.
 
-**`blindbucket_keyring_keys` and `blindbucket_keyring_key_created_timestamp_seconds`.
+**`blindbucket_keyring_keys` and `blindbucket_keyring_key_created_timestamp_seconds`.**
 Key age as a metric rather than as a thing to remember. A timestamp rather than
 an age, so that `time() - max(...)` is the age at scrape time and no gauge has
 to be refreshed to stay true.
 
 **An AWS KMS encryption context** on the sealed root key: always
-`blindbucket=root-key`, plus anything under `keys.awskms.encryption_context`.
-It puts a distinguishable value in CloudTrail and lets a key policy narrow a grant
+`blindbucket=root-key`, plus anything under `keys.awskms.encryption_context`. It
+puts a distinguishable value in CloudTrail and lets a key policy narrow a grant
 to this use of the key with a `kms:EncryptionContext:blindbucket` condition. The
 context is recorded in the keyring's `root_key` object, because decrypting
 requires exactly the context that encrypted. Keyrings sealed by earlier builds
@@ -296,6 +296,7 @@ figures and the methodology are in [bench/](bench/).
   because rotation needs it, but the S3 operation is not wired up.
 - **`ListMultipartUploads`** is refused, and will stay that way: the upload ids
   this gateway issues cannot be reconstructed from the provider's listing.
+  `ListParts` works.
 - **`UploadPartCopy`** is refused.
 - **Object names are not encrypted**, and object sizes are visible to the
   provider. Both are recorded in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) as

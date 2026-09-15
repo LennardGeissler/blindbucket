@@ -37,7 +37,7 @@ func TestMarshalKeysJSON(t *testing.T) {
 		Keys []struct {
 			KID        string  `json:"kid"`
 			Created    *string `json:"created"`
-			AgeSeconds  *int64  `json:"age_seconds"`
+			AgeSeconds *int64  `json:"age_seconds"`
 			Active     bool    `json:"active"`
 		} `json:"keys"`
 	}
@@ -50,7 +50,7 @@ func TestMarshalKeysJSON(t *testing.T) {
 	if got.Keys[0].KID != "2026-09" || !got.Keys[0].Active {
 		t.Errorf("active entry = %+v", got.Keys[0])
 	}
-	if got.Keys[0].Created == nil || *got.Keys[0].Created != "2026-09-13T23:00:00Z" {
+	if got.Keys[0].Created == nil || *got.Keys[0].Created != created.UTC().Format(time.RFC3339) {
 		t.Errorf("created = %v, want RFC3339 UTC timestamp", got.Keys[0].Created)
 	}
 	if got.Keys[0].AgeSeconds == nil || *got.Keys[0].AgeSeconds != 90000 {
