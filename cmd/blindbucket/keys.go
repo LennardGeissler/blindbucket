@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -60,6 +61,7 @@ Flags:
 	var (
 		keyring = fs.String("keyring", "", "keyring file (required)")
 		conf    = fs.String("config", "", "configuration file naming the root-key provider")
+		jsonOut = fs.Bool("json", false, "emit the key list as JSON")
 		pass    passphraseFlags
 	)
 	pass.register(fs)
@@ -82,22 +84,31 @@ Flags:
 	}
 
 	now := time.Now().UTC()
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "KEY ID\tCREATED\tAGE\t")
-	for _, kid := range ring.KIDs() {
-		created, age := "unknown", ""
-		if t, ok := ring.Created(kid); ok && !t.IsZero() {
-			created = t.Format(time.RFC3339)
-			age = humanAge(now.Sub(t))
+	if *jsonOut {
+		data, err := marshalKeysJSON(now, ring)
+		if err != nil {
+			return err
 		}
-		marker := ""
-		if kid == ring.ActiveKID() {
-			marker = "active"
+		_, _ = os.Stdout.Write(data)
+	} else {
+		_, _ = fmt.Fprintln(w, "KEY ID\tCREATED\tAGE\t")
+		for _, kid := range ring.KIDs() {
+			created, age := "unknown", ""
+			if t, ok := ring.Created(kid); ok && !t.IsZero() {
+				created = t.Format(time.RFC3339)
+				age = humanAge(now.Sub(t))
+			}
+			marker := ""
+			if kid == ring.ActiveKID() {
+				marker = "active"
+			}
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", kid, created, age, marker)
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", kid, created, age, marker)
-	}
-	if err := w.Flush(); err != nil {
-		return err
+		if err := w.Flush(); err != nil {
+			return err
+		}
 	}
 
 	if _, ok := ring.AuditKey(); !ok {
@@ -105,6 +116,42 @@ Flags:
 			"\nthis keyring has no audit key; `keygen --add-audit-key` adds one\n")
 	}
 	return nil
+}
+
+type keyListJSON struct {
+	Keys []keyListEntryJSON `json:"keys"`
+}
+
+type keyListEntryJSON struct {
+	KID        string  `json:"kid"`
+	Created    *string `json:"created"`
+	AgeSeconds *int64  `json:"age_seconds"`
+	Active     bool    `json:"active"`
+}
+
+// marshalKeysJSON renders the key list as newline-terminated JSON with UTC timestamps.
+func marshalKeysJSON(now time.Time, ring interface {
+	KIDs() []string
+	Created(string) (time.Time, bool)
+	ActiveKID() string
+}) ([]byte, error) {
+	out := keyListJSON{Keys: make([]keyListEntryJSON, 0, len(ring.KIDs()))}
+	for _, kid := range ring.KIDs() {
+		entry := keyListEntryJSON{KID: kid, Active: kid == ring.ActiveKID()}
+		if t, ok := ring.Created(kid); ok && !t.IsZero() {
+			created := t.UTC().Format(time.RFC3339)
+			age := int64(now.Sub(t).Seconds())
+			entry.Created = &created
+			entry.AgeSeconds = &age
+		}
+		out.Keys = append(out.Keys, entry)
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return nil, err
+	}
+	data = append(data, '\n')
+	return data, nil
 }
 
 // humanAge renders a key's age at the resolution a rotation decision needs.

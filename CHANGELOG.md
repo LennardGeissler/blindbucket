@@ -14,6 +14,8 @@ version 1 would keep being readable.
 
 ### Added
 
+**`blindbucket keys list --json`.** The key listing can be emitted as structured JSON for scripts and scheduled rotation checks. JSON output keeps timestamps in UTC RFC 3339 form and includes each key's age in seconds and active status; warnings remain on stderr.
+
 **A cryptographically verifiable audit log.** The gateway can keep a record of
 what it served — which credential, which operation, which object, what came
 back — in a form an intruder cannot quietly edit. Every entry carries the hash of
@@ -123,8 +125,8 @@ why a shared data key is not nonce reuse in the sense that matters.
 the source's tags before a server-side copy.
 
 **Vault Transit and AWS KMS as root-key sources**, the last of M5. The keyring
-can be sealed by a key service instead of a passphrase: the service decrypts the
-root key at startup and never hands out the key that does it. It is asked once —
+can be sealed by a key service instead of a passphrase: the service decrypts
+the root key at startup and never hands out the key that does it. It is asked once —
 after that every KEK is in memory and no request pays a round trip, which is the
 whole reason the key hierarchy of [ADR-002](docs/adr/ADR-002-key-hierarchy.md)
 exists. The keyring file records which source sealed it, so a keyring from
@@ -294,6 +296,7 @@ figures and the methodology are in [bench/](bench/).
   because rotation needs it, but the S3 operation is not wired up.
 - **`ListMultipartUploads`** is refused, and will stay that way: the upload ids
   this gateway issues cannot be reconstructed from the provider's listing.
+  `ListParts` works.
 - **`UploadPartCopy`** is refused.
 - **Object names are not encrypted**, and object sizes are visible to the
   provider. Both are recorded in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) as
