@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -60,6 +61,7 @@ Flags:
 	var (
 		keyring = fs.String("keyring", "", "keyring file (required)")
 		conf    = fs.String("config", "", "configuration file naming the root-key provider")
+		jsonOut = fs.Bool("json", false, "emit the key list as JSON")
 		pass    passphraseFlags
 	)
 	pass.register(fs)
@@ -82,6 +84,15 @@ Flags:
 	}
 
 	now := time.Now().UTC()
+	if *jsonOut {
+		data, err := marshalKeysJSON(now, ring)
+		if err != nil {
+			return err
+		}
+		_, _ = os.Stdout.Write(data)
+		return nil
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(w, "KEY ID\tCREATED\tAGE\t")
 	for _, kid := range ring.KIDs() {
@@ -105,6 +116,41 @@ Flags:
 			"\nthis keyring has no audit key; `keygen --add-audit-key` adds one\n")
 	}
 	return nil
+}
+
+type keyListJSON struct {
+	Keys []keyListEntryJSON `json:"keys"`
+}
+
+type keyListEntryJSON struct {
+	KID       string  `json:"kid"`
+	Created   *string `json:"created"`
+	AgeSeconds *int64 `json:"age_seconds"`
+	Active    bool    `json:"active"`
+}
+
+func marshalKeysJSON(now time.Time, ring interface {
+	KIDs() []string
+	Created(string) (time.Time, bool)
+	ActiveKID() string
+}) ([]byte, error) {
+	out := keyListJSON{Keys: make([]keyListEntryJSON, 0, len(ring.KIDs()))}
+	for _, kid := range ring.KIDs() {
+		entry := keyListEntryJSON{KID: kid, Active: kid == ring.ActiveKID()}
+		if t, ok := ring.Created(kid); ok && !t.IsZero() {
+			created := t.UTC().Format(time.RFC3339)
+			age := int64(now.Sub(t).Seconds())
+			entry.Created = &created
+			entry.AgeSeconds = &age
+		}
+		out.Keys = append(out.Keys, entry)
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return nil, err
+	}
+	data = append(data, '\n')
+	return data, nil
 }
 
 // humanAge renders a key's age at the resolution a rotation decision needs.
@@ -168,8 +214,6 @@ Flags:
 	if err != nil {
 		return err
 	}
-	// Checked before --force, so that a typo in the key id is reported as a
-	// typo rather than answered with a warning about data loss.
 	if _, ok := ring.Created(kid); !ok {
 		return fmt.Errorf("%s holds no key %q (see `blindbucket keys list`)", *keyring, kid)
 	}
@@ -195,11 +239,6 @@ Flags:
 	return nil
 }
 
-// keysConfig resolves the key configuration a command was pointed at.
-//
-// Without --config the keyring is a passphrase keyring, which is the case that
-// needs no configuration file at all; with one, the file also supplies the
-// passphrase location unless a flag already did.
 func keysConfig(conf string, pass *passphraseFlags) (config.Keys, error) {
 	if conf == "" {
 		return config.Keys{Provider: "file"}, nil

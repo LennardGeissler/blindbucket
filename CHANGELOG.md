@@ -14,6 +14,8 @@ version 1 would keep being readable.
 
 ### Added
 
+**`blindbucket keys list --json`.** The key listing can be emitted as structured JSON for scripts and scheduled rotation checks. JSON output keeps timestamps in UTC RFC 3339 form and includes each key's age in seconds and active status; warnings remain on stderr.
+
 **A cryptographically verifiable audit log.** The gateway can keep a record of
 what it served — which credential, which operation, which object, what came
 back — in a form an intruder cannot quietly edit. Every entry carries the hash of
@@ -63,14 +65,14 @@ for the active key and for the last one — nothing here can see the bucket, so
 whether an object still references the key is the operator's to establish, with
 a `--dry-run` rotation.
 
-**`blindbucket_keyring_keys` and `blindbucket_keyring_key_created_timestamp_seconds`.**
+**`blindbucket_keyring_keys` and `blindbucket_keyring_key_created_timestamp_seconds`.
 Key age as a metric rather than as a thing to remember. A timestamp rather than
 an age, so that `time() - max(...)` is the age at scrape time and no gauge has
 to be refreshed to stay true.
 
 **An AWS KMS encryption context** on the sealed root key: always
-`blindbucket=root-key`, plus anything under `keys.awskms.encryption_context`. It
-puts a distinguishable value in CloudTrail and lets a key policy narrow a grant
+`blindbucket=root-key`, plus anything under `keys.awskms.encryption_context`.
+It puts a distinguishable value in CloudTrail and lets a key policy narrow a grant
 to this use of the key with a `kms:EncryptionContext:blindbucket` condition. The
 context is recorded in the keyring's `root_key` object, because decrypting
 requires exactly the context that encrypted. Keyrings sealed by earlier builds
@@ -123,8 +125,8 @@ why a shared data key is not nonce reuse in the sense that matters.
 the source's tags before a server-side copy.
 
 **Vault Transit and AWS KMS as root-key sources**, the last of M5. The keyring
-can be sealed by a key service instead of a passphrase: the service decrypts the
-root key at startup and never hands out the key that does it. It is asked once —
+can be sealed by a key service instead of a passphrase: the service decrypts
+the root key at startup and never hands out the key that does it. It is asked once —
 after that every KEK is in memory and no request pays a round trip, which is the
 whole reason the key hierarchy of [ADR-002](docs/adr/ADR-002-key-hierarchy.md)
 exists. The keyring file records which source sealed it, so a keyring from
