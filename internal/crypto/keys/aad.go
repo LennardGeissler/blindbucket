@@ -14,6 +14,7 @@ const (
 	aadKEKPrefix    = "blindbucket/v1/kek"
 	aadAuditPrefix  = "blindbucket/v1/audit-secret"
 	aadNamePrefix   = "blindbucket/v1/name-key"
+	aadFreshPrefix  = "blindbucket/v1/freshness-key"
 )
 
 // auditAAD is the associated data binding the audit secret to its purpose.
@@ -33,6 +34,15 @@ func auditAAD() []byte { return []byte(aadAuditPrefix) }
 // domain separation the only thing distinguishing them would be where in the
 // file they were found.
 func nameAAD() []byte { return []byte(aadNamePrefix) }
+
+// freshnessAAD is the associated data binding the rollback-index key to its
+// purpose.
+//
+// Fixed, like the two above, and for the same reason: one per keyring, nothing
+// to bind it to beyond the context. The prefix is what stops the four 32-byte
+// secrets a keyring can hold -- a KEK, an audit secret, a name key and now this
+// -- being unwrapped as one another.
+func freshnessAAD() []byte { return []byte(aadFreshPrefix) }
 
 // MaxKIDLen bounds a key identifier.
 //

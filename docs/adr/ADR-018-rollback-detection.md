@@ -87,28 +87,35 @@ down, and what keeping it costs.**
 ## What remembering costs, measured
 
 Apple M4, Go 1.27.1, from [`internal/freshness/bench_test.go`](../../internal/freshness/bench_test.go).
-It measures a prototype of the design below, not shipped code.
 
 | | |
 |---|---|
-| Index of 100 000 objects | **5.0 MiB** (52 B/object) |
-| Index of 1 000 000 objects | **80.1 MiB** (84 B/object) |
-| Index of 10 000 000 objects | **640.6 MiB** (67 B/object) |
-| The same index with names in clear, 1 M objects | 125.9 MiB (132 B/object) |
-| One check on a read — keyed hash and lookup | **233 ns** (376 ns before the HMAC is pooled) |
-| Rebuilding the index at startup | **87 ms per million objects** |
-| On disk | 32 B/object — 30.5 MiB per million |
+| Index of 100 000 objects | **7.0 MiB** (73 B/object) |
+| Index of 1 000 000 objects | **112.1 MiB** (118 B/object) |
+| Index of 10 000 000 objects | **896.6 MiB** (94 B/object) |
+| The same index with names in clear, 1 M objects | 157.9 MiB (166 B/object) |
+| One check on a read — keyed hash and lookup | **279 ns** |
+| One record on a write, fsync every 256 | **21.3 µs** |
+| One record on a write, fsync every record | 3.69 ms |
+| Rebuilding the index at startup | **106 ms per million objects** |
+| On disk | 48 B/object — 45.8 MiB per million |
 
-The per-object figures move around because a Go map's capacity grows in powers of two,
-so where `n` falls between two of them matters more than `n` does. **84 B/object** is the
-worst of the three and the one to plan with — about 2.6× the 32 bytes actually stored,
-which is the map's overhead and not something to tune away.
+The per-object figures move around because a Go map's capacity grows in powers of two, so
+where `n` falls between two of them matters more than `n` does. **118 B/object** is the
+worst of the three and the one to plan with — against 32 bytes of actual entry, the rest
+being the map's overhead and not something to tune away.
 
-The two numbers that decide the design are the first and the fifth. An index is
-**memory proportional to live objects**, which is a different shape of cost from anything
-else in this gateway — every other structure is O(chunk size) or O(one prefix). And a
-check is **0.18 % of the 0.13 ms** the gateway already costs per request, which is to say
-the check is free and the memory is the entire argument.
+Three numbers decide the design. An index is **memory proportional to live objects**,
+which is a different shape of cost from anything else in this gateway — every other
+structure is O(chunk size) or O(one prefix). A read pays **279 ns, 0.2 % of the 0.13 ms**
+the gateway already costs, which is to say nothing. A write pays **21 µs**, almost all of
+it the amortised fsync, which is the same order as the 18 µs per request ADR-016 accepted
+for audit checkpoints at the same interval — and is in any case paid behind a network
+round trip to the provider.
+
+Syncing every record instead costs 3.69 ms, and buys less than it looks like. A lost tail
+costs *detection* for the objects in it and nothing else, so the durability of this file is
+not the durability of data; that is why the default amortises it.
 
 ## Decision
 
@@ -216,9 +223,16 @@ bucket and key. Rejected because the two have different lifetimes. The audit log
 sized by *request volume* and rotated at 128 MiB; the index is sized by *live objects*
 and must not be rotated away at all, since dropping an entry silently disables detection
 for that object. Coupling them would mean either an audit log that cannot be rotated or
-an index that expires for reasons that have nothing to do with the bucket. They share
-machinery — append-only file, chain, signed checkpoints — and should share code rather
-than a file.
+an index that expires for reasons that have nothing to do with the bucket.
+
+**A hash chain and signed checkpoints over the index**, as ADR-016 has. Rejected on the
+grounds ADR-016 itself used to reject per-entry signatures: it would prove nothing against
+the attacker it would be for. The audit log is chained because its adversary is someone who
+reaches *the log file*; this index's adversary is the storage provider, and `THREAT_MODEL`
+§3 already concedes that anyone who controls the gateway host controls everything on it,
+this file included. What the index does carry is a CRC per fixed-width record, which
+catches the failure that actually happens — a process killed mid-append — and lets the
+replay keep every record before the tear instead of discarding the file.
 
 **A signed root object in the bucket:** a Merkle root over all keys and tags, stored
 upstream, signed by the gateway. Survives the loss of a host, which a local file does not.
@@ -259,9 +273,9 @@ signed-and-timestamped version to serve and an old one is genuinely old.
 
 **Negative.**
 
-- **Memory is proportional to live objects**, ~84 B each — 80 MiB per million. Every other
-  structure in this gateway is bounded by a chunk or a prefix, and this one is not. Ten
-  million objects is 640 MiB, and that is the practical ceiling for a local index.
+- **Memory is proportional to live objects**, ~118 B each — 112 MiB per million. Every
+  other structure in this gateway is bounded by a chunk or a prefix, and this one is not.
+  Ten million objects is 897 MiB, and that is the practical ceiling for a local index.
 - **Trust on first use**: the first read of an object after an index is created or lost
   cannot be checked, and a rollback served at exactly that moment is recorded as the truth.
 - **A mismatch carries no direction.** In a deployment where several instances write the
@@ -273,6 +287,25 @@ signed-and-timestamped version to serve and an old one is genuinely old.
   update the index, and no such operation may be added without doing so.
 - One more secret derived from the keyring, one more file an operator has to know about,
   back up and not copy between instances.
+
+## Corrections this implementation forced
+
+Two figures in the table above replaced earlier ones, and the earlier ones were mine.
+
+The memory numbers were first measured against a prototype whose entry held only the tag.
+The real one holds the tag, a kind and a timestamp — the kind because a tombstone has to be
+distinguishable from an object, the timestamp because tombstones expire — and Go pads that
+to 32 bytes against the prototype's 16. The cost per object rose from 84 B to 118 B, and
+the ten-million ceiling from 640 MiB to 897 MiB. The shape of the argument did not change;
+the number an operator would have planned with was 30 % too low.
+
+The on-disk figure moved the same way and for the same reason: 32 B/object became 48, once
+a record had a kind, a timestamp and a checksum rather than just a hash and a tag.
+
+The write cost is new. The prototype measured no writes at all, so nothing in the first
+draft said what a `PutObject` would pay. It is 21 µs at the default sync interval, and
+naming it is the difference between a reader being able to check this decision and having
+to take it.
 
 ## What this does not claim
 

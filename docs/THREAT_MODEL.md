@@ -156,7 +156,7 @@ The design is now decided rather than merely deferred
 used to state. What ADR-002 rejected was a *shared* index that a read's correctness depends
 on; a local, advisory one is neither shared nor on that path, because an empty index fails
 to detect rather than failing a read. What it costs instead is memory proportional to live
-objects — about 80 MiB per million — and a guarantee with a stated shape: rollback of a
+objects — about 112 MiB per million — and a guarantee with a stated shape: rollback of a
 write the instance has seen before, with the first sighting of any object untrusted.
 
 Until that ships, this row stays **No**.

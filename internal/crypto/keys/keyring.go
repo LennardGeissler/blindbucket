@@ -41,6 +41,9 @@ type Keyring struct {
 	// zero so that a gateway configured to encrypt names against such a keyring
 	// fails at startup instead of encrypting everything under a key of zeroes.
 	name *NameKey
+	// freshness is the optional rollback-index key, absent for the same reason
+	// and handled the same way (ADR-018).
+	freshness *FreshnessKey
 }
 
 // NewKeyring returns an empty keyring.
@@ -142,6 +145,20 @@ func (r *Keyring) SetNameKey(k *NameKey) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.name = k
+}
+
+// SetFreshnessKey installs the rollback-index key, replacing any existing one.
+func (r *Keyring) SetFreshnessKey(k *FreshnessKey) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.freshness = k
+}
+
+// FreshnessKey returns the rollback-index key, and whether the keyring has one.
+func (r *Keyring) FreshnessKey() (*FreshnessKey, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.freshness, r.freshness != nil
 }
 
 // NameKey returns the object-name key, and whether the keyring has one.
@@ -299,6 +316,10 @@ type keyringFile struct {
 	// Name is the wrapped object-name key, absent in a keyring written before
 	// name encryption existed.
 	Name *nameEntry `json:"name_key,omitempty"`
+
+	// Freshness is the optional rollback-index key, absent from every keyring
+	// written before ADR-018.
+	Freshness *freshnessEntry `json:"freshness_key,omitempty"`
 }
 
 // auditEntry is the audit key as it is stored: the secret wrapped under the root
@@ -313,6 +334,10 @@ type keyringFile struct {
 // nothing in clear: a name key has no public half, so there is nothing about it
 // an unwrapping could be checked against, and nothing worth an attacker's edit
 // that the AEAD does not already catch.
+type freshnessEntry struct {
+	Wrapped string `json:"wrapped"`
+}
+
 type nameEntry struct {
 	Wrapped string `json:"wrapped"`
 }
@@ -412,11 +437,44 @@ func (r *Keyring) marshal(rootKey []byte, ref RootKeyRef, params *KDFParams) ([]
 		file.Name = entry
 	}
 
+	if r.freshness != nil {
+		entry, err := sealFreshness(rootKey, r.freshness)
+		if err != nil {
+			return nil, err
+		}
+		file.Freshness = entry
+	}
+
 	out, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return append(out, '\n'), nil
+}
+
+// sealFreshness wraps the rollback-index key.
+func sealFreshness(rootKey []byte, key *FreshnessKey) (*freshnessEntry, error) {
+	secret := key.Secret()
+	defer clear(secret)
+	wrapped, err := sealKey(rootKey, secret, freshnessAAD())
+	if err != nil {
+		return nil, err
+	}
+	return &freshnessEntry{Wrapped: base64.StdEncoding.EncodeToString(wrapped)}, nil
+}
+
+// openFreshness unwraps the rollback-index key.
+func openFreshness(entry *freshnessEntry, rootKey []byte, wrongKeyHint string) (*FreshnessKey, error) {
+	wrapped, err := base64.StdEncoding.DecodeString(entry.Wrapped)
+	if err != nil {
+		return nil, fmt.Errorf("keys: the freshness key is not valid base64: %w", err)
+	}
+	secret, err := openKey(rootKey, wrapped, freshnessAAD())
+	if err != nil {
+		return nil, fmt.Errorf("%w (%s)", err, wrongKeyHint)
+	}
+	defer clear(secret)
+	return FreshnessKeyFromSecret(secret)
 }
 
 // sealName wraps the object-name key.
@@ -567,6 +625,13 @@ func openKeyring(file keyringFile, rootKey []byte, wrongKeyHint string) (*Keyrin
 			return nil, err
 		}
 		ring.name = name
+	}
+	if file.Freshness != nil {
+		freshness, err := openFreshness(file.Freshness, rootKey, wrongKeyHint)
+		if err != nil {
+			return nil, err
+		}
+		ring.freshness = freshness
 	}
 	return ring, nil
 }
