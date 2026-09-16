@@ -22,13 +22,21 @@ rejected options is not a decision, it is a default.
 | [014](ADR-014-part-salts-in-the-manifest.md) | Part salts in the manifest, carried there by the part ETag | Accepted | post-M5 |
 | [015](ADR-015-object-name-encryption.md) | Object name encryption: deterministic, per path segment | **Proposed** | M6 |
 | [016](ADR-016-audit-log.md) | A hash-chained, signed audit log, one chain per instance | Accepted | post-M5 |
+| [017](ADR-017-listing-order-under-name-encryption.md) | Listing order under name encryption: buffer and sort, bounded, or refuse | **Proposed** | M6 |
 
-One entry is **Proposed** rather than Accepted: 015 is the design for a feature that is
-being built, with its primitive and its leakage settled and its S3 consequences written
-down, but not yet wired into the gateway. It is here because the decisions it records
-already constrain the code that exists -- and because 016 already depends on it: the audit
-log encrypts the names in its entries with 015's primitive, which is its first shipped
-caller.
+Two entries are **Proposed** rather than Accepted, and both belong to name encryption.
+015 is the design for a feature that is being built, with its primitive and its leakage
+settled and its S3 consequences written down, but not yet wired into the gateway. It is
+here because the decisions it records already constrain the code that exists -- and because
+016 already depends on it: the audit log encrypts the names in its entries with 015's
+primitive, which is its first shipped caller.
+
+017 closes the one question 015 left open, and is the thing that actually blocks the
+feature: with encrypted names a listing arrives in an order that is arbitrary to the
+client, and an unsorted listing makes `aws s3 sync --delete` delete objects that exist.
+It is separate from 015 because it is a decision about S3 behaviour rather than about
+cryptography, and because the measurements it rests on corrected 015 rather than
+confirming it.
 
 ADR numbers reflect the order the decisions were identified, not the order they are made.
 010 and 011 were added in design version 0.2; 011 was decided in M0 because it governs what

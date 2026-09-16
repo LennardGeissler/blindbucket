@@ -177,8 +177,12 @@ answer costs something:
 - **Ship name encryption without ordered listings** and accept that sync with
   `--delete` corrupts. Rejected on the grounds above.
 
-The choice among the first three is open and is the next decision this ADR
-needs. It is also the reason the effort estimate for this feature was wrong:
+The choice among the first three is made in
+[ADR-017](ADR-017-listing-order-under-name-encryption.md), which measured them
+rather than estimating: buffering costs 213 bytes per object -- twice the figure
+guessed above -- and the constraint that actually binds is not memory but
+latency, because a buffered listing cannot emit its first key until it has seen
+its last. It is also the reason the effort estimate for this feature was wrong:
 the encryption was the easy half.
 
 **Partial-segment prefixes.** `prefix=photos/2026` is a prefix of the segment
