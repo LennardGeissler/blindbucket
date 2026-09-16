@@ -1,0 +1,95 @@
+{
+  "note": "Known-answer vectors for the blindbucket object name mapping, normative alongside docs/FORMAT.md section 15. The name key and the plaintext key are fixed, so the stored key is fully determined. Regenerate with: go test ./internal/crypto/names -update",
+  "vectors": [
+    {
+      "name": "empty key",
+      "name_key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "plaintext_key": "",
+      "stored_key": ""
+    },
+    {
+      "name": "one segment",
+      "name_key": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "plaintext_key": "report.pdf",
+      "stored_key": "S4D3UTCC2VGXZVR4A2R27HB2W3TU5M6T5KEKQER3PY"
+    },
+    {
+      "name": "two segments",
+      "name_key": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "plaintext_key": "photos/beach.jpg",
+      "stored_key": "SBX2CXVTLYJD4PBSKD4WSWKL336BKGCRURAA/3XNFMVQQQ2RHMBC4FPP2OULSRGRP643DSH4LCQFA"
+    },
+    {
+      "name": "deep path",
+      "name_key": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+      "plaintext_key": "a/b/c/d/e/f.txt",
+      "stored_key": "KT5HGRGZ6NGOELXFKM7G5ZPPMGRA/5NPHEVEICJXBE22MUQGFAHKFMO3A/Z6FGMZDBE6HVZH33MXEW355DM2IA/4FUXVNPKEAKJ73Q64RX6NETG7LIQ/I7LEFFXVG7JGPJ6TGJL3YGZ6COZQ/3TAWHOTJXXD3DVTJCU4ZDFTGLJ2SCOKBW4"
+    },
+    {
+      "name": "same leaf under photos",
+      "name_key": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "plaintext_key": "photos/report.pdf",
+      "stored_key": "FXE2JVZFSBK7KPYRVJPJQJBQXXCUD3EE47LQ/EO2USTDNTG7HOK6DGS5UHEHBFNL3YKAWLPW5I24XEU"
+    },
+    {
+      "name": "same leaf under invoices",
+      "name_key": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "plaintext_key": "invoices/report.pdf",
+      "stored_key": "K4GBLTGIRUBTOF7HSCDI4JDQ5FSOGH6JV7PDOFQ/VOM7YMXTUDAYQH5DC5GN5VPI6EA3YCI25GZE2ILQQM"
+    },
+    {
+      "name": "sibling one",
+      "name_key": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+      "plaintext_key": "shared/a/report.pdf",
+      "stored_key": "E5HUABHRHOMU5EGLDLCAXHYJGONNEAYN4YUQ/EVJLV5S6TH6E2WDTHWUEM4ONHFIQ/ZVWQOLEH5OGNPBNQ5YYRX3DFKO6PWQ4Q23U4NYFQ7A"
+    },
+    {
+      "name": "sibling two",
+      "name_key": "e0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "plaintext_key": "shared/b/report.pdf",
+      "stored_key": "QHFOTGLS62S3FQBZVRJWSZIB56ZTET7BGCZQ/RFA6E3XC7QLNNBLNLULQLCTJXI3Q/H2JQUXLDADIKVCEVCYQRVY4Q5GKZ7JSQLLRUKTVS54"
+    },
+    {
+      "name": "empty middle segment",
+      "name_key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "plaintext_key": "a//b",
+      "stored_key": "E4X6MP4W6UHHPR4S5N6BKK2JLYIA/DAL7TDAD27KZVUQBRIEV4X5D2U/5KNNWJXEYEBU5NT3UWOJWJ5O7YWQ"
+    },
+    {
+      "name": "leading separator",
+      "name_key": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "plaintext_key": "/leading",
+      "stored_key": "4XGU4QA4G6ARE3FUNF3XITXD74/TC7SJ5ZGHAOFDGWSGHFMG24JJGBC6G4NB4HKG"
+    },
+    {
+      "name": "trailing separator",
+      "name_key": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "plaintext_key": "trailing/",
+      "stored_key": "AUHDJISGIVDUVSELYMH53HIVN5Q5H2XQSJWZZOY/CPY7FOR522LECX5I6WWZL2US4Q"
+    },
+    {
+      "name": "single character segments",
+      "name_key": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+      "plaintext_key": "a/b/c",
+      "stored_key": "KT5HGRGZ6NGOELXFKM7G5ZPPMGRA/5NPHEVEICJXBE22MUQGFAHKFMO3A/Z6FGMZDBE6HVZH33MXEW355DM2IA"
+    },
+    {
+      "name": "utf-8 segment",
+      "name_key": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "plaintext_key": "urlaub/münchen/straße.txt",
+      "stored_key": "AUSU3QL6JU5O45MV3LIOOTFPODK6MWWINVJQ/TM72YPISRUJGLYWJWHDDH3O2S7TPAPPQKN4AINA/RQD66YBAJZ4BUJMZ7KXPRN2LSNN2CS3VCPBLCDJBASRA"
+    },
+    {
+      "name": "space and punctuation",
+      "name_key": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "plaintext_key": "my documents/report (final).pdf",
+      "stored_key": "LOCQFXPEIPVKII3EL54RV7RVUGFSGJJBQJT4CBRL74BRW/OJCBSF2DBEZXQAAQIUM4F5UTE54IZLRCBV4WFEFHN6CLLAH7J4C2HIQ"
+    },
+    {
+      "name": "long single segment",
+      "name_key": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+      "plaintext_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_key": "SRHX6K2PFQVHW32WTOZBHAV7K4P4TBBK6GSJJR2QRNWEYLPKFLQFOGXZ2VW7ZCILPOXOK6QFSKNBU6P7BKY5354U5LIMEAVYKH6M3MRLR6YFREDPMAOXPYFJTU27EDDF"
+    }
+  ]
+}

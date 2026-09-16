@@ -13,19 +13,35 @@ build against, and the difference is invisible until somebody tries.
 pip install cryptography
 
 python3 test_vectors.py                  # the normative known-answer vectors
+python3 test_names_vectors.py            # the same, for the object name mapping
 python3 difftest.py --count 100000       # against the Go decoder
+python3 difftest_names.py --count 100000 # the same, for the name mapping
 
 python3 blindbucket_ref.py file --kek <hex> encrypted.bb > plain
 python3 blindbucket_ref.py segment --dek <hex> segment.bin > plain
+python3 names_ref.py encrypt --name-key <hex> a/b/c.txt
 ```
 
 ## What it covers
 
-Sections 1 to 6 and 9 of the format: the segment header and its validation rules,
-subkey derivation, chunk nonces and the final-flag rule, the chunk length rules,
-DEK unwrapping with both associated-data encodings, and the local `BBF1` file
-envelope. It decodes; it does not encode, because a decoder is what the
-comparison needs and an encoder would double the surface for no extra evidence.
+Sections 1 to 6 and 9 of the format, in `blindbucket_ref.py`: the segment header
+and its validation rules, subkey derivation, chunk nonces and the final-flag
+rule, the chunk length rules, DEK unwrapping with both associated-data
+encodings, and the local `BBF1` file envelope. It decodes; it does not encode,
+because a decoder is what the comparison needs and an encoder would double the
+surface for no extra evidence.
+
+**Section 15, the object name mapping, in `names_ref.py`** — where that reasoning
+inverts, so it implements **both** directions. The mapping is deterministic, so
+the specification fixes the *stored* key exactly: reproducing it character for
+character is the check, and that takes an encoder.
+
+It also matters more than the rest. Everywhere else the format calls a
+construction; here it composes one. ADR-015 chose to build the SIV paradigm from
+standard parts — HMAC-SHA256 as the PRF, AES-CTR under the synthetic IV — rather
+than depend on a Go library with no release tags whose last commit is from 2018.
+That is a defensible choice only if the composition is checked by something other
+than the code implementing it, and this is that something.
 
 The multipart manifest (§10) and the upload token (§11) are not implemented. They
 are coordination structures rather than content format, and the interesting
@@ -34,10 +50,11 @@ property there — the lifecycle rules — is checked by the TLA+ model in
 
 ## How it is checked
 
-**Known-answer vectors.** §13 makes the ten vectors in
+**Known-answer vectors.** §13 makes the ten segment vectors in
 [`testdata/vectors/`](../../testdata/vectors/) a normative part of the
-specification. The reference decoder opens all ten to exactly their recorded
-plaintext.
+specification, and §15.6 does the same for the fifteen name-mapping vectors. The
+reference decoder opens all ten segments to exactly their recorded plaintext, and
+reproduces all fifteen stored keys character for character.
 
 **Differential fuzzing.** `difftest.py` generates valid segments with the Go
 encoder, mutates them, and feeds every result to both decoders. The only thing
@@ -54,6 +71,17 @@ rejected at the magic and prove nothing.
 Last full run: **100 000 inputs, 0 disagreements** — 8 945 accepted by both with
 identical plaintext, 91 055 rejected by both. The nightly CI job runs 250 000 with
 a fresh seed.
+
+`difftest_names.py` does the same for the name mapping, in both directions: every
+generated object key must map to the same stored key in both implementations, and
+mutated stored keys — a flipped character, a truncated segment, two segments
+swapped, a non-canonical base32 spelling — must be accepted or rejected the same
+way by both. The swap case is the interesting one: both halves decrypt, and only
+the position binding of §15.4 catches it.
+
+Last full run: **5 000 keys mapped identically, and 100 000 stored keys with 0
+disagreements** — 18 841 accepted by both with the same object key, 81 159
+rejected by both. The nightly CI job runs 250 000 with a fresh seed.
 
 ## What it found
 

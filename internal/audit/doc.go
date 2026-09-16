@@ -7,7 +7,7 @@
 // changes a hash that the signature covers, so it is detectable afterwards -- by
 // someone who was not there at the time, and who holds nothing but the public
 // key. The design, and what it deliberately does not do, is
-// docs/adr/ADR-016-audit-log.md; the on-disk format is docs/FORMAT.md section 15.
+// docs/adr/ADR-016-audit-log.md; the on-disk format is docs/FORMAT.md section 14.
 //
 // # What is and is not claimed
 //

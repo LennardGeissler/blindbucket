@@ -14,6 +14,40 @@ version 1 would keep being readable.
 
 ### Added
 
+**The object name mapping is specified and independently implemented.**
+[FORMAT.md section 15](docs/FORMAT.md) now describes the mapping from a client's
+object key to the key the provider stores it under, normatively and in enough
+detail to build from: the two derived keys, the per-segment SIV with the path so
+far as its context, the mandatory canonical base32, the constant-time check on
+the recomputed IV, and the length limit. Fifteen known-answer vectors in
+`testdata/vectors/names_v1.json` fix the stored key for each case, on the same
+footing as the segment vectors of section 13.
+
+`ref/python/names_ref.py` implements it a second time, from that document. It
+reproduces all fifteen vectors character for character, and
+`ref/python/difftest_names.py` compares the two implementations on both
+directions: 5 000 generated keys mapped identically, and 100 000 mutated stored
+keys -- flipped characters, truncated segments, swapped segments, non-canonical
+base32 -- accepted or rejected the same way by both, with zero disagreements.
+Both run nightly.
+
+This closes a promise [ADR-015](docs/adr/ADR-015-object-name-encryption.md) made
+when the primitive shipped: "held to the same standard: known-answer vectors,
+and coverage by the independent Python decoder, which is this project's existing
+answer to 'did you get the composition right'." Until now the mapping had
+neither, and it is the one construction this project *composes* rather than
+calls -- the argument for building SIV from standard parts instead of taking an
+untagged 2018 dependency only holds if the composition is checked by something
+other than the code implementing it. Every test it had was a property test
+running against itself.
+
+Unlike the segment decoder, the Python side implements both directions. The
+mapping is deterministic, so the specification fixes the stored key exactly and
+reproducing it is the evidence -- which takes an encoder.
+
+Also fixed: `internal/audit` documented its on-disk format as FORMAT.md section
+15, which is the version history. It is section 14.
+
 **Object-name encryption.** With `names.encrypt` on, the provider is addressed
 with the encrypted form of an object's key and never sees the key the client
 used. `PutObject`, `GetObject` (ranges included), `HeadObject`, `DeleteObject`

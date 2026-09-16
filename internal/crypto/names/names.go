@@ -1,5 +1,11 @@
 // Package names maps object keys to the keys the storage provider sees.
 //
+// The mapping is specified normatively in docs/FORMAT.md section 15, pinned by
+// the known-answer vectors in testdata/vectors/names_v1.json, and implemented a
+// second time in ref/python/names_ref.py -- which is what checks that the SIV
+// composition below was written down correctly, rather than merely written down
+// consistently.
+//
 // It is the encryption of object names described in ADR-015. A key is split on
 // "/" and each segment is encrypted on its own, so that "a/b/" stays a prefix
 // of "a/b/c.txt" after encryption and prefix listing keeps working. The

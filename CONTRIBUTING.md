@@ -217,9 +217,11 @@ happens to have a document alongside it:
    found so far was exactly that distinction, and it broke every object whose
    size was an exact multiple of the chunk size.
 2. Add or update known-answer vectors in [`testdata/vectors/`](testdata/vectors/).
-   §13 makes them a normative part of the specification.
-3. Update the Python reference decoder in [`ref/python/`](ref/python/), and run
-   `make ref-vectors` and `make ref-diff`. Two decoders disagreeing is the
+   §13 makes the segment vectors a normative part of the specification and §15.6
+   does the same for the object name mapping; both regenerate with
+   `go test ./internal/crypto/<pkg> -update`.
+3. Update the second implementation in [`ref/python/`](ref/python/), and run
+   `make ref-vectors` and `make ref-diff`. Two implementations disagreeing is the
    signal this setup exists to produce.
 4. Decide whether the format version number changes, and say so in the changelog.
    Objects written under version 1 must keep being readable.

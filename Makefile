@@ -82,6 +82,7 @@ tla: $(TLA_TOOLS)
 .PHONY: ref-vectors
 ref-vectors:
 	cd ref/python && python3 test_vectors.py
+	cd ref/python && python3 test_names_vectors.py
 
 # Differential test against the Go decoder. COUNT is the number of inputs;
 # The floor is 100000, which takes a few minutes.
@@ -90,6 +91,7 @@ COUNT ?= 100000
 .PHONY: ref-diff
 ref-diff:
 	cd ref/python && python3 difftest.py --count $(COUNT)
+	cd ref/python && python3 difftest_names.py --count $(COUNT)
 
 # --- Demo recording (demo/) --------------------------------------------------
 

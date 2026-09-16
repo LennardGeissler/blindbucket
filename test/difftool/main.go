@@ -8,6 +8,11 @@
 //	                    part number, as seed material for the mutator
 //	difftool            read inputs on stdin, write one verdict per line
 //
+// and the same two for the object name mapping of FORMAT.md section 15:
+//
+//	difftool -names N       write N object keys with where the mapping puts them
+//	difftool -names-decode  read stored keys on stdin, write one verdict per line
+//
 // A verdict is deliberately coarse -- accepted with this plaintext hash, or
 // rejected -- because that is the whole of what the two implementations have to
 // agree on. Error *messages* are not part of the format and are not compared.
@@ -45,12 +50,19 @@ type verdict struct {
 
 func main() {
 	generate := flag.Int("gen", 0, "emit this many valid segments instead of decoding")
+	genNames := flag.Int("names", 0, "emit this many mapped object keys instead of decoding")
+	decNames := flag.Bool("names-decode", false, "read stored keys on stdin and reverse them")
 	flag.Parse()
 
 	var err error
-	if *generate > 0 {
+	switch {
+	case *genNames > 0:
+		err = emitNameSeeds(*genNames, os.Stdout)
+	case *decNames:
+		err = decryptNameStream(os.Stdin, os.Stdout)
+	case *generate > 0:
 		err = emitSeeds(*generate, os.Stdout)
-	} else {
+	default:
 		err = decodeStream(os.Stdin, os.Stdout)
 	}
 	if err != nil {

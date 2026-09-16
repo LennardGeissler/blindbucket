@@ -1,14 +1,16 @@
 # blindbucket Wire Format — Version 1
 
 **Status:** Normative for format version `1`, and implemented as specified.
-**Last updated:** 2026-09-13 (section 14, the audit log, added with `internal/audit`;
+**Last updated:** 2026-09-16 (section 15, the object name mapping, added with
+`internal/crypto/names`; section 14, the audit log, added with `internal/audit`;
 before that, clarifications from the independent reference decoder, and the manifest
 and upload token of sections 10 and 11 becoming normative with M4)
 
 Every section is implemented. Sections 4 to 9 live in `internal/crypto/stream`,
 `internal/crypto/keys` and `internal/crypto/envelope` and are pinned by the
 known-answer vectors of section 13; section 10 is `internal/manifest`, section 11
-is `internal/upload`, and section 14 is `internal/audit`.
+is `internal/upload`, section 14 is `internal/audit`, and section 15 is
+`internal/crypto/names`, pinned by its own vectors.
 
 This document is the authoritative specification of the bytes blindbucket writes to
 object storage. It is written so that an independent implementation can interoperate
@@ -754,11 +756,160 @@ MUST re-derive it and reject a file where the stored and derived values differ.
 
 ---
 
-## 15. Version history
+## 15. Object name mapping (`names v1`)
+
+Everything above describes the bytes of an object. This section describes **where
+the object is**: the mapping from the key a client uses to the key the storage
+provider is addressed with, when a deployment turns object-name encryption on.
+
+It is optional per deployment and off by default. With it off, the stored key is
+the client's key unchanged and nothing in this section applies. With it on, the
+mapping is part of the format in the strongest sense — an implementation that
+cannot reproduce it cannot find a single object.
+
+Design, alternatives and what the mapping does *not* hide:
+[ADR-015](adr/ADR-015-object-name-encryption.md).
+
+### 15.1 Keys
+
+Two keys are derived from the keyring's 32-byte name key:
+
+```
+K_prf = HKDF-SHA256(ikm = name_key, salt = "", info = "blindbucket/v1/name-prf", L = 32)
+K_enc = HKDF-SHA256(ikm = name_key, salt = "", info = "blindbucket/v1/name-enc", L = 32)
+```
+
+`salt = ""` is the empty salt of RFC 5869, which HKDF-Extract replaces with
+`HashLen` zero bytes. The two info strings are what keep the PRF key and the
+encryption key from ever being the same bytes.
+
+The name key does not rotate with the key-encryption keys. Rotation re-wraps data
+keys and MUST leave stored names alone; changing the name key renames every
+object at once and is a migration, not a rotation.
+
+### 15.2 Mapping a key
+
+A key is split on `/` into segments. Empty segments are preserved: `a//b` and
+`a/b` are different S3 keys and MUST map to different stored keys. An empty key
+maps to an empty key.
+
+Each segment is encrypted on its own, and the `/` separators are written through
+in the clear:
+
+```
+StoredKey = E(s₁) || "/" || E(s₂) || "/" || … || E(sₙ)
+```
+
+That is what keeps prefix listing working: `a/b/` remains a prefix of `a/b/c.txt`
+after mapping, and a delimiter of `/` groups at the same boundaries it would have
+grouped at in plaintext. No other delimiter can be served from this layout.
+
+For the segment at index `i`, let `context` be the plaintext key up to and
+**including** the separator before it — so for `a/b/c` the contexts are `""`,
+`"a/"` and `"a/b/"`. Then:
+
+```
+IV      = HMAC-SHA256(K_prf, lp(context) || lp(segment))[0:16]
+C       = AES-256-CTR(K_enc, IV, segment)        // IV is the initial counter block
+E(s)    = base32(IV || C)
+```
+
+The IV is synthetic — derived from the plaintext rather than from chance — which
+is what makes the mapping deterministic, and deterministic is what lets a client
+naming one object reach it in one request with no index and no lookup. This is
+the SIV paradigm of RFC 5297 with HMAC-SHA256 as the PRF in place of AES-CMAC.
+
+Because `context` covers the path so far, the same segment name under two
+different parents encrypts differently. Under the *same* parent it does not:
+deterministic encryption never hides equality, which is stated as a property
+rather than a defect — [`THREAT_MODEL.md`](THREAT_MODEL.md) section 4 has what
+follows from it.
+
+### 15.3 Encoding
+
+`base32` is RFC 4648 base32 with the standard alphabet `A-Z2-7` and **no
+padding**.
+
+Base32 rather than the shorter base64url, deliberately: two base64url strings can
+differ only in case, and a store that folds case would map two distinct objects
+onto one key and lose one of them. Base32's alphabet has no case pairs.
+
+**Canonical encoding is mandatory.** Base32 packs `17` bytes into `28`
+characters, which carry 140 bits against the 136 in use, so a decoder that
+ignores the four spare bits accepts sixteen spellings of one segment — sixteen
+distinct stored keys naming a single object, and a way past any check made
+against the canonical one. A decoder MUST re-encode what it decoded and reject
+anything that does not match, byte for byte.
+
+### 15.4 Reversing the mapping
+
+For each `/`-separated segment of the stored key, in order:
+
+1. base32-decode it, and reject it if re-encoding does not reproduce the input
+   exactly (§15.3).
+2. Reject it if the result is shorter than 16 bytes.
+3. Split into `IV` (16 bytes) and `C` (the rest).
+4. `s = AES-256-CTR(K_enc, IV, C)`.
+5. Recompute `IV' = HMAC-SHA256(K_prf, lp(context) || lp(s))[0:16]` over the
+   *recovered* plaintext, with `context` built from the segments already
+   recovered, and reject unless `IV' == IV`. The comparison MUST be
+   constant-time.
+
+Step 5 is what makes the construction authenticated as well as deterministic, and
+it is also what binds a segment to its position: a provider that swaps two
+encrypted segments produces a key whose segments decrypt to plaintext whose
+recomputed IVs do not match.
+
+Object integrity does not depend on any of this. An object's wrapped data key is
+bound by its associated data to the bucket and the key **the client named**
+(§6.1), not to the stored key — so the envelope is identical whether or not names
+are encrypted, and an object does not have to be rewritten to move between the
+two. What moves is only where it lives.
+
+### 15.5 Length
+
+A stored key MUST NOT exceed **1024 bytes**, S3's own limit. A plaintext key
+whose mapping would exceed it MUST be refused, never truncated.
+
+The 16-byte IV is charged **per segment**, so the expansion is set by how many
+segments a key has and not by how long it is. The longest plaintext key that
+still maps to a legal stored key, by shape:
+
+| Key shape | Longest plaintext key | Expansion |
+|---|---:|---:|
+| one long segment | 624 B | 1.64× |
+| a path with a long leaf | 560 B | 1.83× |
+| segments of 8 | 214 B | 4.79× |
+| segments of 4 | 128 B | 8.00× |
+
+Measured by `BenchmarkKeyExpansion` in `internal/crypto/names`.
+
+### 15.6 Test vectors
+
+Known-answer vectors live in
+[`testdata/vectors/names_v1.json`](../testdata/vectors/names_v1.json) and are a
+normative part of this specification, on the same footing as those of section 13.
+Each vector fixes the name key and the plaintext key, so the stored key is fully
+determined. An implementation that reproduces every `stored_key` character for
+character implements this section.
+
+Regenerate them after a deliberate change with:
+
+```sh
+go test ./internal/crypto/names -run TestKnownAnswerVectors -update
+```
+
+---
+
+## 16. Version history
 
 | Format version | Status | Change |
 |---|---|---|
 | `1` | draft | Initial specification. |
+
+The object name mapping of section 15 is versioned with the object format above:
+it decides where an object is, so a reader that cannot reproduce it cannot reach
+the bytes the rest of this document describes.
 
 The audit log of section 14 carries its own version, in the `v` field of each
 head. It is at `1`, and it moves independently of the object format above: the

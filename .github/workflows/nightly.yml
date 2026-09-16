@@ -37,9 +37,20 @@ jobs:
         working-directory: ref/python
         run: python3 test_vectors.py
 
+      - name: Known-answer vectors (object name mapping)
+        working-directory: ref/python
+        run: python3 test_names_vectors.py
+
       - name: Differential fuzzing
         working-directory: ref/python
         run: python3 difftest.py --count 250000 --seeds 400 --seed ${{ github.run_number }}
+
+      # The name mapping is the one construction this project composes rather
+      # than calls, so the second implementation matters more here than
+      # anywhere else in the format (ADR-015).
+      - name: Differential fuzzing (object name mapping)
+        working-directory: ref/python
+        run: python3 difftest_names.py --count 250000 --seeds 5000 --seed ${{ github.run_number }}
 
   fuzz:
     name: Long fuzz
