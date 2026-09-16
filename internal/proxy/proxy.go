@@ -14,6 +14,7 @@ import (
 	"github.com/LennardGeissler/blindbucket/internal/audit"
 	"github.com/LennardGeissler/blindbucket/internal/auth"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
+	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/stream"
 	"github.com/LennardGeissler/blindbucket/internal/objectmeta"
 	"github.com/LennardGeissler/blindbucket/internal/obs"
@@ -55,6 +56,10 @@ type Config struct {
 	// (ADR-016). A nil value records nothing, which is the default: a gateway
 	// that wrote an audit log nobody asked for would produce something that
 	// looks like evidence without being any.
+	// Names maps object keys to the keys the provider stores them under
+	// (ADR-015). Nil leaves names in clear, which is the default.
+	Names *names.Encrypter
+
 	Audit *audit.Writer
 	// AuditFailClosed refuses requests once the audit log cannot be written,
 	// rather than serving on with a record known to be incomplete.
@@ -72,6 +77,8 @@ type Proxy struct {
 	log        *slog.Logger
 	metrics    *obs.Metrics
 	stall      time.Duration
+
+	names *names.Encrypter
 
 	audit           *audit.Writer
 	auditFailClosed bool
@@ -112,6 +119,8 @@ func New(cfg Config) (*Proxy, error) {
 		log:        logger,
 		metrics:    cfg.Metrics,
 		stall:      cfg.StallTimeout,
+
+		names: cfg.Names,
 
 		audit:           cfg.Audit,
 		auditFailClosed: cfg.AuditFailClosed,
@@ -180,6 +189,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log = log.With("client", client)
 
 	var err *s3api.Error
+	if gate := p.nameEncryptionGate(req.Op); gate != nil {
+		p.fail(w, r, requestID, req, gate)
+		p.metrics.Request(string(req.Op), recorder.status, time.Since(started))
+		return
+	}
 	switch req.Op {
 	case s3api.OpPutObject:
 		err = p.putObject(w, r, req, authResult, log)

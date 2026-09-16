@@ -19,6 +19,7 @@ import (
 
 	"github.com/LennardGeissler/blindbucket/internal/config"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
+	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
 	"github.com/LennardGeissler/blindbucket/internal/obs"
 	"github.com/LennardGeissler/blindbucket/internal/proxy"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
@@ -128,6 +129,11 @@ Flags:
 		}()
 	}
 
+	nameEnc, err := openNameEncrypter(cfg, ring, log)
+	if err != nil {
+		return err
+	}
+
 	handler, err := proxy.New(proxy.Config{
 		Upstream:        client,
 		Keys:            ring,
@@ -136,6 +142,7 @@ Flags:
 		Log2ChunkSize:   cfg.Crypto.Log2ChunkSize,
 		Logger:          log,
 		Metrics:         metrics,
+		Names:           nameEnc,
 		Audit:           auditLog,
 		AuditFailClosed: cfg.Audit.FailClosed,
 	})
@@ -288,6 +295,39 @@ func openAuditLog(cfg *config.Config, ring *keys.Keyring, log *slog.Logger) (*au
 		"fail_closed", cfg.Audit.FailClosed,
 		"public_key", base64.StdEncoding.EncodeToString(pub))
 	return writer, nil
+}
+
+// openNameEncrypter builds the object-name encrypter, or nil when names are to
+// be stored in clear.
+//
+// The keyring must already hold a name key, for a harder reason than the audit
+// key's: generating one here would give a gateway a fresh key on a restart that
+// lost its keyring, and every object written before would become unfindable
+// rather than merely unreadable. So a missing key is a startup error naming the
+// command that fixes it (ADR-015).
+func openNameEncrypter(
+	cfg *config.Config, ring *keys.Keyring, log *slog.Logger,
+) (*names.Encrypter, error) {
+	if !cfg.Names.Encrypt {
+		return nil, nil
+	}
+	key, ok := ring.NameKey()
+	if !ok {
+		return nil, fmt.Errorf("names.encrypt is on, but %s has no name key; "+
+			"add one with `blindbucket keygen --out %s --add-name-key` -- and add it "+
+			"before writing objects, because the key decides where every object is "+
+			"stored and cannot be changed once objects exist under it",
+			cfg.Keys.Keyring, cfg.Keys.Keyring)
+	}
+	secret := key.Secret()
+	defer clear(secret)
+	enc, err := names.New(secret)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("object names are encrypted",
+		"note", "objects written with this off are not visible with it on, and the reverse")
+	return enc, nil
 }
 
 func loadServerKeyring(ctx context.Context, cfg *config.Config, pass *passphraseFlags) (*keys.Keyring, error) {

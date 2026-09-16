@@ -14,6 +14,42 @@ version 1 would keep being readable.
 
 ### Added
 
+**Object-name encryption, for the four single-object operations.** With
+`names.encrypt` on, the provider is addressed with the encrypted form of an
+object's key and never sees the key the client used. `PutObject`, `GetObject`
+(ranges included), `HeadObject` and `DeleteObject` are wired;
+[ADR-015](docs/adr/ADR-015-object-name-encryption.md) has the construction.
+
+**Off by default, and not a toggle.** An object lives at the encrypted form of
+its key, so turning this on hides everything written before it and turning it
+off hides everything written since. Moving an existing bucket across is a
+rewrite of every object's key, and the documentation says so wherever the switch
+appears rather than only in the ADR.
+
+**Everything not yet wired is refused, not guessed at.** Listing, multipart,
+copy and tagging answer `NotImplemented` with a message naming the operation and
+why. The gate is a whitelist, so an operation added to the router later is
+refused until somebody decides what its key should be -- the direction it is
+safe to be wrong in, because an operation addressing the provider with a
+plaintext key while the rest used an encrypted one would write objects nothing
+could find again. Listing is what blocks the rest, and
+[ADR-017](docs/adr/ADR-017-listing-order-under-name-encryption.md) is the
+decision it waits on.
+
+**The envelope is unchanged.** The associated data binding an object's wrapped
+data key stays over the key the *client* named, not the stored one, so whether
+names are encrypted makes no difference to what is inside an object -- only to
+where it lives. A provider that moves an object still produces something that
+will not unwrap.
+
+**`KeyTooLongError`** for a key S3 would accept whose encrypted form it would
+not. Where that starts is a property of the client's naming convention: 624
+bytes for a key that is one long segment, 128 for a path of four-character ones.
+
+A gateway configured with `names.encrypt` against a keyring that has no name key
+refuses to start and names the command that fixes it, rather than serving with
+names in clear.
+
 **An object-name key in the keyring**, the first piece of M6 that the gateway
 will need rather than the crypto it already has. `internal/crypto/names` has
 been able to map an object key to a stored key since it shipped, but the only

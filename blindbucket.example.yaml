@@ -65,6 +65,25 @@ keys:
 crypto:
   log2_chunk_size: 16                    # 64 KiB
 
+# Object-name encryption (ADR-015). Off by default, and not a switch to flip on a
+# bucket that already holds objects: with it on, an object lives at the encrypted
+# form of its key, so turning it on hides everything written before and turning it
+# off hides everything written since. Moving an existing bucket across is a
+# rewrite of every object's key.
+#
+# The keyring must hold a name key -- keyrings created by `blindbucket keygen` do;
+# older ones need `keygen --add-name-key`. Add it before writing objects: the key
+# decides where every object is stored and cannot be changed once objects exist
+# under it.
+#
+# While this is on, only PutObject, GetObject, HeadObject and DeleteObject are
+# served. Listing, multipart, copy and tagging answer NotImplemented until each
+# has been taught what an encrypted name means -- listing first, because the
+# provider sorts by the stored key and an unsorted listing makes some clients
+# delete objects that exist (ADR-017).
+# names:
+#   encrypt: true
+
 # A hash-chained, signed record of what the gateway served (ADR-016). Off unless
 # a path is given here. The keyring must hold an audit key -- keyrings created by
 # `blindbucket keygen` do; older ones need `keygen --add-audit-key`.

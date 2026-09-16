@@ -224,6 +224,9 @@ everything else works.
 | **Objects not written by the gateway** | Refused with `ObjectNotEncrypted` rather than served. Mixing encrypted and unencrypted objects behind one endpoint would leave a client unable to tell which it got. | by design |
 | **Bucket sub-resources** | `?acl`, `?policy`, `?versioning`, `?lifecycle`, `?tagging` all return `NotImplemented`. | not planned |
 | **Server-side encryption headers** | Refused. The gateway encrypts already; accepting them would suggest a second layer that is not there. | by design |
+| **Object-name encryption (`names.encrypt`)** | Off by default. With it on, only `PutObject`, `GetObject`, `HeadObject` and `DeleteObject` are served; listing, multipart, copy and tagging return `NotImplemented` until each has an answer to what an encrypted name means. Listing is the one that blocks the rest — see [ADR-017](adr/ADR-017-listing-order-under-name-encryption.md). | M6, in progress |
+| **Switching `names.encrypt` on a bucket with objects** | Not a toggle. An object is stored under the encrypted form of its key, so turning it on hides everything written before and turning it off hides everything written since. Moving an existing bucket across is a rewrite of every object's key. | by design |
+| **Key length under name encryption** | A key S3 accepts can have no legal encrypted form, answered with `KeyTooLongError`. Where the limit sits depends on how many `/`-separated segments a key has: 624 bytes for one long segment, 128 for a path of four-character ones. | by design |
 
 ## How to reproduce
 

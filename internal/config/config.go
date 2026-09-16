@@ -25,6 +25,7 @@ type Config struct {
 	Crypto   Crypto   `yaml:"crypto"`
 	Admin    Admin    `yaml:"admin"`
 	Audit    Audit    `yaml:"audit"`
+	Names    Names    `yaml:"names"`
 }
 
 // Audit configures the hash-chained, signed record of what the gateway served
@@ -183,6 +184,20 @@ type AWSKMSKeys struct {
 	// Endpoint overrides kms.<region>.amazonaws.com, for LocalStack and for
 	// AWS-compatible endpoints.
 	Endpoint string `yaml:"endpoint"`
+}
+
+// Names configures object-name encryption (ADR-015).
+//
+// Off by default, and not a switch that can be flipped back and forth on a
+// bucket that has objects in it: with it on, an object is stored under the
+// encrypted form of its key, so turning it on makes everything written before
+// invisible, and turning it off again makes everything written since invisible.
+// Moving an existing bucket across is a rewrite of every object's key.
+type Names struct {
+	// Encrypt turns object-name encryption on. The keyring must hold a name
+	// key; a gateway configured this way against a keyring without one refuses
+	// to start rather than serving with names in clear.
+	Encrypt bool `yaml:"encrypt"`
 }
 
 // Crypto configures the segment format.

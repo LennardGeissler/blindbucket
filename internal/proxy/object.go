@@ -54,6 +54,14 @@ func (p *Proxy) putObject(
 		return s3api.ErrInvalidArgument.WithMessage("%v", err)
 	}
 
+	// The address the provider sees. The associated data below deliberately does
+	// not use it: the wrapped key stays bound to the key the client named, so
+	// the envelope reads the same whether or not names are encrypted.
+	storedKey, apiErr := p.storedKey(req.Key)
+	if apiErr != nil {
+		return apiErr
+	}
+
 	kid := p.keys.ActiveKID()
 	aad, err := keys.ObjectAAD(kid, req.Bucket, req.Key)
 	if err != nil {
@@ -106,7 +114,7 @@ func (p *Proxy) putObject(
 
 	out, putErr := p.upstream.PutObject(r.Context(), upstream.PutObjectInput{
 		Bucket:             req.Bucket,
-		Key:                req.Key,
+		Key:                storedKey,
 		Body:               pr,
 		ContentLength:      sealedLen,
 		ContentType:        r.Header.Get("Content-Type"),
@@ -171,8 +179,13 @@ func (p *Proxy) getObject(w http.ResponseWriter, r *http.Request, req s3api.Requ
 		return p.getObjectRange(w, r, req, spec, log)
 	}
 
+	storedKey, apiErr := p.storedKey(req.Key)
+	if apiErr != nil {
+		return apiErr
+	}
+
 	out, err := p.upstream.GetObject(r.Context(), upstream.GetObjectInput{
-		Bucket: req.Bucket, Key: req.Key,
+		Bucket: req.Bucket, Key: storedKey,
 	})
 	if err != nil {
 		return translateUpstream(err)
@@ -234,7 +247,12 @@ func (p *Proxy) getObject(w http.ResponseWriter, r *http.Request, req s3api.Requ
 func (p *Proxy) getObjectRange(
 	w http.ResponseWriter, r *http.Request, req s3api.Request, spec string, log *slog.Logger,
 ) *s3api.Error {
-	info, err := p.upstream.HeadObject(r.Context(), req.Bucket, req.Key)
+	storedKey, apiErr := p.storedKey(req.Key)
+	if apiErr != nil {
+		return apiErr
+	}
+
+	info, err := p.upstream.HeadObject(r.Context(), req.Bucket, storedKey)
 	if err != nil {
 		return translateUpstream(err)
 	}
@@ -278,7 +296,7 @@ func (p *Proxy) getObjectRange(
 	}
 	out, err := p.upstream.GetObject(r.Context(), upstream.GetObjectInput{
 		Bucket:  req.Bucket,
-		Key:     req.Key,
+		Key:     storedKey,
 		Range:   fmt.Sprintf("bytes=%d-%d", fetchStart, rng.CipherEnd),
 		IfMatch: info.ETag,
 	})
@@ -290,7 +308,7 @@ func (p *Proxy) getObjectRange(
 	rawHeader := make([]byte, stream.HeaderSize)
 	if rng.NeedsSeparateHeader {
 		header, err := p.upstream.GetObject(r.Context(), upstream.GetObjectInput{
-			Bucket: req.Bucket, Key: req.Key,
+			Bucket: req.Bucket, Key: storedKey,
 			Range:   fmt.Sprintf("bytes=0-%d", stream.HeaderSize-1),
 			IfMatch: info.ETag,
 		})
@@ -343,7 +361,11 @@ func (p *Proxy) getObjectRange(
 
 // headObject reports an object's plaintext size without reading it.
 func (p *Proxy) headObject(w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger) *s3api.Error {
-	info, err := p.upstream.HeadObject(r.Context(), req.Bucket, req.Key)
+	storedKey, apiErr := p.storedKey(req.Key)
+	if apiErr != nil {
+		return apiErr
+	}
+	info, err := p.upstream.HeadObject(r.Context(), req.Bucket, storedKey)
 	if err != nil {
 		return translateUpstream(err)
 	}
@@ -392,11 +414,15 @@ func (p *Proxy) deleteObject(
 ) *s3api.Error {
 	// Step 1: what is visible now. This observation is the only thing step 3 is
 	// allowed to delete.
-	observed, hadManifest := p.observedManifest(r.Context(), req.Bucket, req.Key)
+	storedKey, apiErr := p.storedKey(req.Key)
+	if apiErr != nil {
+		return apiErr
+	}
+	observed, hadManifest := p.observedManifest(r.Context(), req.Bucket, storedKey)
 	p.at(hookDelHead, req)
 
 	// Step 2: the object goes.
-	if err := p.upstream.DeleteObject(r.Context(), req.Bucket, req.Key); err != nil {
+	if err := p.upstream.DeleteObject(r.Context(), req.Bucket, storedKey); err != nil {
 		return translateUpstream(err)
 	}
 	p.at(hookDelRemove, req)
@@ -405,7 +431,9 @@ func (p *Proxy) deleteObject(
 	// Best effort: a failure leaves an orphan, which holds no plaintext and
 	// which gc collects.
 	if hadManifest {
-		if err := p.deleteManifest(r.Context(), req.Bucket, req.Key, observed); err != nil {
+		// The stored key, because a manifest path is the hash of the key the
+		// object lives under -- ADR-015 section "Consequences if accepted".
+		if err := p.deleteManifest(r.Context(), req.Bucket, storedKey, observed); err != nil {
 			log.Warn("could not remove the manifest of the deleted object; gc will collect it",
 				"manifest_id", observed.String(), "err", err)
 		}

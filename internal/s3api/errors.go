@@ -58,6 +58,12 @@ var (
 		http.StatusForbidden}
 	ErrBadDigest = &Error{"BadDigest",
 		"The checksum you specified did not match what we received.", http.StatusBadRequest}
+	// ErrKeyTooLong answers a key that S3 would accept but whose encrypted form
+	// would not be a legal key. Encryption grows a key by a factor set by its
+	// number of segments, so where this starts is a property of the client's
+	// naming convention: see ADR-015 and BenchmarkKeyExpansion.
+	ErrKeyTooLong = &Error{"KeyTooLongError",
+		"Your key is too long once encrypted.", http.StatusBadRequest}
 	ErrContentSHA256Mismatch = &Error{"XAmzContentSHA256Mismatch",
 		"The provided x-amz-content-sha256 header does not match what was computed.",
 		http.StatusBadRequest}

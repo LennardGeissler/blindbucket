@@ -97,7 +97,34 @@ list of things that cannot be helped rather than one this gateway adds to
 sets a tag is told, instead of believing the object carries one.
 
 Content *is* hidden. Metadata is not. For workloads where the object names themselves are
-sensitive, this matters, and M6 lists deterministic name encryption as a stretch goal.
+sensitive, this matters, and the option to change it now exists — with limits that have to be
+read before it is switched on.
+
+**Object names can be encrypted, and "encrypted" here does not mean "unguessable."**
+`names.encrypt` stores each object under the deterministic per-segment encryption of
+[ADR-015](adr/ADR-015-object-name-encryption.md), so the provider no longer sees the key a
+client used. It is off by default and, at present, serves only the four single-object
+operations; listing, multipart and copy are refused rather than served wrongly
+([ADR-017](adr/ADR-017-listing-order-under-name-encryption.md)).
+
+What it does *not* hide is the part that matters most, and it follows from the one
+requirement the design could not give up — a point lookup must reach one object in one
+request, with no index, which forces the mapping to be a pure function of the key:
+
+- **Equality of full paths.** One plaintext key maps to one stored key, forever. An attacker
+  who suspects an object is called `payroll/2026-q1.xlsx` can confirm the guess by watching
+  whether a name they cause to be created collides. Deterministic encryption never hides
+  equality, and equality is what confirms a guess.
+- **Equality of sibling names.** Two objects called `report.pdf` in one directory are
+  visibly the same name. Under different directories they are not, because the path so far
+  is associated data of each segment.
+- **Segment lengths**, since ciphertext length tracks plaintext length, and **tree shape** —
+  depth, and how many children each directory has.
+
+So this moves object names from "in the clear" to "confirmable by guessing", which is a real
+improvement against a provider reading its own storage and close to none against an attacker
+who already knows what they are looking for. A reader who takes it for more than that has
+been misled, which is why it is written out here rather than left to the ADR.
 
 **The audit log sees the same names, and hides them the same way.** When audit
 logging is enabled, the bucket and key of every request are written to a local

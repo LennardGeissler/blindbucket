@@ -122,8 +122,13 @@ must run in the same trust domain as its clients (sidecar, or behind TLS on an i
 network). Anyone who controls the proxy host or the KEK has everything.
 
 Metadata is **not** hidden: object names, exact sizes, timestamps and access patterns remain
-visible to the provider. Rollback to an older genuine version of an object is not currently
-detectable — and the [audit log](#the-audit-log), despite the name, does not change that.
+visible to the provider. Object names are the one item on that list being worked on —
+`names.encrypt` hides them, but it is off by default, serves only single-object operations
+so far, and "encrypted" there means *confirmable by guessing* rather than unguessable. The
+limits are written out in [THREAT_MODEL.md](docs/THREAT_MODEL.md) section 4, and they are
+the point rather than a footnote. Rollback to an older genuine version of an object is not
+currently detectable — and the [audit log](#the-audit-log), despite the name, does not
+change that.
 
 These are stated up front on purpose. The full analysis, including every residual risk, is
 in **[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)**.
@@ -470,7 +475,7 @@ the gateway already costs per request.
 | — | `CopyObject` and `UploadPartCopy`, deferred from M5 | **done** |
 | — | Vault Transit and AWS KMS as root-key sources, deferred from M5 | **done** |
 | — | Cryptographically verifiable audit log, hash-chained and signed | **done**, unreleased |
-| M6 | Stretch: name encryption, presigned URLs, rollback protection | open |
+| M6 | Stretch: name encryption, presigned URLs, rollback protection | **in progress** |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
 clients" actually means for anything over 8 MiB. M3.5 existed to get its coordination rules
@@ -482,7 +487,10 @@ AWS credential chain is not used — KMS credentials are configured explicitly
 ([ADR-013](docs/adr/ADR-013-root-key-sources.md)). Object tags are refused rather than
 stored, because the provider would hold them in plaintext
 ([ADR-012](docs/adr/ADR-012-copy-semantics.md)). `ListMultipartUploads` is refused
-permanently and says why. The audit log is per instance and has no cross-instance
+permanently and says why. Object-name encryption is half-wired: the four single-object
+operations map their keys, everything else is refused while it is on, and what unblocks
+the rest is the listing decision of
+[ADR-017](docs/adr/ADR-017-listing-order-under-name-encryption.md). The audit log is per instance and has no cross-instance
 order, and entries after its last checkpoint are chained but unsigned — both by
 design, both in [ADR-016](docs/adr/ADR-016-audit-log.md). And one benchmark cell is
 documented as the provider's behaviour rather than explained; the gateway's share of it is
