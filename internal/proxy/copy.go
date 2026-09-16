@@ -84,7 +84,21 @@ func (p *Proxy) copyObject(
 				"use x-amz-metadata-directive: REPLACE to rewrite its metadata")
 	}
 
-	info, err := p.upstream.HeadObject(r.Context(), src.Bucket, src.Key)
+	// Both objects are addressed by their stored keys and identified by the keys
+	// the client named. CopyObject is not yet served while names are encrypted
+	// -- the gate in names.go refuses it -- but the two forms are kept apart
+	// here so that wiring it later is a matter of lifting the refusal rather
+	// than finding every call site again.
+	srcStored, apiErr := p.storedKey(src.Key)
+	if apiErr != nil {
+		return apiErr
+	}
+	destStored, apiErr := p.storedKey(req.Key)
+	if apiErr != nil {
+		return apiErr
+	}
+
+	info, err := p.upstream.HeadObject(r.Context(), src.Bucket, srcStored)
 	if err != nil {
 		return translateUpstream(err)
 	}
@@ -115,7 +129,7 @@ func (p *Proxy) copyObject(
 	}
 
 	dest := objcopy.Dest{
-		Bucket: req.Bucket, Key: req.Key,
+		Bucket: req.Bucket, Key: req.Key, StoredKey: destStored,
 		KeyID:              p.keys.ActiveKID(),
 		ContentType:        info.ContentType,
 		CacheControl:       info.CacheControl,
@@ -141,8 +155,10 @@ func (p *Proxy) copyObject(
 	out, err := objcopy.Do(r.Context(), objcopy.Deps{
 		Upstream: p.upstream, Keys: p.keys, Log: log,
 	}, objcopy.Request{
-		Source: objcopy.Source{Bucket: src.Bucket, Key: src.Key, Info: info, Meta: meta},
-		Dest:   dest,
+		Source: objcopy.Source{
+			Bucket: src.Bucket, Key: src.Key, StoredKey: srcStored, Info: info, Meta: meta,
+		},
+		Dest: dest,
 		// The source could be replaced between the HEAD above and the copy
 		// below. Without this the copy can pair one version's metadata -- its
 		// wrapped key included -- with another version's bytes, which produces

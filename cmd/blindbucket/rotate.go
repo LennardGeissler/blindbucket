@@ -108,8 +108,15 @@ Flags:
 	}
 
 	started := time.Now()
+	// The same encrypter the gateway serves with. A rotation that did not have
+	// it would see only stored keys and bind every data key to the wrong name.
+	nameEnc, err := openNameEncrypter(cfg, ring, log)
+	if err != nil {
+		return err
+	}
+
 	result, err := rotate.Run(ctx, rotate.Config{
-		Upstream: client, Keys: ring, Bucket: bucket, Prefix: prefix,
+		Upstream: client, Keys: ring, Bucket: bucket, Prefix: prefix, Names: nameEnc,
 		TargetKID: target, Log2ChunkSize: cfg.Crypto.Log2ChunkSize,
 		Concurrency: *workers, DryRun: *dryRun, AllowUnconditional: *uncond, Log: log,
 	})

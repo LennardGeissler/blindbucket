@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
+	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/stream"
 	"github.com/LennardGeissler/blindbucket/internal/manifest"
 	"github.com/LennardGeissler/blindbucket/internal/objcopy"
@@ -47,6 +48,17 @@ type Config struct {
 	TargetKID string
 	// Log2ChunkSize is the fallback for objects whose metadata records none.
 	Log2ChunkSize uint8
+
+	// Names maps between the key a client uses and the key the provider stores
+	// it under (ADR-015). Nil means names are in clear and the two are equal.
+	//
+	// A rotation needs both. It finds its work by listing the *provider*, so
+	// every key it sees is a stored one; but the data key it re-wraps is bound
+	// to the key the *client* names, so rotating with the stored key as
+	// associated data produces an object no read can open. The unwrap of the old
+	// key fails first and nothing is written, so the failure is loud rather than
+	// silent -- but it is still a rotation that cannot run.
+	Names *names.Encrypter
 
 	Concurrency int
 	DryRun      bool
@@ -120,7 +132,7 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	}
 
 	result := &Result{}
-	keysCh := make(chan string)
+	keysCh := make(chan objectKeys)
 	var wg sync.WaitGroup
 
 	for range cfg.Concurrency {
@@ -133,7 +145,7 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		}()
 	}
 
-	err := eachObject(ctx, cfg, func(key string) bool {
+	err := eachObject(ctx, cfg, func(key objectKeys) bool {
 		select {
 		case keysCh <- key:
 			return true
@@ -146,11 +158,38 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	return result, err
 }
 
+// objectKeys is one object's two names: the key a client uses, which is its
+// identity, and the key the provider keeps it under, which is its address. They
+// are the same string unless object-name encryption is on.
+type objectKeys struct {
+	identity string
+	stored   string
+}
+
 // eachObject walks the prefix, skipping the gateway's own objects.
-func eachObject(ctx context.Context, cfg Config, visit func(string) bool) error {
+//
+// The prefix is the client's, so it is mapped before it goes upstream, the same
+// way a listing through the gateway maps one.
+func eachObject(ctx context.Context, cfg Config, visit func(objectKeys) bool) error {
 	query := url.Values{"list-type": {"2"}, "max-keys": {"1000"}}
 	if cfg.Prefix != "" {
-		query.Set("prefix", cfg.Prefix)
+		prefix := cfg.Prefix
+		if cfg.Names != nil {
+			stored, whole, err := cfg.Names.EncryptPrefix(prefix)
+			if err != nil {
+				return fmt.Errorf("rotate: mapping the prefix: %w", err)
+			}
+			if !whole {
+				return fmt.Errorf("rotate: prefix %q does not end on a '/' boundary, "+
+					"and with object-name encryption on it must: encryption is per path "+
+					"segment, so a partial segment has no encrypted form to match against",
+					prefix)
+			}
+			prefix = stored
+		}
+		if prefix != "" {
+			query.Set("prefix", prefix)
+		}
 	}
 	for {
 		page, err := cfg.Upstream.ListObjects(ctx, cfg.Bucket, query)
@@ -163,7 +202,19 @@ func eachObject(ctx context.Context, cfg Config, visit func(string) bool) error 
 			if strings.HasPrefix(entry.Key, s3api.ReservedPrefix) {
 				continue
 			}
-			if !visit(entry.Key) {
+			key := objectKeys{identity: entry.Key, stored: entry.Key}
+			if cfg.Names != nil {
+				plain, err := cfg.Names.DecryptKey(entry.Key)
+				if err != nil {
+					// Something in the bucket this keyring did not write. It has
+					// no wrapped key to rotate either way.
+					cfg.Log.Warn("skipping a stored key this keyring did not produce",
+						"err", err)
+					continue
+				}
+				key.identity = plain
+			}
+			if !visit(key) {
 				return ctx.Err()
 			}
 		}
@@ -175,11 +226,13 @@ func eachObject(ctx context.Context, cfg Config, visit func(string) bool) error 
 }
 
 // rotateOne re-wraps one object's data key.
-func rotateOne(ctx context.Context, cfg Config, key string, result *Result) {
+func rotateOne(ctx context.Context, cfg Config, key objectKeys, result *Result) {
 	atomic.AddInt64(&result.Scanned, 1)
-	log := cfg.Log.With("key", key)
+	// The identity in the log: it is the name an operator recognises, and the
+	// gateway host is inside the trust boundary that already sees it.
+	log := cfg.Log.With("key", key.identity)
 
-	info, err := cfg.Upstream.HeadObject(ctx, cfg.Bucket, key)
+	info, err := cfg.Upstream.HeadObject(ctx, cfg.Bucket, key.stored)
 	if err != nil {
 		log.Warn("could not read the object", "err", err)
 		atomic.AddInt64(&result.Failed, 1)
@@ -207,7 +260,7 @@ func rotateOne(ctx context.Context, cfg Config, key string, result *Result) {
 		return
 	}
 
-	cfg.at(HookHead, key)
+	cfg.at(HookHead, key.identity)
 
 	if cfg.DryRun {
 		log.Info("would rotate", "from", meta.KeyID, "to", cfg.TargetKID)
@@ -239,7 +292,7 @@ var errChangedUnderUs = objcopy.ErrPreconditionFailed
 // the provider, keep the manifest lifecycle rules. Rotation is the case where
 // the destination is the source, which is what makes the two conditions below
 // both about the same object.
-func writeBack(ctx context.Context, cfg Config, key string, info *upstream.ObjectInfo,
+func writeBack(ctx context.Context, cfg Config, key objectKeys, info *upstream.ObjectInfo,
 	meta objectmeta.Meta,
 ) error {
 	clientMeta := map[string]string{}
@@ -273,9 +326,13 @@ func writeBack(ctx context.Context, cfg Config, key string, info *upstream.Objec
 	_, err := objcopy.Do(ctx, objcopy.Deps{
 		Upstream: cfg.Upstream, Keys: cfg.Keys, Log: cfg.Log,
 	}, objcopy.Request{
-		Source: objcopy.Source{Bucket: cfg.Bucket, Key: key, Info: info, Meta: meta},
+		Source: objcopy.Source{
+			Bucket: cfg.Bucket, Key: key.identity, StoredKey: key.stored,
+			Info: info, Meta: meta,
+		},
 		Dest: objcopy.Dest{
-			Bucket: cfg.Bucket, Key: key, KeyID: cfg.TargetKID,
+			Bucket: cfg.Bucket, Key: key.identity, StoredKey: key.stored,
+			KeyID:        cfg.TargetKID,
 			UserMetadata: clientMeta,
 			ContentType:  info.ContentType,
 			CacheControl: info.CacheControl,
@@ -283,7 +340,7 @@ func writeBack(ctx context.Context, cfg Config, key string, info *upstream.Objec
 		SourceIfMatch:    info.ETag,
 		DestIfMatch:      destIfMatch,
 		ReplacedManifest: replaced,
-		Hook:             cfg.hookAdapter(key),
+		Hook:             cfg.hookAdapter(key.identity),
 	})
 	return err
 }

@@ -78,14 +78,28 @@ type Deps struct {
 // decide whether to copy at all, and repeating the request here would open a
 // window between the two reads.
 type Source struct {
-	Bucket, Key string
-	Info        *upstream.ObjectInfo
-	Meta        objectmeta.Meta
+	Bucket string
+	// Key is the key the *client* names, which is the object's identity: it is
+	// what the wrapped data key is bound to and what a manifest is bound to.
+	//
+	// StoredKey is where the object actually lives. The two differ only when
+	// object-name encryption is on (ADR-015), and separating them is not
+	// cosmetic: building associated data from the stored key would produce an
+	// object the gateway cannot open, because every read binds the plaintext
+	// key. Both must be set; see FORMAT.md section 15.4.
+	Key       string
+	StoredKey string
+	Info      *upstream.ObjectInfo
+	Meta      objectmeta.Meta
 }
 
 // Dest is where the object lands.
 type Dest struct {
-	Bucket, Key string
+	Bucket string
+	// Key and StoredKey split the same way Source's do: identity against
+	// address. Both must be set.
+	Key       string
+	StoredKey string
 	// KeyID is the KEK the data key is wrapped under at the destination. For
 	// rotation it is the target KEK; for a copy it is whichever is active.
 	KeyID string
@@ -160,6 +174,14 @@ func Do(ctx context.Context, deps Deps, req Request) (*Result, error) {
 		return nil, errors.New("objcopy: a key provider is required")
 	case req.Source.Info == nil:
 		return nil, errors.New("objcopy: the source has not been read")
+	// Both halves of each key, always. A caller that set only one would either
+	// address the wrong object or bind the data key to the wrong name, and the
+	// second of those produces an object that cannot be opened again -- so it is
+	// refused here rather than left to a zero value.
+	case req.Source.Key == "" || req.Source.StoredKey == "":
+		return nil, errors.New("objcopy: the source needs both Key and StoredKey")
+	case req.Dest.Key == "" || req.Dest.StoredKey == "":
+		return nil, errors.New("objcopy: the destination needs both Key and StoredKey")
 	}
 	if deps.Log == nil {
 		deps.Log = slog.Default()
@@ -188,6 +210,9 @@ func Do(ctx context.Context, deps Deps, req Request) (*Result, error) {
 func rewrap(ctx context.Context, deps Deps, req Request) (objectmeta.Meta, []byte, error) {
 	src, dst := req.Source, req.Dest
 
+	// The identity, deliberately: the wrapped data key is bound to the key the
+	// client names, so an object reads the same whether or not names are
+	// encrypted, and moving between the two is a rename rather than a rewrite.
 	oldAAD, err := keys.ObjectAAD(src.Meta.KeyID, src.Bucket, src.Key)
 	if err != nil {
 		return objectmeta.Meta{}, nil, err
@@ -256,7 +281,7 @@ func publish(ctx context.Context, deps Deps, req Request,
 	}
 
 	uploadID, err := deps.Upstream.CreateMultipartUpload(ctx, upstream.CreateMultipartUploadInput{
-		Bucket: dst.Bucket, Key: dst.Key,
+		Bucket: dst.Bucket, Key: dst.StoredKey,
 		ContentType:        dst.ContentType,
 		CacheControl:       dst.CacheControl,
 		ContentDisposition: dst.ContentDisposition,
@@ -273,7 +298,7 @@ func publish(ctx context.Context, deps Deps, req Request,
 	committed := false
 	defer func() {
 		if !committed {
-			if err := deps.Upstream.AbortMultipartUpload(ctx, dst.Bucket, dst.Key, uploadID); err != nil {
+			if err := deps.Upstream.AbortMultipartUpload(ctx, dst.Bucket, dst.StoredKey, uploadID); err != nil {
 				deps.Log.Warn("could not abort a failed copy upload",
 					"bucket", dst.Bucket, "key", dst.Key, "err", err)
 			}
@@ -295,7 +320,7 @@ func publish(ctx context.Context, deps Deps, req Request,
 	// have worked.
 	if next.Multipart {
 		m := &manifest.Manifest{
-			Bucket: dst.Bucket, Key: dst.Key, ID: next.ManifestID, Parts: layout,
+			Bucket: dst.Bucket, Key: dst.StoredKey, ID: next.ManifestID, Parts: layout,
 		}
 		if err := writeManifest(ctx, deps, m, dek); err != nil {
 			return nil, err
@@ -304,7 +329,7 @@ func publish(ctx context.Context, deps Deps, req Request,
 	req.at(HookManifest)
 
 	out, err := deps.Upstream.CompleteMultipartUpload(ctx, upstream.CompleteMultipartUploadInput{
-		Bucket: dst.Bucket, Key: dst.Key, UploadID: uploadID,
+		Bucket: dst.Bucket, Key: dst.StoredKey, UploadID: uploadID,
 		Parts: completed, IfMatch: req.DestIfMatch,
 	})
 	if err != nil {
@@ -320,7 +345,7 @@ func publish(ctx context.Context, deps Deps, req Request,
 	// read before this write landed, and nothing else. Deleting it any earlier
 	// would strand a reader that is still on the old version.
 	if id := req.ReplacedManifest; id != nil && *id != next.ManifestID {
-		if err := deps.Upstream.DeleteObject(ctx, dst.Bucket, id.ObjectKey(dst.Key)); err != nil {
+		if err := deps.Upstream.DeleteObject(ctx, dst.Bucket, id.ObjectKey(dst.StoredKey)); err != nil {
 			deps.Log.Warn("could not remove the replaced manifest; gc will collect it",
 				"bucket", dst.Bucket, "key", dst.Key, "err", err)
 		}
@@ -339,8 +364,8 @@ func copyParts(ctx context.Context, deps Deps, req Request,
 	// A single-part object is copied whole as part 1.
 	if layout == nil {
 		etag, err := deps.Upstream.UploadPartCopy(ctx, upstream.UploadPartCopyInput{
-			SourceBucket: src.Bucket, SourceKey: src.Key,
-			Bucket: dst.Bucket, Key: dst.Key, UploadID: uploadID,
+			SourceBucket: src.Bucket, SourceKey: src.StoredKey,
+			Bucket: dst.Bucket, Key: dst.StoredKey, UploadID: uploadID,
 			PartNumber: 1, WholeObject: true, SourceIfMatch: req.SourceIfMatch,
 		})
 		if err != nil {
@@ -359,8 +384,8 @@ func copyParts(ctx context.Context, deps Deps, req Request,
 			return nil, fmt.Errorf("part %d has an impossible size: %w", part.Number, err)
 		}
 		etag, err := deps.Upstream.UploadPartCopy(ctx, upstream.UploadPartCopyInput{
-			SourceBucket: src.Bucket, SourceKey: src.Key,
-			Bucket: dst.Bucket, Key: dst.Key, UploadID: uploadID,
+			SourceBucket: src.Bucket, SourceKey: src.StoredKey,
+			Bucket: dst.Bucket, Key: dst.StoredKey, UploadID: uploadID,
 			//nolint:gosec // part numbers come from a verified manifest, 1..10000.
 			PartNumber: int(part.Number),
 			First:      offset, Last: offset + sealed - 1,
@@ -379,7 +404,7 @@ func copyParts(ctx context.Context, deps Deps, req Request,
 // loadParts fetches and verifies the manifest of a multipart source.
 func loadParts(ctx context.Context, deps Deps, src Source, dek []byte) ([]manifest.Part, error) {
 	out, err := deps.Upstream.GetObject(ctx, upstream.GetObjectInput{
-		Bucket: src.Bucket, Key: src.Meta.ManifestID.ObjectKey(src.Key),
+		Bucket: src.Bucket, Key: src.Meta.ManifestID.ObjectKey(src.StoredKey),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("reading the manifest: %w", err)
@@ -393,7 +418,13 @@ func loadParts(ctx context.Context, deps Deps, src Source, dek []byte) ([]manife
 	if len(raw) > MaxManifestBytes {
 		return nil, fmt.Errorf("%w: manifest exceeds %d bytes", manifest.ErrVerify, MaxManifestBytes)
 	}
-	m, err := manifest.Unmarshal(raw, dek, src.Bucket, src.Key, src.Meta.ManifestID)
+	// The manifest is bound to the *stored* key, not the identity, and its path
+	// is the hash of the same. That pairing is what keeps `gc` free of the name
+	// key: it reads a key out of a manifest and checks that it hashes back to
+	// the directory the manifest was found in, and both halves of that check
+	// live in the provider's namespace. The object's own data key goes the other
+	// way, bound to the identity, because that is what a read has in hand.
+	m, err := manifest.Unmarshal(raw, dek, src.Bucket, src.StoredKey, src.Meta.ManifestID)
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +456,7 @@ func fillSaltsFromHeaders(
 			return nil, fmt.Errorf("part %d has an impossible size: %w", part.Number, err)
 		}
 		got, err := deps.Upstream.GetObject(ctx, upstream.GetObjectInput{
-			Bucket: src.Bucket, Key: src.Key,
+			Bucket: src.Bucket, Key: src.StoredKey,
 			Range:   fmt.Sprintf("bytes=%d-%d", offset, offset+stream.HeaderSize-1),
 			IfMatch: src.Info.ETag,
 		})

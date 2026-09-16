@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
+	"github.com/LennardGeissler/blindbucket/internal/rotate"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
@@ -322,5 +323,77 @@ func TestEncryptedListingRefusesWhatItCannotSort(t *testing.T) {
 				t.Errorf("the refusal does not explain itself (want %q): %s", tc.wants, body)
 			}
 		})
+	}
+}
+
+// TestEncryptedNamesRotate is a regression test for a real defect: a rotation
+// finds its work by listing the *provider*, so every key it sees is a stored
+// one -- but the data key it re-wraps is bound to the key the *client* names.
+// Rotating with the stored key as associated data produced an object no read
+// could open. The unwrap of the old key failed first, so nothing was written and
+// the failure was loud rather than silent, but key rotation could not run at all
+// against a bucket with encrypted names.
+func TestEncryptedNamesRotate(t *testing.T) {
+	option, enc := withEncryptedNames(t)
+	h := newHarness(t, option)
+	ctx := context.Background()
+
+	const key = "rotate/me/please.bin"
+	body := bytes.Repeat([]byte("rotate"), 900)
+	stored, err := enc.EncryptKey(key)
+	if err != nil {
+		t.Fatalf("EncryptKey: %v", err)
+	}
+	t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+
+	resp := h.put(t, key, body, nil)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT returned %d", resp.StatusCode)
+	}
+	before := h.objectKID(t, stored)
+
+	// The rotation is given the same encrypter the gateway serves with, and a
+	// prefix in the client's namespace -- both of which it has to map itself.
+	cfg := h.rotateConfig(t, "rotate/me/")
+	cfg.Names = enc
+	result, err := rotate.Run(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("rotate.Run: %v", err)
+	}
+	if result.Rotated != 1 || result.Failed != 0 {
+		t.Fatalf("rotated %d, failed %d, scanned %d; want exactly one rotation",
+			result.Rotated, result.Failed, result.Scanned)
+	}
+
+	if after := h.objectKID(t, stored); after == before {
+		t.Errorf("the object is still wrapped under %q", after)
+	}
+
+	// The point of the test: it still reads back through the gateway, which
+	// unwraps with the plaintext key as associated data.
+	get := h.do(t, http.MethodGet, key)
+	defer func() { _ = get.Body.Close() }()
+	if get.StatusCode != http.StatusOK {
+		t.Fatalf("GET after rotation returned %d: %s", get.StatusCode, readBody(t, get))
+	}
+	if got := readBodyBytes(t, get); !bytes.Equal(got, body) {
+		t.Errorf("the rotated object came back as %d bytes, want %d", len(got), len(body))
+	}
+}
+
+// TestEncryptedNamesRotateRefusesAPartialPrefix: a rotation prefix lives in the
+// client's namespace and has to map, so it carries the same '/' boundary rule a
+// listing does.
+func TestEncryptedNamesRotateRefusesAPartialPrefix(t *testing.T) {
+	option, enc := withEncryptedNames(t)
+	h := newHarness(t, option)
+
+	cfg := h.rotateConfig(t, "rotate/me")
+	cfg.Names = enc
+	if _, err := rotate.Run(t.Context(), cfg); err == nil {
+		t.Fatal("a prefix not ending on a '/' boundary was accepted")
+	} else if !strings.Contains(err.Error(), "boundary") {
+		t.Errorf("the refusal does not explain itself: %v", err)
 	}
 }

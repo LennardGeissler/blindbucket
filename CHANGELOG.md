@@ -14,6 +14,35 @@ version 1 would keep being readable.
 
 ### Added
 
+**Fixed before it shipped: `blindbucket rotate` could not run against a bucket
+with encrypted names.** A rotation finds its work by listing the *provider*, so
+every key it sees is a stored one -- but the data key it re-wraps is bound to the
+key the *client* names. Rotating therefore built its associated data from the
+wrong name.
+
+The outcome was a refusal rather than corruption, which is the fail-closed design
+working: `objcopy` unwraps the old key before it writes anything, that unwrap
+failed on the mismatched associated data, and nothing was written. But key
+rotation -- a headline feature -- could not run at all with names on, and said so
+with `unwrapping failed` and an encrypted key in the log.
+
+The fix is structural rather than a patch at the call site. `objcopy.Source` and
+`objcopy.Dest` each carried one `Key` doing two jobs: the object's **identity**,
+which the wrapped data key and the manifest are bound to, and its **address**,
+which is what the provider is told. Name encryption pulls those apart, so they
+are now two fields, and `objcopy` refuses a request that sets only one rather
+than letting a zero value decide. `rotate` maps each listed key back to its
+identity, and maps a `--prefix` on the way out the same way a listing does.
+
+One consequence worth recording: a manifest is bound to the **stored** key and
+its path is the hash of the same, while the object's data key is bound to the
+identity. That pairing is what keeps `gc` free of the name key -- it reads a key
+out of a manifest and checks that it hashes back to the directory it was found
+in, and both halves of that check live in the provider's namespace.
+
+Found by reading `rotate` before wiring multipart, and reproduced end to end
+against MinIO before it was fixed.
+
 **The object name mapping is specified and independently implemented.**
 [FORMAT.md section 15](docs/FORMAT.md) now describes the mapping from a client's
 object key to the key the provider stores it under, normatively and in enough
