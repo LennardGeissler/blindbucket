@@ -32,7 +32,12 @@ func (p *Proxy) listObjects(w http.ResponseWriter, r *http.Request, req s3api.Re
 		return p.serveEncryptedListing(w, r, req, log)
 	}
 
-	result, err := p.upstream.ListObjects(r.Context(), req.Bucket, r.URL.Query())
+	// Stripped, not forwarded. The gateway signs its own upstream requests, and a
+	// client's presigning parameters arriving alongside that signature would at
+	// best be a request the provider rejects and at worst one it reads as a
+	// second, conflicting authentication (ADR-019).
+	result, err := p.upstream.ListObjects(r.Context(), req.Bucket,
+		stripPresign(r.URL.Query()))
 	if err != nil {
 		return translateUpstream(err)
 	}
@@ -193,7 +198,8 @@ func (p *Proxy) passthrough(w http.ResponseWriter, r *http.Request, req s3api.Re
 		body = read
 	}
 
-	resp, err := p.upstream.Passthrough(r.Context(), r.Method, req.Bucket, r.URL.Query(), body)
+	resp, err := p.upstream.Passthrough(r.Context(), r.Method, req.Bucket,
+		stripPresign(r.URL.Query()), body)
 	if err != nil {
 		return translateUpstream(err)
 	}

@@ -341,6 +341,38 @@ jobs:
 
           test "$(aws s3 ls s3://blindbucket-dev/ci/ | awk '{print $3}')" = "200000"
 
+      # A presigned URL is the one credential the gateway serves that arrives
+      # with no client behind it, so curl is the right tool: no SDK, no signing,
+      # no AWS environment. `aws s3 presign` is a local computation, which is
+      # exactly why the gateway only ever has to verify one (ADR-019).
+      - name: Presigned URL scenarios
+        env:
+          AWS_ACCESS_KEY_ID: CITESTKEY
+          AWS_SECRET_ACCESS_KEY: ci-test-secret-key
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:9000
+        run: |
+          set -euo pipefail
+          url=$(aws s3 presign s3://blindbucket-dev/ci/payload.bin --expires-in 3600)
+
+          # Downloaded by something holding no credential at all.
+          env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY \
+            curl -sf -o presigned.bin "$url"
+          cmp payload.bin presigned.bin
+
+          # A window that has closed is refused.
+          expired=$(aws s3 presign s3://blindbucket-dev/ci/payload.bin --expires-in 1)
+          sleep 2
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$expired")
+          test "$code" = "403" || { echo "expired URL answered $code, want 403"; exit 1; }
+
+          # Writes are not served this way: a URL is where a bearer credential
+          # gets copied, so the operations that change data stay off that path.
+          put=$(aws s3 presign s3://blindbucket-dev/ci/nope.bin --expires-in 300)
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT --data-binary @payload.bin "$put")
+          test "$code" = "403" || { echo "presigned PUT answered $code, want 403"; exit 1; }
+          ! aws s3 ls s3://blindbucket-dev/ci/nope.bin
+
       # Multipart through the balancer: the AWS CLI switches to it above 8 MiB on
       # its own, so this is the client's code path and not a hand-built request.
       - name: Multipart across two instances

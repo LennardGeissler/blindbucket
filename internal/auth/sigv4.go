@@ -141,6 +141,19 @@ func parseCredential(value string) (Credential, error) {
 // used as sent, not URI-encoded a second time. Encoding it again would break
 // every key containing a character that needs escaping.
 func CanonicalRequest(r *http.Request, signedHeaders []string, payloadHash string) string {
+	return CanonicalRequestWithQuery(r, r.URL.Query(), signedHeaders, payloadHash)
+}
+
+// CanonicalRequestWithQuery is CanonicalRequest over a query the caller chooses.
+//
+// It exists for presigned URLs, whose signature covers every query parameter
+// except the signature itself (ADR-019). Everything else about the canonical
+// request is identical, which is the point: there is one implementation of the
+// thing that must be exactly right, and presigning passes it a query with one
+// parameter removed.
+func CanonicalRequestWithQuery(
+	r *http.Request, query url.Values, signedHeaders []string, payloadHash string,
+) string {
 	path := r.URL.EscapedPath()
 	if path == "" {
 		path = "/"
@@ -151,7 +164,7 @@ func CanonicalRequest(r *http.Request, signedHeaders []string, payloadHash strin
 	b.WriteByte('\n')
 	b.WriteString(path)
 	b.WriteByte('\n')
-	b.WriteString(canonicalQuery(r.URL.Query()))
+	b.WriteString(canonicalQuery(query))
 	b.WriteByte('\n')
 	b.WriteString(canonicalHeaders(r, signedHeaders))
 	b.WriteByte('\n')

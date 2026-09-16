@@ -97,11 +97,15 @@ type harness struct {
 	unsigned *http.Client
 }
 
-// newHarness builds a gateway against a real provider. The options adjust the
-// proxy configuration for tests that need something other than the defaults --
-// a short stall timeout, say, where waiting out the real one would take a
-// minute.
-func newHarness(t *testing.T, options ...func(*Config)) *harness {
+// newHarness builds a gateway against a real provider.
+//
+// An option adjusts either the proxy configuration or the verifier's, for tests
+// that need something other than the defaults -- a short stall timeout, say,
+// where waiting out the real one would take a minute, or presigned URLs, which
+// are configured on the verifier and not on the proxy. Anything else is a
+// mistake rather than a no-op, so the default case fails the test instead of
+// ignoring it.
+func newHarness(t *testing.T, options ...any) *harness {
 	t.Helper()
 	endpoint := os.Getenv(endpointEnv)
 	if endpoint == "" {
@@ -121,10 +125,16 @@ func newHarness(t *testing.T, options ...func(*Config)) *harness {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	verifier, err := auth.NewVerifier(auth.Config{Clients: []auth.Client{{
+	authCfg := auth.Config{Clients: []auth.Client{{
 		Name: "integration", AccessKeyID: clientAccessKey,
 		SecretAccessKey: clientSecretKey, Buckets: []string{testBucket},
-	}}})
+	}}}
+	for _, option := range options {
+		if adjust, ok := option.(func(*auth.Config)); ok {
+			adjust(&authCfg)
+		}
+	}
+	verifier, err := auth.NewVerifier(authCfg)
 	if err != nil {
 		t.Fatalf("auth.NewVerifier: %v", err)
 	}
@@ -137,7 +147,14 @@ func newHarness(t *testing.T, options ...func(*Config)) *harness {
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	for _, option := range options {
-		option(&cfg)
+		switch adjust := option.(type) {
+		case func(*Config):
+			adjust(&cfg)
+		case func(*auth.Config):
+			// Applied above, before the verifier was built.
+		default:
+			t.Fatalf("newHarness: %T is not a harness option", adjust)
+		}
 	}
 	p, err := New(cfg)
 	if err != nil {

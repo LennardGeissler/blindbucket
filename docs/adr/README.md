@@ -24,6 +24,7 @@ rejected options is not a decision, it is a default.
 | [016](ADR-016-audit-log.md) | A hash-chained, signed audit log, one chain per instance | Accepted | post-M5 |
 | [017](ADR-017-listing-order-under-name-encryption.md) | Listing order under name encryption: buffer and sort, bounded, or refuse | Accepted | M6 |
 | [018](ADR-018-rollback-detection.md) | Rollback detection: a local freshness index, trust on first use | Accepted | M6 |
+| [019](ADR-019-presigned-urls.md) | Presigned URLs: verified, never issued, and only for reads | Accepted | M6 |
 
 Every entry is Accepted. 018 was Proposed while it was a decision without code, for the
 same reason 015 was: its decisions already constrained the code while the code did not yet
@@ -51,6 +52,12 @@ Building it corrected its own measurements, which is now a habit rather than a c
 and a timestamp as well, so the cost per object was 30 % higher than the figure an operator
 would have planned with, and the write cost was missing entirely because a prototype that
 never wrote could not report it.
+
+019 closes M6. Its substance is a narrowing rather than an addition: S3 lets a client
+presign any operation, and this gateway serves two of them. The argument is the accident
+rather than the attacker -- a link preview that issues a GET is a GET, one that issues a
+DELETE is data loss with nobody hostile in the story -- and it is the same instinct 012
+followed in refusing object tags rather than storing them in clear.
 
 ADR numbers reflect the order the decisions were identified, not the order they are made.
 010 and 011 were added in design version 0.2; 011 was decided in M0 because it governs what

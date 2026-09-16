@@ -97,7 +97,7 @@ func (p *Proxy) nameEncryptionGate(op s3api.Operation) *s3api.Error {
 func (p *Proxy) serveEncryptedListing(
 	w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger,
 ) *s3api.Error {
-	query := r.URL.Query()
+	query := stripPresign(r.URL.Query())
 	v2 := req.Op == s3api.OpListObjectsV2
 
 	delimiter := query.Get("delimiter")

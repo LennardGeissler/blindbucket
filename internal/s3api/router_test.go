@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/LennardGeissler/blindbucket/internal/auth"
 )
 
 func request(t *testing.T, method, target string) *http.Request {
@@ -58,7 +60,6 @@ func TestRouteRefusesSubResources(t *testing.T) {
 		"/bucket/key?acl",
 		"/bucket/key?tagging",
 		"/bucket/key?versionId=null",
-		"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=deadbeef",
 		"/bucket/key?attributes",
 	}
 	for _, target := range targets {
@@ -72,6 +73,78 @@ func TestRouteRefusesSubResources(t *testing.T) {
 				t.Errorf("code = %q, want NotImplemented", err.Code)
 			}
 		})
+	}
+}
+
+// TestRoutePassesPresignedURLsThrough. The presigning parameters used to be
+// refused here alongside ?acl and ?attributes, which was right while presigned
+// URLs were unimplemented and is wrong now: the router runs before the verifier,
+// so refusing them would reject every presigned URL before its signature was ever
+// checked (ADR-019).
+//
+// What must not change is the rest of that refusal. A parameter this build does
+// not implement is still refused, and a presigned URL naming one is refused too --
+// carrying a signature does not make ?acl implemented.
+func TestRoutePassesPresignedURLsThrough(t *testing.T) {
+	t.Parallel()
+
+	const presign = "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=k%2F20260916%2F" +
+		"us-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260916T000000Z&X-Amz-Expires=3600" +
+		"&X-Amz-SignedHeaders=host&X-Amz-Signature=deadbeef"
+
+	t.Run("a presigned object read routes as one", func(t *testing.T) {
+		t.Parallel()
+		got, err := Route(request(t, http.MethodGet, "/bucket/key?"+presign), "")
+		if err != nil {
+			t.Fatalf("a presigned GET was refused by the router: %v", err)
+		}
+		if got.Op != OpGetObject || got.Bucket != "bucket" || got.Key != "key" {
+			t.Errorf("got %+v, want a GetObject on bucket/key", got)
+		}
+	})
+
+	t.Run("a presigned listing routes as one", func(t *testing.T) {
+		t.Parallel()
+		got, err := Route(request(t, http.MethodGet, "/bucket?list-type=2&"+presign), "")
+		if err != nil {
+			t.Fatalf("a presigned listing was refused by the router: %v", err)
+		}
+		if got.Op != OpListObjectsV2 {
+			t.Errorf("got %+v, want ListObjectsV2", got)
+		}
+	})
+
+	t.Run("a signature does not make an unimplemented sub-resource implemented", func(t *testing.T) {
+		t.Parallel()
+		_, err := Route(request(t, http.MethodGet, "/bucket/key?acl&"+presign), "")
+		if err == nil {
+			t.Fatal("?acl was routed because the URL was presigned")
+		}
+		if err.Code != "NotImplemented" {
+			t.Errorf("code = %q, want NotImplemented", err.Code)
+		}
+	})
+}
+
+// TestSigV2PresignedURLSaysWhatIsWrong. botocore produces one by default against
+// a custom endpoint, so this is the first thing a boto3 user meets. Before the
+// message existed the answer named the first unknown query parameter, which is a
+// symptom nobody can act on.
+func TestSigV2PresignedURLSaysWhatIsWrong(t *testing.T) {
+	t.Parallel()
+	const v2 = "AWSAccessKeyId=KEY&Expires=1789600000&Signature=abc%3D"
+
+	_, err := Route(request(t, http.MethodGet, "/bucket/key?"+v2), "")
+	if err == nil {
+		t.Fatal("a SigV2 presigned URL was routed")
+	}
+	if err.Code != "InvalidRequest" {
+		t.Errorf("code = %q, want InvalidRequest", err.Code)
+	}
+	for _, want := range []string{"SigV2", "s3v4", "AWS4-HMAC-SHA256"} {
+		if !strings.Contains(err.Message, want) {
+			t.Errorf("the message does not mention %q: %s", want, err.Message)
+		}
 	}
 }
 
@@ -438,5 +511,28 @@ func TestRouteCopyObject(t *testing.T) {
 	}
 	if req.Op != OpPutObject {
 		t.Errorf("without a copy source, Op = %s, want %s", req.Op, OpPutObject)
+	}
+}
+
+// TestPresignParamsMatchTheVerifier keeps the router's copy of the presigning
+// parameter names in step with the verifier's.
+//
+// They are declared twice so that routing does not depend on authentication.
+// Drift between them would be silent and would look like a client problem: a
+// parameter the verifier signs over but the router does not know is a presigned
+// URL refused as an unimplemented sub-resource, before anything gets as far as
+// checking the signature.
+func TestPresignParamsMatchTheVerifier(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{
+		auth.QueryAlgorithm, auth.QueryCredential, auth.QueryDate,
+		auth.QueryExpires, auth.QuerySignedHeaders, auth.QuerySignature,
+	} {
+		if !PresignQueryParam(name) {
+			t.Errorf("the verifier signs over %q and the router does not know it", name)
+		}
+	}
+	if got := len(presignParams); got != 6 {
+		t.Errorf("the router knows %d presigning parameters, the verifier has 6", got)
 	}
 }

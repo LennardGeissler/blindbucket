@@ -13,6 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/LennardGeissler/blindbucket/internal/auth"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/stream"
 )
 
@@ -160,6 +161,42 @@ type Server struct {
 	// turning it on only makes sense behind TLS or in a sidecar, where the hop
 	// between client and proxy is already trusted.
 	AllowUnsignedPayload bool `yaml:"allow_unsigned_payload"`
+
+	Presign Presign `yaml:"presign"`
+}
+
+// Presign configures presigned URLs (ADR-019).
+//
+// Unlike name encryption, the audit log and the rollback index, this is **on** by
+// default: it removes a refusal of something every S3 client expects rather than
+// adding a cost or weakening a hop. A presigned URL can do nothing the credential
+// that signed it could not already do.
+//
+// What it does change is that a credential holder can delegate -- before it,
+// handing someone access meant handing over the secret key. That is strictly less
+// dangerous than the alternative people actually use, and it is still new for a
+// deployment, which is why it can be switched off.
+type Presign struct {
+	// Enabled accepts signatures that arrive in the query string. Defaults to
+	// true; set it to false to refuse presigned URLs outright.
+	Enabled bool `yaml:"enabled"`
+	// MaxExpiry caps the window a presigned URL may name, as a Go duration.
+	// Empty selects S3's own maximum of seven days, which is what keeps working
+	// clients working; most deployments should set something far shorter, and
+	// the cost of doing so is only that longer URLs are refused.
+	MaxExpiry string `yaml:"max_expiry"`
+}
+
+// Expiry parses MaxExpiry. Zero selects the package default.
+func (p Presign) Expiry() (time.Duration, error) {
+	if p.MaxExpiry == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(p.MaxExpiry)
+	if err != nil {
+		return 0, fmt.Errorf("server.presign.max_expiry: %w", err)
+	}
+	return d, nil
 }
 
 // TLS configures transport security towards clients.
@@ -345,7 +382,6 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg := &Config{
-		Server: Server{Listen: "127.0.0.1:9000"},
 		Keys:   Keys{Provider: "file"},
 		Crypto: Crypto{Log2ChunkSize: stream.DefaultLog2ChunkSize},
 		// Defaults that are not the zero value go here rather than after the
@@ -353,6 +389,10 @@ func Load(path string) (*Config, error) {
 		// it, so this is also what makes an explicit "fail_closed: false"
 		// distinguishable from an absent one.
 		Audit: Audit{FailClosed: true},
+		// On by default, for ADR-019's reasons. Here rather than after the
+		// decode, so that an explicit "enabled: false" is distinguishable from
+		// an absent one.
+		Server: Server{Listen: "127.0.0.1:9000", Presign: Presign{Enabled: true}},
 	}
 	// KnownFields makes a typo in a key an error rather than a silently ignored
 	// setting -- which for something like path_style would mean every request
@@ -479,7 +519,25 @@ func (c *Config) validate() error {
 	if err := c.Audit.validate(); err != nil {
 		return err
 	}
+	if err := c.Server.Presign.validate(); err != nil {
+		return err
+	}
 	return c.Freshness.validate()
+}
+
+func (p Presign) validate() error {
+	expiry, err := p.Expiry()
+	if err != nil {
+		return err
+	}
+	if expiry < 0 {
+		return fmt.Errorf("server.presign.max_expiry must not be negative")
+	}
+	if expiry > auth.MaxPresignExpiry {
+		return fmt.Errorf("server.presign.max_expiry is %s; S3's own maximum is %s",
+			expiry, auth.MaxPresignExpiry)
+	}
+	return nil
 }
 
 func (f Freshness) validate() error {

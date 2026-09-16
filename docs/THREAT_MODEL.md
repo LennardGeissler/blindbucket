@@ -137,6 +137,17 @@ What the log does record in clear is the operator's own vocabulary — the
 credential's configured name, the operation, the key id, the status, the byte
 count — and, for a rejected request, the access key id that was attempted.
 
+**A presigned URL carries the object's name in clear, to whoever holds the URL.**
+The signature covers the key the client named, so the plaintext key is in the link
+([ADR-019](adr/ADR-019-presigned-urls.md)) — the one thing name encryption otherwise
+keeps out of sight. The adversary is a different one from the rest of this section:
+not the storage provider, but whoever the link reaches, which is at least the person
+it was sent to and at most everyone who sees a browser history, a `Referer` header, a
+chat preview or a CI log. A presigned URL is a bearer credential, and what it bears
+includes the name. Deployments that encrypt names because the *names* are the secret
+should weigh that before handing links out, and `server.presign.enabled: false`
+refuses them outright.
+
 ---
 
 ## 5. Residual risks

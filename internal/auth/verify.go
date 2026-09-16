@@ -58,6 +58,10 @@ type Result struct {
 	Seed       string
 	// Time is the request timestamp the signature was built with.
 	Time time.Time
+	// Presigned reports that the signature arrived in the query string rather
+	// than the Authorization header. The proxy uses it to decide which
+	// operations a URL may reach (ADR-019); nothing else branches on it.
+	Presigned bool
 }
 
 // Config configures a Verifier.
@@ -68,12 +72,25 @@ type Config struct {
 	// signature, and turning it on is only reasonable behind TLS or in a
 	// sidecar, where the hop is already trusted.
 	AllowUnsignedPayload bool
+	// AllowPresign accepts signatures that arrive in the query string. Unlike
+	// the switch above it defaults to on, because it removes a refusal of
+	// something every S3 client expects rather than weakening a hop -- a
+	// presigned URL can do nothing the credential that signed it could not
+	// already do. What it does change is that a credential holder can now
+	// delegate, which is why it can be turned off (ADR-019).
+	AllowPresign bool
+	// MaxPresignExpiry caps the window a presigned URL may name. Zero selects
+	// MaxPresignExpiry, which is S3's own maximum of seven days; most
+	// deployments should set something far shorter.
+	MaxPresignExpiry time.Duration
 }
 
 // Verifier checks inbound SigV4 signatures.
 type Verifier struct {
 	registry             *Registry
 	allowUnsignedPayload bool
+	allowPresign         bool
+	maxPresignExpiry     time.Duration
 	// now is overridable so skew handling can be tested without sleeping.
 	now func() time.Time
 }
@@ -84,9 +101,19 @@ func NewVerifier(cfg Config) (*Verifier, error) {
 	if err != nil {
 		return nil, err
 	}
+	maxExpiry := cfg.MaxPresignExpiry
+	if maxExpiry <= 0 {
+		maxExpiry = MaxPresignExpiry
+	}
+	if maxExpiry > MaxPresignExpiry {
+		return nil, fmt.Errorf("auth: max presign expiry %s exceeds S3's own maximum of %s",
+			maxExpiry, MaxPresignExpiry)
+	}
 	return &Verifier{
 		registry:             registry,
 		allowUnsignedPayload: cfg.AllowUnsignedPayload,
+		allowPresign:         cfg.AllowPresign,
+		maxPresignExpiry:     maxExpiry,
 		now:                  time.Now,
 	}, nil
 }
@@ -99,9 +126,11 @@ func NewVerifier(cfg Config) (*Verifier, error) {
 func (v *Verifier) Verify(r *http.Request, bucket string) (*Result, error) {
 	header := r.Header.Get("Authorization")
 	if header == "" {
-		if r.URL.Query().Get("X-Amz-Signature") != "" {
-			return nil, fmt.Errorf("%w: presigned URLs are not implemented in this build",
-				ErrUnsupportedPayload)
+		// A signature in the query is a presigned URL. Checked before the
+		// missing-header case so that one answers "not signed" only when nothing
+		// signed it at all.
+		if IsPresigned(r) {
+			return v.verifyPresigned(r, bucket)
 		}
 		return nil, ErrMissingAuth
 	}

@@ -221,6 +221,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log = log.With("client", client)
 
 	var err *s3api.Error
+	if gate := p.presignGate(authResult.Presigned, req.Op); gate != nil {
+		log.Warn("refusing an operation a presigned URL may not reach")
+		p.fail(w, r, requestID, req, gate)
+		p.metrics.Request(string(req.Op), recorder.status, time.Since(started))
+		return
+	}
 	if gate := p.nameEncryptionGate(req.Op); gate != nil {
 		p.fail(w, r, requestID, req, gate)
 		p.metrics.Request(string(req.Op), recorder.status, time.Since(started))

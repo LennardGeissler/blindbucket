@@ -106,9 +106,18 @@ Flags:
 			SecretAccessKey: c.SecretAccessKey, Buckets: c.Buckets,
 		})
 	}
+	presignExpiry, err := cfg.Server.Presign.Expiry()
+	if err != nil {
+		return err
+	}
+	if presignExpiry == 0 {
+		presignExpiry = auth.MaxPresignExpiry
+	}
 	verifier, err := auth.NewVerifier(auth.Config{
 		Clients:              clients,
 		AllowUnsignedPayload: cfg.Server.AllowUnsignedPayload,
+		AllowPresign:         cfg.Server.Presign.Enabled,
+		MaxPresignExpiry:     presignExpiry,
 	})
 	if err != nil {
 		return err
@@ -230,6 +239,13 @@ Flags:
 	}
 	if cfg.Server.AllowUnsignedPayload {
 		log.Warn("UNSIGNED-PAYLOAD is enabled; request bodies are not covered by the signature")
+	}
+	if cfg.Server.Presign.Enabled && presignExpiry == auth.MaxPresignExpiry {
+		log.Warn("presigned URLs may name a window of up to "+
+			"S3's maximum; a URL is a bearer credential for as long as it lasts",
+			// String, because slog renders a time.Duration as an integer count
+			// of nanoseconds and "604800000000000" is not a number anyone reads.
+			"setting", "server.presign.max_expiry", "max", auth.MaxPresignExpiry.String())
 	}
 	if auditLog != nil && !cfg.Audit.FailClosed {
 		log.Warn("audit.fail_closed is off; the gateway will keep serving if it can no " +

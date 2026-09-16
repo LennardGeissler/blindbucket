@@ -12,6 +12,34 @@ server:
   #   cert_file: /etc/blindbucket/tls.crt
   #   key_file: /etc/blindbucket/tls.key
 
+  # Presigned URLs (ADR-019). A client signs a URL offline with credentials it
+  # already holds, and whoever receives it can make that one request until it
+  # expires -- no credential, no SDK. The gateway only ever verifies one; there
+  # is nothing for it to issue.
+  #
+  # On by default, unlike names/audit/freshness below: it removes a refusal of
+  # something every S3 client expects rather than adding a cost. A presigned URL
+  # can do nothing the credential that signed it could not already do. What is
+  # new is that a credential holder can now delegate, which is why it can be
+  # turned off.
+  #
+  # Reads only. GET and HEAD are served and everything else is refused: a URL is
+  # where a bearer credential gets copied, and a link preview that issues a GET
+  # is a GET while one that issues a DELETE is data loss.
+  #
+  # Two things worth knowing before handing links out. The URL must point at
+  # this gateway -- what sits at the provider is ciphertext with no key -- so
+  # the gateway has to be reachable by the recipient. And the URL carries the
+  # object's plaintext key, which with names.encrypt on is the one thing that
+  # otherwise stays out of sight.
+  presign:
+    enabled: true
+    # The longest window a URL may name. Empty means S3's own maximum of seven
+    # days, which is what keeps working clients working -- but a URL is a bearer
+    # credential for as long as it lasts, so set this to the shortest window
+    # your clients actually need.
+    max_expiry: 1h
+
 # Operator-facing listener: metrics, health and, if asked for, profiles. None of
 # it is for storage clients, which is why it is a separate address and why the
 # default stays on loopback. Leave listen empty to disable it entirely.

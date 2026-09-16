@@ -9,6 +9,7 @@ package s3api
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -120,6 +121,53 @@ var ignorableParams = map[string]bool{
 	"x-id": true,
 }
 
+// presignParams are the six query parameters that carry a SigV4 signature in a
+// URL rather than selecting a sub-resource (ADR-019).
+//
+// The router runs before authentication, so it has to know them: without this
+// every presigned URL would be refused as an unimplemented sub-resource before
+// the verifier ever saw it. Naming them weakens nothing -- five of the six stay
+// covered by the signature, because the canonical query string is built from the
+// request as it arrived, which is the same reasoning ?x-id above already records.
+//
+// Repeated here rather than imported from internal/auth, so that routing does not
+// depend on authentication. TestPresignParamsMatchTheVerifier is what keeps the
+// two from drifting.
+var presignParams = map[string]bool{
+	"X-Amz-Algorithm":     true,
+	"X-Amz-Credential":    true,
+	"X-Amz-Date":          true,
+	"X-Amz-Expires":       true,
+	"X-Amz-SignedHeaders": true,
+	"X-Amz-Signature":     true,
+}
+
+// PresignQueryParam reports whether a query parameter is part of a presigned
+// URL's signature. Exported for the proxy, which must strip them from anything
+// it forwards to the provider.
+func PresignQueryParam(name string) bool { return presignParams[name] }
+
+// sigV2Presigned recognises the older signature format a presigned URL can carry.
+//
+// SigV2 is not served: it is deprecated, weaker, and AWS removed it from regions
+// launched after 2014. What this exists for is the error message. botocore still
+// produces a SigV2 presigned URL by default against a custom endpoint -- found by
+// pointing boto3 at this gateway with no signature_version set -- and without this
+// the answer is `the sub-resource "AWSAccessKeyId" is not implemented`, which
+// names a symptom nobody can act on.
+func sigV2Presigned(query url.Values) bool {
+	return query.Get("AWSAccessKeyId") != "" && query.Get("Signature") != ""
+}
+
+// errSigV2 says what happened and how to fix it in the two clients that hit it.
+func errSigV2() *Error {
+	return ErrInvalidRequest.WithMessage(
+		"this is a SigV2 presigned URL; this gateway verifies AWS4-HMAC-SHA256 only. " +
+			"With boto3, pass Config(signature_version=\"s3v4\") when building the " +
+			"client -- botocore still defaults to SigV2 for presigned URLs against a " +
+			"custom endpoint. The AWS CLI produces SigV4 already")
+}
+
 // listingParams are the query parameters that shape a listing rather than
 // selecting a different operation. They are forwarded to the provider
 // unchanged, so pagination, prefixes and delimiters behave exactly as a client
@@ -188,7 +236,7 @@ func routeBucket(r *http.Request, bucket string) (Request, *Error) {
 			}
 			continue
 		}
-		if ignorableParams[strings.ToLower(name)] {
+		if ignorableParams[strings.ToLower(name)] || presignParams[name] {
 			continue
 		}
 		if !listingParams[name] {
@@ -246,8 +294,12 @@ func routeObject(r *http.Request, bucket, key string) (Request, *Error) {
 	}
 
 	query := r.URL.Query()
+	if sigV2Presigned(query) {
+		return Request{Bucket: bucket, Key: key, Op: OpUnsupported}, errSigV2()
+	}
 	for name := range query {
-		if ignorableParams[strings.ToLower(name)] || objectQueryParams[name] {
+		if ignorableParams[strings.ToLower(name)] || objectQueryParams[name] ||
+			presignParams[name] {
 			continue
 		}
 		return Request{Bucket: bucket, Key: key, Op: OpUnsupported},

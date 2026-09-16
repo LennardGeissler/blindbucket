@@ -259,7 +259,11 @@ func TestVerifyRejectsBadCredentials(t *testing.T) {
 		}
 	})
 
-	t.Run("presigned URL", func(t *testing.T) {
+	// A query-signed request against a listener that does not serve them. The
+	// subject of this subtest changed with ADR-019: it used to assert that
+	// presigned URLs were unimplemented, and now asserts that a listener with
+	// them switched off says so rather than reporting a payload problem.
+	t.Run("presigned URL against a listener that refuses them", func(t *testing.T) {
 		t.Parallel()
 		v := testVerifier(t)
 		req, err := http.NewRequestWithContext(t.Context(), "GET",
@@ -268,8 +272,8 @@ func TestVerifyRejectsBadCredentials(t *testing.T) {
 			t.Fatalf("building request: %v", err)
 		}
 		req.Host = req.URL.Host
-		if _, err := v.Verify(req, "bucket"); !errors.Is(err, ErrUnsupportedPayload) {
-			t.Errorf("got %v, want ErrUnsupportedPayload", err)
+		if _, err := v.Verify(req, "bucket"); !errors.Is(err, ErrPresignDisabled) {
+			t.Errorf("got %v, want ErrPresignDisabled", err)
 		}
 	})
 }

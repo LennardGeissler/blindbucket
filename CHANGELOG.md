@@ -52,8 +52,40 @@ read pays 279 ns against the 0.13 ms a request already costs; a write pays 21 µ
 almost all of it an amortised fsync. Full reasoning, alternatives and the
 measurements in [ADR-018](docs/adr/ADR-018-rollback-detection.md).
 
+**Presigned URLs are verified, which closes M6.** A client signs a URL offline
+with credentials it already holds; whoever receives it can make that one request
+until it expires, with no credential and no SDK. The gateway never issues one —
+presigning is a local computation, so there was never anything to build on that
+side — and it verifies them on by default, because this removes a refusal of
+something every S3 client expects rather than adding a cost.
+
+**Reads only.** `GET` and `HEAD` are served; every other operation a presigned URL
+can name is refused with `AccessDenied`. The argument is the accident rather than
+the attacker: a URL is where a bearer credential gets copied — browser history,
+`Referer` headers, chat previews, CI logs — and a link preview that issues a `GET`
+is a `GET`, while one that issues a `DELETE` is data loss with nobody hostile in
+the story. Presigned `PUT` is deferred rather than refused permanently; presigned
+POST is a different protocol and is not planned.
+
+Expiry is a window and not a clock-skew bound, which is the part that had to be
+right: a presigned URL is meant to be used long after it was signed, so the
+fifteen-minute rule that governs header-signed requests would have refused every
+one of them. `server.presign.max_expiry` caps the window and defaults to S3's own
+seven days; most deployments should set something far shorter.
+
+A presigned read is an ordinary read once authenticated, so it inherits rollback
+detection, the audit log, fail-closed and name encryption without any of them
+being taught about presigning. What it does leak is the object's name: the
+plaintext key is in the URL, which `THREAT_MODEL` §4 now says. Full reasoning in
+[ADR-019](docs/adr/ADR-019-presigned-urls.md).
+
 ### Fixed
 
+- **boto3 presigns with SigV2 by default against a custom endpoint**, and the
+  gateway answered `the sub-resource "AWSAccessKeyId" is not implemented` — a
+  symptom nobody can act on. It now answers `InvalidRequest` naming
+  `Config(signature_version="s3v4")`. Found by pointing real boto3 at it; SigV2
+  itself stays unsupported.
 - The roadmap in `README.md` still described the audit log as unreleased, eleven
   lines below a status banner announcing it in `v0.3.0`.
 - A comment in `internal/proxy/copy.go` still said `CopyObject` was refused while

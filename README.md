@@ -475,7 +475,7 @@ the gateway already costs per request.
 | — | `CopyObject` and `UploadPartCopy`, deferred from M5 | **done** |
 | — | Vault Transit and AWS KMS as root-key sources, deferred from M5 | **done** |
 | — | Cryptographically verifiable audit log, hash-chained and signed | **done** |
-| M6 | Stretch: name encryption, presigned URLs, rollback protection | name encryption and rollback detection **done**; presigned URLs open |
+| M6 | Stretch: name encryption, presigned URLs, rollback protection | **done** |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
 clients" actually means for anything over 8 MiB. M3.5 existed to get its coordination rules
@@ -487,7 +487,10 @@ AWS credential chain is not used — KMS credentials are configured explicitly
 ([ADR-013](docs/adr/ADR-013-root-key-sources.md)). Object tags are refused rather than
 stored, because the provider would hold them in plaintext
 ([ADR-012](docs/adr/ADR-012-copy-semantics.md)). `ListMultipartUploads` is refused
-permanently and says why. Rollback detection is off by default and bounded in three ways
+permanently and says why. Presigned URLs are verified but never issued — presigning
+is a computation the client does offline — and they read only: `GET` and `HEAD` are
+served, everything else a presigned URL can name is refused, because a URL is where a
+bearer credential gets copied ([ADR-019](docs/adr/ADR-019-presigned-urls.md)). Rollback detection is off by default and bounded in three ways
 that are stated rather than implied: the first read of any object is trusted, a copied
 object is trusted once more after the copy, and a tag says *which* write and not *which is
 newer* — so where several instances write the same objects, a peer's write and a
