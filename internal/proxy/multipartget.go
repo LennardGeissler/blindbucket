@@ -498,6 +498,11 @@ func (p *Proxy) getMultipartRange(
 	}
 	defer clear(dek)
 
+	storedKey, apiErr := p.storedKey(req.Key)
+	if apiErr != nil {
+		return apiErr
+	}
+
 	layout, apiErr := p.multipartLayout(r, req, meta, info.ContentLength, dek, log)
 	if apiErr != nil {
 		return apiErr
@@ -523,7 +528,7 @@ func (p *Proxy) getMultipartRange(
 	if spans[0].headerSeparate {
 		offset := layout.cipherStart[spans[0].index]
 		header, err := p.upstream.GetObject(r.Context(), upstream.GetObjectInput{
-			Bucket: req.Bucket, Key: req.Key,
+			Bucket: req.Bucket, Key: storedKey,
 			Range:   fmt.Sprintf("bytes=%d-%d", offset, offset+stream.HeaderSize-1),
 			IfMatch: info.ETag,
 		})
@@ -541,7 +546,7 @@ func (p *Proxy) getMultipartRange(
 
 	fetchStart, fetchEnd := layout.bodyRange(spans)
 	out, err := p.upstream.GetObject(r.Context(), upstream.GetObjectInput{
-		Bucket: req.Bucket, Key: req.Key,
+		Bucket: req.Bucket, Key: storedKey,
 		Range:   fmt.Sprintf("bytes=%d-%d", fetchStart, fetchEnd),
 		IfMatch: info.ETag,
 	})
@@ -584,7 +589,14 @@ func (p *Proxy) getMultipartRange(
 func (p *Proxy) multipartLayout(
 	r *http.Request, req s3api.Request, meta objectMeta, storedCipher int64, dek []byte, log *slog.Logger,
 ) (*partLayout, *s3api.Error) {
-	m, err := p.loadManifest(r.Context(), req.Bucket, req.Key, meta.ManifestID, dek)
+	// The manifest lives at the hash of the *stored* key and is bound to it,
+	// which is what keeps gc free of the name key. The data key went the other
+	// way, bound to the identity.
+	storedKey, apiErr := p.storedKey(req.Key)
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	m, err := p.loadManifest(r.Context(), req.Bucket, storedKey, meta.ManifestID, dek)
 	if err != nil {
 		if isManifestFailure(err) {
 			return nil, p.integrityError(log, "manifest", err)

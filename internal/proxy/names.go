@@ -55,21 +55,32 @@ func (p *Proxy) nameEncryptionGate(op s3api.Operation) *s3api.Error {
 		return nil
 	}
 	switch op {
-	case s3api.OpPutObject, s3api.OpGetObject, s3api.OpHeadObject, s3api.OpDeleteObject:
+	case s3api.OpPutObject, s3api.OpGetObject, s3api.OpHeadObject, s3api.OpDeleteObject,
+		s3api.OpDeleteObjects, s3api.OpGetObjectTagging:
 		return nil
 	// Listings are served for a prefix that comes back whole in one page, and
 	// refuse the shapes they cannot sort. ADR-017 has the tiers.
 	case s3api.OpListObjects, s3api.OpListObjectsV2:
+		return nil
+	// Multipart, and the copies that go through it. The upload token is sealed
+	// against the key the client named; every request to the provider carries
+	// the key it stores. openToken hands back both so that no handler has to
+	// remember the second.
+	case s3api.OpCreateMultipartUpload, s3api.OpUploadPart, s3api.OpUploadPartCopy,
+		s3api.OpCompleteMultipartUpload, s3api.OpAbortMultipartUpload, s3api.OpListParts,
+		s3api.OpCopyObject:
 		return nil
 	// Bucket-level operations carry no object key at all.
 	case s3api.OpListBuckets, s3api.OpHeadBucket, s3api.OpCreateBucket,
 		s3api.OpDeleteBucket, s3api.OpGetBucketLocation:
 		return nil
 	}
+	// Nothing the router serves is left, so this is reached only by an operation
+	// added later. Refusing it until someone has decided what its key means is
+	// the direction it is safe to be wrong in.
 	return s3api.ErrNotImplemented.WithMessage(
-		"%s is not available while object-name encryption is on. Multipart, copy and "+
-			"tagging each still need their own answer to what an encrypted name "+
-			"means. See ADR-015 and ADR-017.", op)
+		"%s has not been taught what an object name means while object-name "+
+			"encryption is on. See ADR-015 and ADR-017.", op)
 }
 
 // encryptedListingQuery rewrites a client's listing query for the provider, or

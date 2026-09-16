@@ -5,12 +5,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/xml"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
+	"github.com/LennardGeissler/blindbucket/internal/manifest"
 	"github.com/LennardGeissler/blindbucket/internal/rotate"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
@@ -132,24 +134,6 @@ func TestEncryptedNamesServeRanges(t *testing.T) {
 	}
 	if got := readBodyBytes(t, get); !bytes.Equal(got, body[start:end+1]) {
 		t.Errorf("the ranged read returned the wrong %d bytes", len(got))
-	}
-}
-
-// TestEncryptedNamesRefuseUnwiredOperations: the gate has to be reachable
-// through the real handler, not only as a unit.
-func TestEncryptedNamesRefuseUnwiredOperations(t *testing.T) {
-	option, _ := withEncryptedNames(t)
-	h := newHarness(t, option)
-
-	// Tagging, not listing: listing is wired now, and this test is about the
-	// gate still holding for what is not.
-	resp := h.do(t, http.MethodGet, "some/object?tagging")
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusNotImplemented {
-		t.Fatalf("tagging returned %d, want 501: %s", resp.StatusCode, readBody(t, resp))
-	}
-	if body := readBody(t, resp); !strings.Contains(body, "object-name encryption") {
-		t.Errorf("the refusal does not explain itself: %s", body)
 	}
 }
 
@@ -395,5 +379,186 @@ func TestEncryptedNamesRotateRefusesAPartialPrefix(t *testing.T) {
 		t.Fatal("a prefix not ending on a '/' boundary was accepted")
 	} else if !strings.Contains(err.Error(), "boundary") {
 		t.Errorf("the refusal does not explain itself: %v", err)
+	}
+}
+
+// TestEncryptedNamesMultipartRoundTrip: an object above the client's multipart
+// threshold is where "works with real S3 clients" is decided, and it is the path
+// with the most places for the two key forms to be confused -- the upload token
+// is sealed against the key the client named, the provider is addressed with the
+// key it stores, and the manifest is bound to the stored key and lives at the
+// hash of it.
+func TestEncryptedNamesMultipartRoundTrip(t *testing.T) {
+	option, enc := withEncryptedNames(t)
+	h := newHarness(t, option)
+	ctx := context.Background()
+
+	const key = "big/2026/archive.tar"
+	parts := [][]byte{randomBytes(t, testPart), randomBytes(t, testPart), randomBytes(t, 4321)}
+	stored, err := enc.EncryptKey(key)
+	if err != nil {
+		t.Fatalf("EncryptKey: %v", err)
+	}
+	t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+
+	whole := h.mpuStore(t, key, parts)
+
+	// Stored where the mapping says, and nowhere else.
+	if _, err := h.upstream.HeadObject(ctx, testBucket, stored); err != nil {
+		t.Fatalf("the object is not at its encrypted key upstream: %v", err)
+	}
+	if _, err := h.upstream.HeadObject(ctx, testBucket, key); err == nil {
+		t.Error("the object is also stored under its plaintext key")
+	}
+
+	// The manifest hangs off the stored key, which is what keeps gc free of the
+	// name key. Reading it by the plaintext key must find nothing.
+	if _, id := h.manifestKeyOf(t, stored); id == (manifest.ID{}) {
+		t.Error("no manifest was written for the multipart object")
+	}
+
+	get := h.do(t, http.MethodGet, key)
+	defer func() { _ = get.Body.Close() }()
+	if get.StatusCode != http.StatusOK {
+		t.Fatalf("GET returned %d: %s", get.StatusCode, readBody(t, get))
+	}
+	if got := readBodyBytes(t, get); !bytes.Equal(got, whole) {
+		t.Errorf("GET returned %d bytes, want %d", len(got), len(whole))
+	}
+}
+
+// TestEncryptedNamesMultipartRange reads across a part boundary, which is the
+// path that loads the manifest and then fetches byte ranges of the object --
+// two different addresses derived from one client key.
+func TestEncryptedNamesMultipartRange(t *testing.T) {
+	option, enc := withEncryptedNames(t)
+	h := newHarness(t, option)
+
+	const key = "big/ranged.bin"
+	parts := [][]byte{randomBytes(t, testPart), randomBytes(t, testPart)}
+	stored, err := enc.EncryptKey(key)
+	if err != nil {
+		t.Fatalf("EncryptKey: %v", err)
+	}
+	t.Cleanup(func() { _ = h.upstream.DeleteObject(context.Background(), testBucket, stored) })
+
+	whole := h.mpuStore(t, key, parts)
+
+	// Straddling the boundary between part one and part two.
+	start, end := testPart-500, testPart+499
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.url(key), nil)
+	if err != nil {
+		t.Fatalf("building request: %v", err)
+	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+	get, err := h.client.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = get.Body.Close() }()
+	if get.StatusCode != http.StatusPartialContent {
+		t.Fatalf("ranged GET returned %d: %s", get.StatusCode, readBody(t, get))
+	}
+	if got := readBodyBytes(t, get); !bytes.Equal(got, whole[start:end+1]) {
+		t.Errorf("the ranged read returned the wrong %d bytes", len(got))
+	}
+}
+
+// TestEncryptedNamesCopyObject covers CopyObject, where objcopy copies the
+// ciphertext inside the provider and only re-wraps the data key.
+func TestEncryptedNamesCopyObject(t *testing.T) {
+	option, enc := withEncryptedNames(t)
+	h := newHarness(t, option)
+	ctx := context.Background()
+
+	const src, dst = "copy/src/small.bin", "copy/dst/small.bin"
+	for _, key := range []string{src, dst} {
+		stored, err := enc.EncryptKey(key)
+		if err != nil {
+			t.Fatalf("EncryptKey: %v", err)
+		}
+		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+	}
+
+	want := randomBytes(t, 4096)
+	h.store(t, src, want)
+
+	resp := h.copyTo(t, src, dst, nil)
+	body := readBody(t, resp)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("copy returned %d: %s", resp.StatusCode, body)
+	}
+
+	get := h.do(t, http.MethodGet, dst)
+	defer func() { _ = get.Body.Close() }()
+	if get.StatusCode != http.StatusOK {
+		t.Fatalf("GET of the copy returned %d: %s", get.StatusCode, readBody(t, get))
+	}
+	if got := readBodyBytes(t, get); !bytes.Equal(got, want) {
+		t.Errorf("the copy is %d bytes, want %d", len(got), len(want))
+	}
+
+	storedDst, err := enc.EncryptKey(dst)
+	if err != nil {
+		t.Fatalf("EncryptKey: %v", err)
+	}
+	if _, err := h.upstream.HeadObject(ctx, testBucket, storedDst); err != nil {
+		t.Errorf("the copy is not at its encrypted key: %v", err)
+	}
+	if _, err := h.upstream.HeadObject(ctx, testBucket, dst); err == nil {
+		t.Error("the copy is also stored under its plaintext key")
+	}
+}
+
+// TestEncryptedNamesUploadPartCopy is a regression test, and it is the one the
+// suite was missing. This is what `aws s3 cp s3://a s3://b` does above the
+// client's multipart threshold: the client drives the copy itself, and the
+// gateway reads the source's byte ranges and re-encrypts them into a part.
+//
+// That read went to the key the *client* named rather than the one the provider
+// stores it under, and every part came back NoSuchKey. A sweep for the wrong
+// variable name missed it, and no test went through this path with names on --
+// it was found by copying a 40 MiB object with the AWS CLI.
+//
+// The source is itself multipart, so the read crosses a segment boundary the
+// manifest describes and exercises the manifest lookup as well.
+func TestEncryptedNamesUploadPartCopy(t *testing.T) {
+	option, enc := withEncryptedNames(t)
+	h := newHarness(t, option)
+	ctx := context.Background()
+
+	const src, dst = "copy/src/big.bin", "copy/dst/big.bin"
+	for _, key := range []string{src, dst} {
+		stored, err := enc.EncryptKey(key)
+		if err != nil {
+			t.Fatalf("EncryptKey: %v", err)
+		}
+		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+	}
+
+	whole := h.mpuStore(t, src, [][]byte{
+		randomBytes(t, testPart), randomBytes(t, testPart), randomBytes(t, 2048),
+	})
+
+	// A range starting inside the source's first segment and ending inside its
+	// second, which is where the separate-header fetch happens too.
+	const first, last = 1000, testPart + 5000
+	token := h.mpuStart(t, dst, nil)
+	etag := h.copyPartETag(t, dst, token, 1, src, fmt.Sprintf("bytes=%d-%d", first, last))
+
+	resp := h.mpuComplete(t, dst, token, []completeReqPart{{PartNumber: 1, ETag: etag}})
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("completion returned %d", resp.StatusCode)
+	}
+
+	get := h.do(t, http.MethodGet, dst)
+	defer func() { _ = get.Body.Close() }()
+	if get.StatusCode != http.StatusOK {
+		t.Fatalf("GET of the copy returned %d: %s", get.StatusCode, readBody(t, get))
+	}
+	if got := readBodyBytes(t, get); !bytes.Equal(got, whole[first:last+1]) {
+		t.Errorf("the copied range is %d bytes, want %d", len(got), last-first+1)
 	}
 }

@@ -30,7 +30,12 @@ type copyObjectResult struct {
 // copySource is a parsed x-amz-copy-source.
 type copySource struct {
 	Bucket string
+	// Key is the key the client named, which is the source object's identity.
+	// Stored is where the provider keeps it; the two differ only when names are
+	// encrypted, and it is filled in by whoever is about to address the
+	// provider, because parsing the header cannot know the keyring.
 	Key    string
+	Stored string
 }
 
 // copyObject serves CopyObject: a PUT carrying x-amz-copy-source.

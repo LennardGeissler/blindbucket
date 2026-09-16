@@ -671,8 +671,12 @@ func rejectUnsupportedUpload(r *http.Request) *s3api.Error {
 func (p *Proxy) getObjectTagging(
 	w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger,
 ) *s3api.Error {
+	storedKey, apiErr := p.storedKey(req.Key)
+	if apiErr != nil {
+		return apiErr
+	}
 	resp, err := p.upstream.ObjectPassthrough(r.Context(), http.MethodGet,
-		req.Bucket, req.Key, url.Values{"tagging": {""}})
+		req.Bucket, storedKey, url.Values{"tagging": {""}})
 	if err != nil {
 		return translateUpstream(err)
 	}

@@ -87,6 +87,14 @@ func (p *Proxy) createMultipartUpload(
 		return s3api.ErrInvalidArgument.WithMessage("%v", err)
 	}
 
+	// The address the provider is given. The associated data below, the upload
+	// token and the response all stay on req.Key, the identity: a client names
+	// its own object and must go on seeing that name back.
+	storedKey, apiErr := p.storedKey(req.Key)
+	if apiErr != nil {
+		return apiErr
+	}
+
 	kid := p.keys.ActiveKID()
 	aad, err := keys.ObjectAAD(kid, req.Bucket, req.Key)
 	if err != nil {
@@ -119,7 +127,7 @@ func (p *Proxy) createMultipartUpload(
 
 	uploadID, err := p.upstream.CreateMultipartUpload(r.Context(), upstream.CreateMultipartUploadInput{
 		Bucket:             req.Bucket,
-		Key:                req.Key,
+		Key:                storedKey,
 		ContentType:        r.Header.Get("Content-Type"),
 		CacheControl:       r.Header.Get("Cache-Control"),
 		ContentDisposition: r.Header.Get("Content-Disposition"),
@@ -142,7 +150,7 @@ func (p *Proxy) createMultipartUpload(
 		// The upstream upload is already open; leaving it would hold storage
 		// until the bucket's lifecycle rule expires it.
 		if abortErr := p.upstream.AbortMultipartUpload(
-			r.Context(), req.Bucket, req.Key, uploadID); abortErr != nil {
+			r.Context(), req.Bucket, storedKey, uploadID); abortErr != nil {
 			log.Warn("could not abort the upload after sealing failed", "err", abortErr)
 		}
 		log.Error("sealing the upload token failed", "err", err)
@@ -164,7 +172,7 @@ func (p *Proxy) createMultipartUpload(
 func (p *Proxy) uploadPart(
 	w http.ResponseWriter, r *http.Request, req s3api.Request, authResult *auth.Result, log *slog.Logger,
 ) *s3api.Error {
-	token, apiErr := p.openToken(r, req)
+	token, storedKey, apiErr := p.openToken(r, req)
 	if apiErr != nil {
 		return apiErr
 	}
@@ -230,7 +238,7 @@ func (p *Proxy) uploadPart(
 
 	etag, putErr := p.upstream.UploadPart(r.Context(), upstream.UploadPartInput{
 		Bucket:        req.Bucket,
-		Key:           req.Key,
+		Key:           storedKey,
 		UploadID:      token.UploadID,
 		PartNumber:    req.PartNumber,
 		Body:          pr,
@@ -305,7 +313,7 @@ func (p *Proxy) uploadPart(
 func (p *Proxy) completeMultipartUpload(
 	w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger,
 ) *s3api.Error {
-	token, apiErr := p.openToken(r, req)
+	token, storedKey, apiErr := p.openToken(r, req)
 	if apiErr != nil {
 		return apiErr
 	}
@@ -323,7 +331,7 @@ func (p *Proxy) completeMultipartUpload(
 	// Step 1: the provider's own view of what was stored. The client's list says
 	// which parts to assemble; the sizes come from here, because a client could
 	// claim any size it liked and the size arithmetic has to be right.
-	stored, err := p.upstream.ListParts(r.Context(), req.Bucket, req.Key, token.UploadID)
+	stored, err := p.upstream.ListParts(r.Context(), req.Bucket, storedKey, token.UploadID)
 	if err != nil {
 		if upstream.NoSuchUpload(err) {
 			return s3api.ErrNoSuchUpload
@@ -349,12 +357,14 @@ func (p *Proxy) completeMultipartUpload(
 
 	// Step 2: what is visible right now. This observation, and nothing else, is
 	// what step 5 is allowed to delete.
-	observed, hadManifest := p.observedManifest(r.Context(), req.Bucket, req.Key)
+	observed, hadManifest := p.observedManifest(r.Context(), req.Bucket, storedKey)
 	p.at(hookUpHead, req)
 
 	// Step 3: the manifest exists before the object does.
 	m := &manifest.Manifest{
-		Bucket: req.Bucket, Key: req.Key, ID: token.ManifestID, Parts: parts,
+		// Bound to the stored key, and living at the hash of it: that pairing is
+		// what keeps gc free of the name key. See internal/objcopy.
+		Bucket: req.Bucket, Key: storedKey, ID: token.ManifestID, Parts: parts,
 	}
 	if err := p.writeManifest(r.Context(), m, dek); err != nil {
 		log.Error("could not write the manifest", "err", err)
@@ -373,7 +383,7 @@ func (p *Proxy) completeMultipartUpload(
 		})
 	}
 	out, err := p.upstream.CompleteMultipartUpload(r.Context(), upstream.CompleteMultipartUploadInput{
-		Bucket: req.Bucket, Key: req.Key, UploadID: token.UploadID, Parts: completed,
+		Bucket: req.Bucket, Key: storedKey, UploadID: token.UploadID, Parts: completed,
 	})
 	if err != nil {
 		// The manifest written at step 3 is now an orphan. It is left for gc
@@ -392,7 +402,7 @@ func (p *Proxy) completeMultipartUpload(
 	// effort -- a failure here leaves an orphan for gc, which is harmless,
 	// whereas retrying in the request would delay a completed upload.
 	if hadManifest && observed != token.ManifestID {
-		if err := p.deleteManifest(r.Context(), req.Bucket, req.Key, observed); err != nil {
+		if err := p.deleteManifest(r.Context(), req.Bucket, storedKey, observed); err != nil {
 			log.Warn("could not remove the replaced manifest; gc will collect it",
 				"manifest_id", observed.String(), "err", err)
 		}
@@ -421,11 +431,11 @@ func (p *Proxy) completeMultipartUpload(
 func (p *Proxy) abortMultipartUpload(
 	w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger,
 ) *s3api.Error {
-	token, apiErr := p.openToken(r, req)
+	token, storedKey, apiErr := p.openToken(r, req)
 	if apiErr != nil {
 		return apiErr
 	}
-	if err := p.upstream.AbortMultipartUpload(r.Context(), req.Bucket, req.Key, token.UploadID); err != nil {
+	if err := p.upstream.AbortMultipartUpload(r.Context(), req.Bucket, storedKey, token.UploadID); err != nil {
 		return translateUpstream(err)
 	}
 	log.Info("multipart upload aborted")
@@ -437,11 +447,11 @@ func (p *Proxy) abortMultipartUpload(
 func (p *Proxy) listParts(
 	w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger,
 ) *s3api.Error {
-	token, apiErr := p.openToken(r, req)
+	token, storedKey, apiErr := p.openToken(r, req)
 	if apiErr != nil {
 		return apiErr
 	}
-	stored, err := p.upstream.ListParts(r.Context(), req.Bucket, req.Key, token.UploadID)
+	stored, err := p.upstream.ListParts(r.Context(), req.Bucket, storedKey, token.UploadID)
 	if err != nil {
 		if upstream.NoSuchUpload(err) {
 			return s3api.ErrNoSuchUpload
@@ -482,21 +492,33 @@ func (p *Proxy) listMultipartUploads(_ http.ResponseWriter, _ *http.Request, _ s
 			"sealed tokens that cannot be recovered from the provider's listing")
 }
 
-// openToken recovers the upload state a client presented.
-func (p *Proxy) openToken(r *http.Request, req s3api.Request) (*upload.Token, *s3api.Error) {
+// openToken recovers the upload state a client presented, and the key the
+// provider keeps the object under.
+//
+// The two are returned together on purpose. Every multipart handler needs both
+// -- the token is sealed against the key the *client* named, while every request
+// to the provider carries the key it *stores* -- and handing back only the token
+// would leave four call sites each having to remember the second one.
+func (p *Proxy) openToken(
+	r *http.Request, req s3api.Request,
+) (*upload.Token, string, *s3api.Error) {
 	if req.UploadID == "" {
-		return nil, s3api.ErrInvalidArgument.WithMessage("the request names no upload id")
+		return nil, "", s3api.ErrInvalidArgument.WithMessage("the request names no upload id")
+	}
+	storedKey, apiErr := p.storedKey(req.Key)
+	if apiErr != nil {
+		return nil, "", apiErr
 	}
 	token, err := upload.Open(r.Context(), p.keys, req.UploadID, req.Bucket, req.Key)
 	if err != nil {
 		if errors.Is(err, upload.ErrToken) {
 			// Deliberately the same answer for a forged token, a token for
 			// another object and a token under a retired key.
-			return nil, s3api.ErrNoSuchUpload
+			return nil, "", s3api.ErrNoSuchUpload
 		}
-		return nil, s3api.ErrInternal
+		return nil, "", s3api.ErrInternal
 	}
-	return token, nil
+	return token, storedKey, nil
 }
 
 // unwrapTokenDEK recovers the upload's data key from its token.

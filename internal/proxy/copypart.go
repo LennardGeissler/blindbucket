@@ -46,7 +46,7 @@ type copyPartResult struct {
 func (p *Proxy) uploadPartCopy(
 	w http.ResponseWriter, r *http.Request, req s3api.Request, authResult *auth.Result, log *slog.Logger,
 ) *s3api.Error {
-	token, apiErr := p.openToken(r, req)
+	token, storedKey, apiErr := p.openToken(r, req)
 	if apiErr != nil {
 		return apiErr
 	}
@@ -69,7 +69,15 @@ func (p *Proxy) uploadPartCopy(
 			"the %s prefix is reserved by the gateway", s3api.ReservedPrefix)
 	}
 
-	info, err := p.upstream.HeadObject(r.Context(), src.Bucket, src.Key)
+	// UploadPartCopy is still refused while names are encrypted (see names.go),
+	// but the source is addressed by its stored key here so that lifting the
+	// refusal is lifting a refusal rather than another hunt for call sites.
+	src.Stored, apiErr = p.storedKey(src.Key)
+	if apiErr != nil {
+		return apiErr
+	}
+
+	info, err := p.upstream.HeadObject(r.Context(), src.Bucket, src.Stored)
 	if err != nil {
 		return translateUpstream(err)
 	}
@@ -129,7 +137,7 @@ func (p *Proxy) uploadPartCopy(
 	}()
 
 	etag, putErr := p.upstream.UploadPart(r.Context(), upstream.UploadPartInput{
-		Bucket: req.Bucket, Key: req.Key, UploadID: token.UploadID,
+		Bucket: req.Bucket, Key: storedKey, UploadID: token.UploadID,
 		PartNumber: req.PartNumber, Body: pr, ContentLength: sealedLen,
 	})
 
@@ -242,7 +250,7 @@ func (p *Proxy) openSourceRange(
 		fetchStart = 0
 	}
 	out, err := p.upstream.GetObject(r.Context(), upstream.GetObjectInput{
-		Bucket: src.Bucket, Key: src.Key,
+		Bucket: src.Bucket, Key: src.Stored,
 		Range:   fmt.Sprintf("bytes=%d-%d", fetchStart, rng.CipherEnd),
 		IfMatch: info.ETag,
 	})
@@ -253,7 +261,7 @@ func (p *Proxy) openSourceRange(
 	rawHeader := make([]byte, stream.HeaderSize)
 	if rng.NeedsSeparateHeader {
 		header, err := p.upstream.GetObject(r.Context(), upstream.GetObjectInput{
-			Bucket: src.Bucket, Key: src.Key,
+			Bucket: src.Bucket, Key: src.Stored,
 			Range:   fmt.Sprintf("bytes=0-%d", stream.HeaderSize-1),
 			IfMatch: info.ETag,
 		})
@@ -300,6 +308,14 @@ func (p *Proxy) openMultipartSourceRange(
 		return nil, 0, code
 	}
 
+	// srcReq carries the source's identity, because that is what its data key
+	// and its manifest are bound to. The byte ranges below go to the provider
+	// and need the address.
+	srcStored, apiErr := p.storedKey(srcReq.Key)
+	if apiErr != nil {
+		return fail(apiErr)
+	}
+
 	layout, apiErr := p.multipartLayout(r, srcReq, meta, info.ContentLength, dek, log)
 	if apiErr != nil {
 		return fail(apiErr)
@@ -328,7 +344,7 @@ func (p *Proxy) openMultipartSourceRange(
 	if spans[0].headerSeparate {
 		offset := layout.cipherStart[spans[0].index]
 		header, err := p.upstream.GetObject(r.Context(), upstream.GetObjectInput{
-			Bucket: srcReq.Bucket, Key: srcReq.Key,
+			Bucket: srcReq.Bucket, Key: srcStored,
 			Range:   fmt.Sprintf("bytes=%d-%d", offset, offset+stream.HeaderSize-1),
 			IfMatch: info.ETag,
 		})
@@ -346,7 +362,7 @@ func (p *Proxy) openMultipartSourceRange(
 
 	fetchStart, fetchEnd := layout.bodyRange(spans)
 	out, err := p.upstream.GetObject(r.Context(), upstream.GetObjectInput{
-		Bucket: srcReq.Bucket, Key: srcReq.Key,
+		Bucket: srcReq.Bucket, Key: srcStored,
 		Range:   fmt.Sprintf("bytes=%d-%d", fetchStart, fetchEnd),
 		IfMatch: info.ETag,
 	})

@@ -487,12 +487,12 @@ AWS credential chain is not used — KMS credentials are configured explicitly
 ([ADR-013](docs/adr/ADR-013-root-key-sources.md)). Object tags are refused rather than
 stored, because the provider would hold them in plaintext
 ([ADR-012](docs/adr/ADR-012-copy-semantics.md)). `ListMultipartUploads` is refused
-permanently and says why. Object-name encryption is part-wired: the four single-object
-operations and listing map their keys, while multipart, copy and tagging are refused
-while it is on. Listings are served for a prefix that comes back in one page and refused
-for one that does not, which is the first of the three tiers in
-[ADR-017](docs/adr/ADR-017-listing-order-under-name-encryption.md); the buffered tier is
-the open half. The audit log is per instance and has no cross-instance
+permanently and says why. Object-name encryption now covers every operation the gateway
+serves, but only the first of the three listing tiers in
+[ADR-017](docs/adr/ADR-017-listing-order-under-name-encryption.md): a prefix that comes
+back in one page is decrypted and sorted, and one that does not is refused rather than
+served in an order that can make a client delete data. The buffered tier is the open
+half. The audit log is per instance and has no cross-instance
 order, and entries after its last checkpoint are chained but unsigned — both by
 design, both in [ADR-016](docs/adr/ADR-016-audit-log.md). And one benchmark cell is
 documented as the provider's behaviour rather than explained; the gateway's share of it is

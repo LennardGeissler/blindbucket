@@ -14,6 +14,35 @@ version 1 would keep being readable.
 
 ### Added
 
+**Object-name encryption now covers every operation the gateway serves.**
+Multipart -- create, upload, complete, abort, list parts -- and both copy paths,
+plus tagging and bulk delete. A 40 MiB file round-trips through the AWS CLI with
+an identical SHA-256, and `aws s3 cp s3://a s3://b` copies it server-side.
+
+The upload token stays sealed against the key the *client* named; every request
+to the provider carries the key it *stores*. `openToken` hands both back
+together, so no handler has to remember the second one -- and changing its
+signature is what made the compiler point at the fifth caller nobody had thought
+about.
+
+A manifest is bound to the stored key and lives at the hash of it, deliberately
+on the other side of that split from the object's data key. That pairing is what
+keeps **`gc` free of the name key**: it reads a key out of a manifest and checks
+that it hashes back to the directory it was found in, and both halves of that
+check live in the provider's namespace. `gc` therefore needed no change at all.
+
+The gate that refused unwired operations is now a whitelist with nothing left
+outside it, so it only ever fires for an operation added later -- still the
+direction it is safe to be wrong in.
+
+**One bug found this way and worth recording.** `UploadPartCopy` -- what
+`aws s3 cp s3://a s3://b` uses above the client's multipart threshold -- read the
+source's byte ranges with the key the client named rather than the stored one,
+and every part came back `NoSuchKey`. A sweep of the call sites missed it because
+the variable there has a different name, and no test went through that path, so
+it was found by copying a 40 MiB object with the real client. It now has a
+regression test, checked by putting the bug back and watching the test fail.
+
 **Fixed before it shipped: `blindbucket rotate` could not run against a bucket
 with encrypted names.** A rotation finds its work by listing the *provider*, so
 every key it sees is a stored one -- but the data key it re-wraps is bound to the

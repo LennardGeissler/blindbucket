@@ -127,16 +127,17 @@ func TestStoredKeyRefusesAKeyTooLongToEncrypt(t *testing.T) {
 func TestNameEncryptionGateIsAWhitelist(t *testing.T) {
 	allowed := []s3api.Operation{
 		s3api.OpPutObject, s3api.OpGetObject, s3api.OpHeadObject, s3api.OpDeleteObject,
+		s3api.OpDeleteObjects, s3api.OpGetObjectTagging,
 		s3api.OpListObjects, s3api.OpListObjectsV2,
+		s3api.OpCreateMultipartUpload, s3api.OpUploadPart, s3api.OpUploadPartCopy,
+		s3api.OpCompleteMultipartUpload, s3api.OpAbortMultipartUpload, s3api.OpListParts,
+		s3api.OpCopyObject,
 		s3api.OpListBuckets, s3api.OpHeadBucket, s3api.OpCreateBucket,
 		s3api.OpDeleteBucket, s3api.OpGetBucketLocation,
 	}
-	refused := []s3api.Operation{
-		s3api.OpDeleteObjects,
-		s3api.OpCopyObject, s3api.OpGetObjectTagging,
-		s3api.OpCreateMultipartUpload, s3api.OpUploadPart, s3api.OpUploadPartCopy,
-		s3api.OpCompleteMultipartUpload, s3api.OpAbortMultipartUpload, s3api.OpListParts,
-	}
+	// Everything the router serves is wired, so the refusal is reached only by
+	// an operation added later. A made-up one stands in for that.
+	refused := []s3api.Operation{"SomeFutureOperation"}
 
 	off := &Proxy{}
 	for _, op := range append(append([]s3api.Operation{}, allowed...), refused...) {
@@ -163,5 +164,12 @@ func TestNameEncryptionGateIsAWhitelist(t *testing.T) {
 		if !strings.Contains(gate.Message, string(op)) {
 			t.Errorf("the refusal for %s does not name the operation: %q", op, gate.Message)
 		}
+	}
+
+	// And the one op the router does serve but the gate must still refuse if it
+	// were ever added to neither list: ListMultipartUploads is refused earlier,
+	// permanently, for a reason that has nothing to do with names.
+	if gate := on.nameEncryptionGate(s3api.OpListMultipartUploads); gate == nil {
+		t.Log("ListMultipartUploads passes the name gate; it is refused by its own handler")
 	}
 }

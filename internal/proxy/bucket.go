@@ -134,9 +134,36 @@ func (p *Proxy) deleteObjects(w http.ResponseWriter, r *http.Request, req s3api.
 		}
 	}
 
+	// The request names the client's keys and the response has to as well, so
+	// the mapping runs in both directions around the provider. A key the client
+	// asked to delete comes back under that same name whatever happened to it.
+	back := map[string]string{}
+	if p.names != nil {
+		for i, obj := range in.Objects {
+			stored, apiErr := p.storedKey(obj.Key)
+			if apiErr != nil {
+				return apiErr
+			}
+			in.Objects[i].Key = stored
+			back[stored] = obj.Key
+		}
+	}
+
 	result, err := p.upstream.DeleteObjects(r.Context(), req.Bucket, in)
 	if err != nil {
 		return translateUpstream(err)
+	}
+	if p.names != nil {
+		for i, entry := range result.Deleted {
+			if plain, ok := back[entry.Key]; ok {
+				result.Deleted[i].Key = plain
+			}
+		}
+		for i, entry := range result.Errors {
+			if plain, ok := back[entry.Key]; ok {
+				result.Errors[i].Key = plain
+			}
+		}
 	}
 	return writeXML(w, http.StatusOK, result)
 }
