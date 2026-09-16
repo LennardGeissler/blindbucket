@@ -76,11 +76,15 @@ crypto:
 # decides where every object is stored and cannot be changed once objects exist
 # under it.
 #
-# While this is on, only PutObject, GetObject, HeadObject and DeleteObject are
-# served. Listing, multipart, copy and tagging answer NotImplemented until each
-# has been taught what an encrypted name means -- listing first, because the
-# provider sorts by the stored key and an unsorted listing makes some clients
-# delete objects that exist (ADR-017).
+# While this is on, PutObject, GetObject, HeadObject, DeleteObject and listing are
+# served; multipart, copy and tagging answer NotImplemented until each has been
+# taught what an encrypted name means.
+#
+# A listing is served when its whole result comes back in one page, which the
+# gateway then decrypts and sorts -- the provider orders by the stored key, and an
+# unsorted listing makes `aws s3 sync --delete` delete objects that exist. A
+# prefix larger than one page is refused rather than answered in an order the
+# client cannot use; raise max-keys or narrow the prefix (ADR-017).
 # names:
 #   encrypt: true
 

@@ -14,10 +14,10 @@ version 1 would keep being readable.
 
 ### Added
 
-**Object-name encryption, for the four single-object operations.** With
-`names.encrypt` on, the provider is addressed with the encrypted form of an
-object's key and never sees the key the client used. `PutObject`, `GetObject`
-(ranges included), `HeadObject` and `DeleteObject` are wired;
+**Object-name encryption.** With `names.encrypt` on, the provider is addressed
+with the encrypted form of an object's key and never sees the key the client
+used. `PutObject`, `GetObject` (ranges included), `HeadObject`, `DeleteObject`
+and listing are wired;
 [ADR-015](docs/adr/ADR-015-object-name-encryption.md) has the construction.
 
 **Off by default, and not a toggle.** An object lives at the encrypted form of
@@ -26,15 +26,37 @@ off hides everything written since. Moving an existing bucket across is a
 rewrite of every object's key, and the documentation says so wherever the switch
 appears rather than only in the ADR.
 
-**Everything not yet wired is refused, not guessed at.** Listing, multipart,
-copy and tagging answer `NotImplemented` with a message naming the operation and
-why. The gate is a whitelist, so an operation added to the router later is
-refused until somebody decides what its key should be -- the direction it is
-safe to be wrong in, because an operation addressing the provider with a
-plaintext key while the rest used an encrypted one would write objects nothing
-could find again. Listing is what blocks the rest, and
-[ADR-017](docs/adr/ADR-017-listing-order-under-name-encryption.md) is the
-decision it waits on.
+**Listings are served, in the client's order.** The provider orders by the
+stored key, and encrypted names sort differently from plaintext ones -- an
+unsorted listing is what makes `aws s3 sync --delete` delete objects that exist.
+So a listing is decrypted and sorted before the client sees it. This is the
+first of the three tiers in
+[ADR-017](docs/adr/ADR-017-listing-order-under-name-encryption.md): it serves a
+prefix whose whole result arrives in one page, which costs nothing beyond the
+page the gateway was already holding and is the overwhelmingly common listing.
+Delimiter grouping works because the `/` separators survive encryption, so the
+provider's own grouping lines up with the plaintext one.
+
+What this tier cannot sort, it **refuses** rather than answering in an order the
+client cannot use: a prefix larger than one page, a pagination token, a prefix
+that does not end on a `/` boundary, and any delimiter other than `/`. Each
+names its own reason. The buffered tier that would lift the first two is the
+open half of ADR-017, and it needs a cache over continuation tokens -- the
+gateway's first server-side state.
+
+Verified against the AWS CLI rather than asserted: two consecutive
+`aws s3 sync --delete` runs against a gateway with names encrypted upload eleven
+files and then do nothing, with zero deletes, while the provider holds eleven
+keys in which no plaintext segment appears and whose order is not the plaintext
+order.
+
+**Everything else not yet wired is refused, not guessed at.** Multipart, copy
+and tagging answer `NotImplemented` with a message naming the operation and why.
+The gate is a whitelist, so an operation added to the router later is refused
+until somebody decides what its key should be -- the direction it is safe to be
+wrong in, because an operation addressing the provider with a plaintext key
+while the rest used an encrypted one would write objects nothing could find
+again.
 
 **The envelope is unchanged.** The associated data binding an object's wrapped
 data key stays over the key the *client* named, not the stored one, so whether

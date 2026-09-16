@@ -25,9 +25,28 @@ const maxDeleteBody = 2 << 20
 // authenticated in any case, which docs/THREAT_MODEL.md states plainly. The
 // authenticated size is established when an object is actually read.
 func (p *Proxy) listObjects(w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger) *s3api.Error {
-	result, err := p.upstream.ListObjects(r.Context(), req.Bucket, r.URL.Query())
+	query := r.URL.Query()
+	if p.names != nil {
+		translated, apiErr := p.encryptedListingQuery(query)
+		if apiErr != nil {
+			return apiErr
+		}
+		query = translated
+	}
+
+	result, err := p.upstream.ListObjects(r.Context(), req.Bucket, query)
 	if err != nil {
 		return translateUpstream(err)
+	}
+
+	// Names come back as the provider stores them, so they are turned back into
+	// the client's -- and put into the client's order -- before anything else
+	// reads them. Reserved-prefix filtering happens in there too, because it has
+	// to run against the stored key.
+	if p.names != nil {
+		if apiErr := p.decryptListing(result, r.URL.Query(), log); apiErr != nil {
+			return apiErr
+		}
 	}
 
 	kept := make([]upstream.ObjectEntry, 0, len(result.Contents))
