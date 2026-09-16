@@ -10,6 +10,55 @@ is version `1` and is specified in [docs/FORMAT.md](docs/FORMAT.md). A change to
 it would be a change to that number, announced here, and objects written under
 version 1 would keep being readable.
 
+## [Unreleased]
+
+### Added
+
+**Rollback detection: the gateway can now tell that a provider served an older
+but genuine version of an object.** That was the one row in the threat model's
+risk table that said **No**, deferred to M6 by ADR-002 in M0 and explicitly
+declined by ADR-016. It is the last one.
+
+Off by default. Set `freshness.index` to a path and add a key with
+`blindbucket keygen --add-freshness-key`. What is recorded per object is a hash
+over its segment salts — which `FORMAT.md` §4.1 already requires to be fresh per
+write and authenticates as associated data of every chunk, so a provider cannot
+forge one and can only serve a whole genuine segment, which is the attack. The
+check runs where ADR-014's salt comparison already runs: after the header is
+authenticated and before any plaintext is released. A mismatch answers
+`RollbackDetected` (502) rather than `IntegrityCheckFailed`, because nothing
+failed authentication — the bytes are genuine, they are simply not current. A
+suppressed `DeleteObject` is caught the same way, through a tombstone.
+
+**Nothing in the wire format changed.** Objects written by every previous version
+are covered the moment an index records them, and objects written with this on
+are readable by a gateway without it. `blindbucket rotate` costs the index
+nothing either: ADR-009 re-wraps metadata without moving ciphertext, so the salts
+and therefore the tags are untouched. That is why the tag covers salts rather
+than the wrapped data key, and there are integration tests for both halves of it.
+
+**The limits are part of the feature and are stated everywhere it is documented.**
+The first read of any object is unchecked — an index that has just been created,
+or lost, trusts what it is shown. A server-side copy leaves its destination
+unchecked until it is read once. `HEAD` is never checked, because it reads no
+body. And a tag says *which* write, never *which is newer*, so in a deployment
+where several instances write the same objects a peer's legitimate write is
+indistinguishable from a rollback — which is why this is off by default and why
+the store is an interface with room for a shared implementation.
+
+It costs memory proportional to live objects, about 112 MiB per million and
+897 MiB for ten, which is a shape of cost nothing else in this gateway has. A
+read pays 279 ns against the 0.13 ms a request already costs; a write pays 21 µs,
+almost all of it an amortised fsync. Full reasoning, alternatives and the
+measurements in [ADR-018](docs/adr/ADR-018-rollback-detection.md).
+
+### Fixed
+
+- The roadmap in `README.md` still described the audit log as unreleased, eleven
+  lines below a status banner announcing it in `v0.3.0`.
+- A comment in `internal/proxy/copy.go` still said `CopyObject` was refused while
+  object names are encrypted. It has been served since `v0.3.0`.
+
 ## [0.3.0] — 2026-09-16
 
 ### Added

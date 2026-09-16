@@ -104,6 +104,10 @@ Flags:
 		fmt.Fprintf(os.Stderr,
 			"\nthis keyring has no audit key; `keygen --add-audit-key` adds one\n")
 	}
+	if _, ok := ring.FreshnessKey(); !ok {
+		fmt.Fprintf(os.Stderr,
+			"\nthis keyring has no rollback-index key; `keygen --add-freshness-key` adds one\n")
+	}
 	if _, ok := ring.NameKey(); !ok {
 		fmt.Fprintf(os.Stderr,
 			"\nthis keyring has no object-name key; `keygen --add-name-key` adds one.\n"+

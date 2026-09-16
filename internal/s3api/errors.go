@@ -93,6 +93,18 @@ var (
 	ErrIntegrity = &Error{"IntegrityCheckFailed",
 		"The stored object failed authentication and was not returned.",
 		http.StatusBadGateway}
+	// ErrRollback has no counterpart in S3 either. It reports an object that
+	// authenticated perfectly and is nonetheless not the write this gateway last
+	// recorded -- THREAT_MODEL section 5.1, which the index of ADR-018 closes for
+	// objects it has seen before.
+	//
+	// Separate from ErrIntegrity because nothing failed authentication: the bytes
+	// are genuine, they are simply not current. Conflating the two would send an
+	// operator looking for corruption that is not there, and would hide the one
+	// finding that means the provider is replaying.
+	ErrRollback = &Error{"RollbackDetected",
+		"The stored object is not the version this gateway last recorded.",
+		http.StatusBadGateway}
 )
 
 // WithMessage returns a copy of e carrying a more specific message. The code and

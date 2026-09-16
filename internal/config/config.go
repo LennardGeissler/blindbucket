@@ -26,6 +26,49 @@ type Config struct {
 	Admin    Admin    `yaml:"admin"`
 	Audit    Audit    `yaml:"audit"`
 	Names    Names    `yaml:"names"`
+
+	Freshness Freshness `yaml:"freshness"`
+}
+
+// Freshness configures rollback detection (ADR-018).
+//
+// Off unless a path is given, and deliberately so. The index is memory
+// proportional to live objects -- about 112 MiB per million -- which is a shape
+// of cost nothing else in this gateway has. And in a deployment where several
+// instances write the same objects it cannot tell a rollback from a peer's
+// write, because the tag it records carries no order. Neither should arrive by
+// upgrade.
+type Freshness struct {
+	// Index is the file to keep the index in. Empty disables rollback detection
+	// entirely. The directory must exist and must not be shared between
+	// instances: two gateways writing one index would fight over it, and the
+	// guarantee is per instance in any case.
+	Index string `yaml:"index"`
+	// TombstoneRetention is how long a delete is remembered, as a Go duration.
+	// Tombstones are the one entry that does not shrink when the bucket does, so
+	// they expire -- and past this a suppressed delete stops being detectable.
+	// Empty selects the package default of 90 days.
+	TombstoneRetention string `yaml:"tombstone_retention"`
+	// SyncEvery is how many index records may be written between fsyncs. A lost
+	// tail costs detection for the objects in it and nothing else, which is why
+	// this is amortised rather than one fsync per write: syncing every record
+	// costs 3.69 ms against 21 µs. Zero selects the package default.
+	SyncEvery int64 `yaml:"sync_every"`
+}
+
+// Enabled reports whether rollback detection was asked for.
+func (f Freshness) Enabled() bool { return f.Index != "" }
+
+// Retention parses TombstoneRetention. Zero selects the package default.
+func (f Freshness) Retention() (time.Duration, error) {
+	if f.TombstoneRetention == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(f.TombstoneRetention)
+	if err != nil {
+		return 0, fmt.Errorf("freshness.tombstone_retention: %w", err)
+	}
+	return d, nil
 }
 
 // Audit configures the hash-chained, signed record of what the gateway served
@@ -433,7 +476,27 @@ func (c *Config) validate() error {
 	if (c.Server.TLS.CertFile == "") != (c.Server.TLS.KeyFile == "") {
 		return fmt.Errorf("server.tls needs both cert_file and key_file, or neither")
 	}
-	return c.Audit.validate()
+	if err := c.Audit.validate(); err != nil {
+		return err
+	}
+	return c.Freshness.validate()
+}
+
+func (f Freshness) validate() error {
+	if !f.Enabled() {
+		return nil
+	}
+	if f.SyncEvery < 0 {
+		return fmt.Errorf("freshness.sync_every must not be negative")
+	}
+	retention, err := f.Retention()
+	if err != nil {
+		return err
+	}
+	if retention < 0 {
+		return fmt.Errorf("freshness.tombstone_retention must not be negative")
+	}
+	return nil
 }
 
 func (a Audit) validate() error {

@@ -117,7 +117,7 @@ func touchesReservedPrefix(prefix string) bool {
 }
 
 // deleteObjects removes several objects in one request.
-func (p *Proxy) deleteObjects(w http.ResponseWriter, r *http.Request, req s3api.Request, _ *slog.Logger) *s3api.Error {
+func (p *Proxy) deleteObjects(w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger) *s3api.Error {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxDeleteBody))
 	if err != nil {
 		return s3api.ErrIncompleteBody.WithMessage("could not read the request body")
@@ -168,6 +168,13 @@ func (p *Proxy) deleteObjects(w http.ResponseWriter, r *http.Request, req s3api.
 			}
 		}
 	}
+	// Only what the provider says it deleted, and under the client's own name --
+	// the loop above has already mapped the keys back, so this is the identity
+	// the index is keyed on whether or not names are encrypted.
+	for _, entry := range result.Deleted {
+		p.forgetFreshness(req.Bucket, entry.Key, log)
+	}
+
 	return writeXML(w, http.StatusOK, result)
 }
 

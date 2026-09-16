@@ -63,7 +63,7 @@ must reside in the same trust domain as the clients it serves.
 | Detection of reordered or missing parts | **Yes** | Part number in the authenticated segment header; MAC-protected manifest |
 | Client authentication | **Yes** | SigV4 with proxy-specific credentials, constant-time comparison |
 | Tamper evidence of the audit log, once written | **Yes**, with limits | Hash chain and signed checkpoints, §5.8 |
-| Rollback to an older genuine version of the same key | **No** | Residual risk, §5.1. **The audit log does not change this** |
+| Rollback to an older genuine version of the same key | **Yes**, with limits | Only with `freshness.index` configured, and only for objects the instance has seen before, §5.1 |
 | Confidentiality of names, sizes, timestamps | **No** | §4 |
 | Authenticity of sizes reported in listings | **No** | Computed from unauthenticated upstream data, §5.4 |
 | Availability | **No** | The provider can delete or refuse access |
@@ -141,32 +141,52 @@ count — and, for a rejected request, the access key id that was attempted.
 
 ## 5. Residual risks
 
-### 5.1 Rollback
+### 5.1 Rollback — mitigated when switched on, with limits
 
 If the provider serves an older but genuine version of the same object — from its own
 versioning, for instance — that version is cryptographically valid: the proxy produced it,
 and it is bound to the same bucket and key. Nothing in the format distinguishes "current"
 from "previous".
 
-Detecting this requires remembering, per object, which write is the current one. That is
-still **accepted risk**: nothing in this build checks it.
+Detecting this requires remembering, per object, which write is the current one. Since
+`freshness.index` exists, the gateway can ([ADR-018](adr/ADR-018-rollback-detection.md)).
+It is **off by default**, and with it off this remains accepted risk exactly as before.
 
-The design is now decided rather than merely deferred
-([ADR-018](adr/ADR-018-rollback-detection.md)), and it narrows the objection this section
-used to state. What ADR-002 rejected was a *shared* index that a read's correctness depends
-on; a local, advisory one is neither shared nor on that path, because an empty index fails
-to detect rather than failing a read. What it costs instead is memory proportional to live
-objects — about 112 MiB per million — and a guarantee with a stated shape: rollback of a
-write the instance has seen before, with the first sighting of any object untrusted.
+What is remembered is a tag over the object's segment salts, which §4.1 of `FORMAT.md`
+already requires to be fresh per write and authenticates as associated data of every chunk.
+A provider cannot forge one; it can only serve a whole genuine segment, which is the attack.
+The check runs where ADR-014's salt comparison already runs — after the header is
+authenticated, before any plaintext is released — and a mismatch is `RollbackDetected`
+rather than an integrity failure, because nothing failed authentication. The bytes are
+genuine. They are not current.
 
-Until that ships, this row stays **No**.
+**The limits are part of the claim, not footnotes to it.**
 
-The audit log of §5.8 does not change this, and is worth naming here because its
+- **The first read of any object is unchecked.** An index that has just been created, or
+  lost, trusts what it is shown and records it. A rollback served at exactly that moment
+  is recorded as the truth.
+- **A tag carries no order.** It says *which* write, never *which is newer*. So where
+  several instances write the same objects, a peer's legitimate write and a provider's
+  rollback are the same observation, and a local index cannot separate them. Detection
+  there needs a shared index, which this build does not ship.
+- **A server-side copy leaves its destination unchecked until it is read once.** The
+  destination's ciphertext comes from the source and its salts are never read, so the index
+  is told to forget rather than to record.
+- **`HEAD` is not checked**, because it reads no body and therefore no salt. It returns no
+  plaintext either.
+- **Memory is proportional to live objects**, about 112 MiB per million. That is an
+  operational cost rather than a security limit, and it is why this is a switch.
+
+What does *not* limit it: `blindbucket rotate` re-wraps metadata without moving ciphertext
+(ADR-009), so the salts and therefore the tags are untouched and a rotation costs the index
+nothing. That is why the tag covers salts rather than the wrapped data key.
+
+The audit log of §5.8 has nothing to do with this, and is worth naming here because its
 name invites the assumption that it does. That log records what the gateway
 *served*; it is not consulted on a read, and it is not an authority on which
-version of an object is current. Building it into one is the deferred mitigation
-above, not a side effect of the log existing
-([ADR-016](adr/ADR-016-audit-log.md)).
+version of an object is current. The index above is a separate file with a
+separate key and a separate lifetime, and ADR-018 explains why folding the two
+together was rejected ([ADR-016](adr/ADR-016-audit-log.md)).
 
 ### 5.2 Retry substitution within a multipart upload — mitigated
 

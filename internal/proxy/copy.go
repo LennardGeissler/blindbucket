@@ -90,10 +90,9 @@ func (p *Proxy) copyObject(
 	}
 
 	// Both objects are addressed by their stored keys and identified by the keys
-	// the client named. CopyObject is not yet served while names are encrypted
-	// -- the gate in names.go refuses it -- but the two forms are kept apart
-	// here so that wiring it later is a matter of lifting the refusal rather
-	// than finding every call site again.
+	// the client named. Keeping the two apart is what lets this path serve a copy
+	// while names are encrypted: the wrapped key stays bound to the identity, and
+	// only the provider is told the address.
 	srcStored, apiErr := p.storedKey(src.Key)
 	if apiErr != nil {
 		return apiErr
@@ -180,6 +179,19 @@ func (p *Proxy) copyObject(
 	case err != nil:
 		log.Warn("copy failed", "source_bucket", src.Bucket, "source_key", src.Key, "err", err)
 		return translateUpstream(err)
+	}
+
+	// The destination holds the source's ciphertext, whose salts this path never
+	// reads -- objcopy moves the bytes inside the provider and reports no tag. So
+	// the index is told to forget rather than to record: keeping the entry the
+	// copy replaced would make a perfectly good object read back as a rollback.
+	// The destination is unchecked until it has been read once, which ADR-018
+	// names as the cost of a copy.
+	if p.fresh != nil {
+		if err := p.fresh.Invalidate(req.Bucket, req.Key); err != nil {
+			log.Error("could not drop the copy destination from the freshness index; "+
+				"it may read back as a rollback", "err", err)
+		}
 	}
 
 	p.noteObject(r, dest.KeyID, 0)

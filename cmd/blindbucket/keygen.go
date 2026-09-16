@@ -40,6 +40,8 @@ Flags:
 			"add an audit-log signing key to an existing keyring; new keyrings get one anyway")
 		addName = fs.Bool("add-name-key", false,
 			"add an object-name key to an existing keyring; new keyrings get one anyway")
+		addFresh = fs.Bool("add-freshness-key", false,
+			"add a rollback-index key to an existing keyring; new keyrings get one anyway")
 		act  = fs.Bool("activate", true, "with --add, make the new key the active one")
 		conf = fs.String("config", "",
 			"configuration file naming the root-key provider (default: a passphrase)")
@@ -64,10 +66,10 @@ Flags:
 	}
 
 	switch {
-	case (*addAudit || *addName) && !*add:
-		return addStandaloneKeys(ctx, *out, *addAudit, *addName, keysCfg, &pass)
+	case (*addAudit || *addName || *addFresh) && !*add:
+		return addStandaloneKeys(ctx, *out, *addAudit, *addName, *addFresh, keysCfg, &pass)
 	case *add:
-		return addKey(ctx, *out, *kid, *act, *addAudit, *addName, keysCfg, &pass)
+		return addKey(ctx, *out, *kid, *act, *addAudit, *addName, *addFresh, keysCfg, &pass)
 	}
 	return createKeyring(ctx, *out, *kid, keysCfg, &pass)
 }
@@ -142,6 +144,16 @@ func createKeyring(
 		return err
 	}
 	ring.SetNameKey(name)
+	// And a freshness key, on the same reasoning again: inert until rollback
+	// detection is switched on, and impossible to add afterwards without
+	// resealing a running deployment's keyring. Unlike the name key it is not
+	// catastrophic to change -- a new one empties the index rather than hiding
+	// objects -- but the reseal is the same nuisance either way.
+	fresh, err := keys.NewFreshnessKey()
+	if err != nil {
+		return err
+	}
+	ring.SetFreshnessKey(fresh)
 
 	data, err := sealKeyring(ctx, ring, cfg, pass, true)
 	if err != nil {
@@ -181,7 +193,7 @@ func printAuditPublicKey(ring *keys.Keyring) error {
 // addStandaloneKeys gives an existing keyring an audit key, a name key, or both,
 // without adding a KEK.
 func addStandaloneKeys(
-	ctx context.Context, path string, withAudit, withName bool,
+	ctx context.Context, path string, withAudit, withName, withFresh bool,
 	cfg config.Keys, pass *passphraseFlags,
 ) error {
 	ring, err := openKeyring(ctx, path, cfg, pass)
@@ -198,6 +210,11 @@ func addStandaloneKeys(
 			return err
 		}
 	}
+	if withFresh {
+		if err := attachFreshnessKey(ring, path); err != nil {
+			return err
+		}
+	}
 
 	updated, err := sealKeyring(ctx, ring, cfg, pass, false)
 	if err != nil {
@@ -211,6 +228,9 @@ func addStandaloneKeys(
 	}
 	if withName {
 		fmt.Fprintf(os.Stderr, "added an object-name key to %s\n", path)
+	}
+	if withFresh {
+		fmt.Fprintf(os.Stderr, "added a rollback-index key to %s\n", path)
 	}
 	if withAudit {
 		return printAuditPublicKey(ring)
@@ -259,6 +279,29 @@ func attachNameKey(ring *keys.Keyring, path string) error {
 	return nil
 }
 
+// attachFreshnessKey generates a rollback-index key and installs it, refusing to
+// replace one.
+//
+// Refused rather than replaced for a softer reason than the name key's. Every
+// entry in the index is keyed under this key, so a new one does not make objects
+// unfindable -- it empties the index, and every object falls back to trust on
+// first use. That is recoverable, and it is still not something to do by
+// accident on a running gateway.
+func attachFreshnessKey(ring *keys.Keyring, path string) error {
+	if _, exists := ring.FreshnessKey(); exists {
+		return fmt.Errorf("%s already has a freshness key; replacing it would empty "+
+			"the rollback index, because every entry in it is keyed under the old "+
+			"key -- every object would go back to being trusted the first time it "+
+			"is read", path)
+	}
+	fresh, err := keys.NewFreshnessKey()
+	if err != nil {
+		return err
+	}
+	ring.SetFreshnessKey(fresh)
+	return nil
+}
+
 // sealedBy names the root-key source for the operator's confirmation line.
 func sealedBy(cfg config.Keys) string {
 	switch cfg.Provider {
@@ -272,7 +315,7 @@ func sealedBy(cfg config.Keys) string {
 }
 
 func addKey(
-	ctx context.Context, path, kid string, activate, withAudit, withName bool,
+	ctx context.Context, path, kid string, activate, withAudit, withName, withFresh bool,
 	cfg config.Keys, pass *passphraseFlags,
 ) error {
 	ring, err := openKeyring(ctx, path, cfg, pass)
@@ -297,6 +340,11 @@ func addKey(
 			return err
 		}
 	}
+	if withFresh {
+		if err := attachFreshnessKey(ring, path); err != nil {
+			return err
+		}
+	}
 
 	// Re-sealed rather than patched: a new root key on every write means a
 	// keyring that is added to does not accumulate ciphertext under one key
@@ -312,6 +360,9 @@ func addKey(
 	fmt.Fprintf(os.Stderr, "added key %q to %s (active key: %q)\n", kid, path, ring.ActiveKID())
 	if withName {
 		fmt.Fprintf(os.Stderr, "added an object-name key to %s\n", path)
+	}
+	if withFresh {
+		fmt.Fprintf(os.Stderr, "added a rollback-index key to %s\n", path)
 	}
 	if withAudit {
 		return printAuditPublicKey(ring)

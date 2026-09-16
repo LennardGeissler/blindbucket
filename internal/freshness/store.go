@@ -87,6 +87,17 @@ type Store interface {
 	// the delete and keep serving the object with nothing to disagree.
 	Forget(bucket, key string) error
 
+	// Invalidate drops what the index knows about a key, returning it to trust
+	// on first use.
+	//
+	// For the operation that changed an object without the gateway being able to
+	// name the write it produced -- a server-side copy, where the destination's
+	// ciphertext comes from the source and its salts are never read. Neither of
+	// the other two would do: keeping the old tag would make the copy read back
+	// as a rollback of whatever it replaced, and a tombstone would make it read
+	// back as a suppressed delete. Both would refuse a perfectly good object.
+	Invalidate(bucket, key string) error
+
 	// Stats describes what is held.
 	Stats() Stats
 

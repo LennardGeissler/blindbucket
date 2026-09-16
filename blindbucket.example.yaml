@@ -114,6 +114,36 @@ crypto:
 #   # means a full disk silently switches auditing off instead of paging you.
 #   fail_closed: true
 
+# Rollback detection (ADR-018). A storage provider serving an *older but genuine*
+# version of an object is the one attack the object format cannot catch by
+# itself: the bytes are authentic and bound to the right key, they are simply no
+# longer current. An index of which write is current is what tells the
+# difference.
+#
+# Off unless a path is given here. The keyring must hold a freshness key --
+# keyrings created by `blindbucket keygen` do; older ones need
+# `keygen --add-freshness-key`.
+#
+# Two things to understand before switching it on, both in ADR-018:
+#
+#   * It costs memory proportional to the number of live objects -- about
+#     112 MiB per million, 897 MiB for ten. Nothing else in this gateway has
+#     that shape of cost.
+#   * The first read of any object is unchecked, and a tag carries no order. So
+#     where several instances write the *same* objects, a peer's legitimate
+#     write is indistinguishable from a rollback. One index per instance, and
+#     never a shared file.
+# freshness:
+#   index: /var/lib/blindbucket/freshness.idx
+#   # How long a delete is remembered. Tombstones are the one entry that does
+#   # not shrink when the bucket does, so they expire -- and past this, a
+#   # provider that ignored a delete stops being detectable.
+#   tombstone_retention: 2160h          # 90 days
+#   # Records between fsyncs. A lost tail costs detection for the objects in it
+#   # and nothing else, which is why this is amortised: syncing every record
+#   # costs 3.69 ms against 21 microseconds.
+#   sync_every: 256
+
 # Credentials the proxy accepts from its own clients. These are unrelated to the
 # upstream credentials above, which a client never sees -- that separation is
 # what stops a client bypassing the gateway.

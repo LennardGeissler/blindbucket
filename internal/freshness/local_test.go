@@ -486,3 +486,124 @@ func TestClosedStoreRefuses(t *testing.T) {
 		t.Errorf("closing twice: %v", err)
 	}
 }
+
+// TestAFailedRecordForgetsRatherThanLies. If the append fails, the map still
+// holds the *previous* write. Keeping it would make the object that was just
+// stored read back as a rollback of itself -- so a full disk would turn good
+// objects unreadable, which is a far worse failure than not detecting anything.
+func TestAFailedRecordForgetsRatherThanLies(t *testing.T) {
+	l, _, _ := testStore(t)
+	first, second := tagOf(t, 1), tagOf(t, 2)
+
+	if err := l.Record("bucket", "photos/a.jpg", first); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	// Break the file underneath the store, the way a full disk would.
+	l.mu.Lock()
+	if err := l.f.Close(); err != nil {
+		t.Fatalf("closing the file: %v", err)
+	}
+	l.mu.Unlock()
+
+	if err := l.Record("bucket", "photos/a.jpg", second); err == nil {
+		t.Fatal("a record onto a broken file reported success")
+	}
+
+	// The object is now unknown, not stale: the gateway forgot rather than
+	// asserting a version it could not write down.
+	if v, _ := l.Check("bucket", "photos/a.jpg", second); v == Stale {
+		t.Error("a failed record left the previous tag behind; the new object reads as a rollback")
+	}
+}
+
+// TestInvalidateReturnsToTrustOnFirstUse. A server-side copy replaces the
+// destination with ciphertext whose salts the gateway never reads, so it cannot
+// name the write it produced. Neither of the other two answers would do: the old
+// tag would make the copy read as a rollback, a tombstone would make it read as a
+// suppressed delete, and both would refuse an object that is perfectly good.
+func TestInvalidateReturnsToTrustOnFirstUse(t *testing.T) {
+	l, path, key := testStore(t)
+	before, after := tagOf(t, 1), tagOf(t, 2)
+
+	if err := l.Record("bucket", "photos/a.jpg", before); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if err := l.Invalidate("bucket", "photos/a.jpg"); err != nil {
+		t.Fatalf("Invalidate: %v", err)
+	}
+
+	if v, _ := l.Check("bucket", "photos/a.jpg", after); v != Unknown {
+		t.Errorf("after an invalidate: %v, want unknown", v)
+	}
+	// And that first sighting is recorded, so the next rollback is caught.
+	if v, _ := l.Check("bucket", "photos/a.jpg", before); v != Stale {
+		t.Errorf("a rollback after the copy was seen: %v, want stale", v)
+	}
+
+	// The drop must survive a restart. The file still holds the record that
+	// Invalidate dropped, so a replay that ignored the invalidation would bring
+	// it back -- and the object would read as a rollback again.
+	if err := l.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	reopened, err := Open(Options{Path: path, Key: key})
+	if err != nil {
+		t.Fatalf("reopening: %v", err)
+	}
+	defer func() { _ = reopened.Close() }()
+	if v, _ := reopened.Check("bucket", "photos/a.jpg", after); v != Fresh {
+		t.Errorf("the tag the index last saw: %v, want fresh", v)
+	}
+	if v, _ := reopened.Check("bucket", "photos/a.jpg", before); v != Stale {
+		t.Errorf("the tag from before the copy: %v, want stale", v)
+	}
+}
+
+// TestInvalidateSurvivesAReplayWithNothingAfterIt is the case the one above
+// cannot reach: an invalidation that is the *last* record in the file, with no
+// later sighting to mask it. A replay that ignored it would resurrect the entry.
+func TestInvalidateSurvivesAReplayWithNothingAfterIt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "freshness.idx")
+	key := testKey(t)
+	tag := tagOf(t, 1)
+
+	l, err := Open(Options{Path: path, Key: key})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := l.Record("bucket", "photos/a.jpg", tag); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if err := l.Invalidate("bucket", "photos/a.jpg"); err != nil {
+		t.Fatalf("Invalidate: %v", err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	reopened, err := Open(Options{Path: path, Key: key})
+	if err != nil {
+		t.Fatalf("reopening: %v", err)
+	}
+	defer func() { _ = reopened.Close() }()
+	if got := reopened.Stats().Objects; got != 0 {
+		t.Errorf("the replay brought back %d objects, want 0", got)
+	}
+	if v, _ := reopened.Check("bucket", "photos/a.jpg", tag); v != Unknown {
+		t.Errorf("after the restart: %v, want unknown", v)
+	}
+}
+
+// TestInvalidateOfAnUnknownKeyWritesNothing keeps a copy to a fresh destination
+// from growing the file for no reason.
+func TestInvalidateOfAnUnknownKeyWritesNothing(t *testing.T) {
+	l, _, _ := testStore(t)
+	before := l.Stats().Records
+	if err := l.Invalidate("bucket", "never-seen"); err != nil {
+		t.Fatalf("Invalidate: %v", err)
+	}
+	if got := l.Stats().Records; got != before {
+		t.Errorf("records went from %d to %d; an unknown key needs no record", before, got)
+	}
+}

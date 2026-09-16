@@ -1,9 +1,9 @@
 # ADR-018 — Rollback detection: a local freshness index, trust on first use
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-16
 **Milestone:** M6
-**Would implement:** `internal/freshness`, `internal/proxy`, `internal/crypto/keys`, `internal/config`, `blindbucket freshness`
+**Implements:** `internal/freshness`, `internal/proxy`, `internal/crypto/keys`, `internal/config`, `blindbucket keygen --add-freshness-key`
 
 ## Context
 

@@ -16,6 +16,7 @@ import (
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/stream"
+	"github.com/LennardGeissler/blindbucket/internal/freshness"
 	"github.com/LennardGeissler/blindbucket/internal/objectmeta"
 	"github.com/LennardGeissler/blindbucket/internal/obs"
 	"github.com/LennardGeissler/blindbucket/internal/s3api"
@@ -68,6 +69,13 @@ type Config struct {
 	// AuditFailClosed refuses requests once the audit log cannot be written,
 	// rather than serving on with a record known to be incomplete.
 	AuditFailClosed bool
+
+	// Freshness detects rollback: a provider serving an older but genuine
+	// version of an object (ADR-018). Nil detects nothing, which is the default
+	// -- the index is memory proportional to live objects, and in a deployment
+	// where several instances write the same objects it cannot tell a rollback
+	// from a peer's write.
+	Freshness freshness.Store
 }
 
 // Proxy serves the S3 API, encrypting on the way in and decrypting on the way
@@ -92,6 +100,8 @@ type Proxy struct {
 
 	audit           *audit.Writer
 	auditFailClosed bool
+
+	fresh freshness.Store
 
 	// hook is called at the coordination points named in hooks.go. It exists so
 	// that the integration tests can replay the model's counterexamples, and is
@@ -145,6 +155,7 @@ func New(cfg Config) (*Proxy, error) {
 
 		audit:           cfg.Audit,
 		auditFailClosed: cfg.AuditFailClosed,
+		fresh:           cfg.Freshness,
 	}, nil
 }
 

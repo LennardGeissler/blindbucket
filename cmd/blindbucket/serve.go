@@ -20,6 +20,7 @@ import (
 	"github.com/LennardGeissler/blindbucket/internal/config"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
+	"github.com/LennardGeissler/blindbucket/internal/freshness"
 	"github.com/LennardGeissler/blindbucket/internal/obs"
 	"github.com/LennardGeissler/blindbucket/internal/proxy"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
@@ -134,6 +135,22 @@ Flags:
 		return err
 	}
 
+	freshIndex, err := openFreshnessIndex(cfg, ring, log)
+	if err != nil {
+		return err
+	}
+	if freshIndex != nil {
+		// Closed before the process exits so the last records are on disk. A
+		// lost tail costs detection for the objects in it, which is recoverable
+		// -- they fall back to trust on first use -- but there is no reason to
+		// lose it on an orderly shutdown.
+		defer func() {
+			if err := freshIndex.Close(); err != nil {
+				log.Error("the freshness index did not close cleanly", "err", err)
+			}
+		}()
+	}
+
 	handler, err := proxy.New(proxy.Config{
 		Upstream:              client,
 		Keys:                  ring,
@@ -147,6 +164,7 @@ Flags:
 		MaxConcurrentListings: cfg.Names.MaxConcurrentListings,
 		Audit:                 auditLog,
 		AuditFailClosed:       cfg.Audit.FailClosed,
+		Freshness:             freshnessStore(freshIndex),
 	})
 	if err != nil {
 		return err
@@ -330,6 +348,60 @@ func openNameEncrypter(
 	log.Info("object names are encrypted",
 		"note", "objects written with this off are not visible with it on, and the reverse")
 	return enc, nil
+}
+
+// openFreshnessIndex builds the rollback index, or nil when detection is off.
+//
+// The keyring must already hold a freshness key, for the reason the name key
+// must: generating one here would make a restart that lost its keyring silently
+// forget every object, and the gateway would report nothing wrong while
+// detecting nothing. A missing key is a startup error naming the command that
+// fixes it (ADR-018).
+func openFreshnessIndex(
+	cfg *config.Config, ring *keys.Keyring, log *slog.Logger,
+) (*freshness.Local, error) {
+	if !cfg.Freshness.Enabled() {
+		return nil, nil
+	}
+	key, ok := ring.FreshnessKey()
+	if !ok {
+		return nil, fmt.Errorf("freshness.index is set, but %s has no freshness key; "+
+			"add one with `blindbucket keygen --out %s --add-freshness-key`",
+			cfg.Keys.Keyring, cfg.Keys.Keyring)
+	}
+	retention, err := cfg.Freshness.Retention()
+	if err != nil {
+		return nil, err
+	}
+	secret := key.Secret()
+	defer clear(secret)
+
+	index, err := freshness.Open(freshness.Options{
+		Path:               cfg.Freshness.Index,
+		Key:                secret,
+		TombstoneRetention: retention,
+		SyncEvery:          cfg.Freshness.SyncEvery,
+		Logger:             log,
+	})
+	if err != nil {
+		return nil, err
+	}
+	stats := index.Stats()
+	log.Info("rollback detection is on",
+		"index", cfg.Freshness.Index,
+		"objects", stats.Objects, "tombstones", stats.Tombstones,
+		"note", "objects this index has not seen are trusted the first time they are read")
+	return index, nil
+}
+
+// freshnessStore avoids the typed-nil trap: a (*freshness.Local)(nil) assigned
+// to a freshness.Store interface is not nil, and every guard in the proxy checks
+// the interface against nil.
+func freshnessStore(l *freshness.Local) freshness.Store {
+	if l == nil {
+		return nil
+	}
+	return l
 }
 
 func loadServerKeyring(ctx context.Context, cfg *config.Config, pass *passphraseFlags) (*keys.Keyring, error) {

@@ -30,6 +30,11 @@ const (
 
 	kindPresent   = 1
 	kindTombstone = 2
+	// kindInvalid marks a key the index deliberately knows nothing about, after
+	// an operation changed the object without the gateway learning which write
+	// it produced. It has to be on disk rather than merely absent from the map,
+	// or a replay would bring back the entry it replaced.
+	kindInvalid = 3
 )
 
 // indexInfo derives the key the index actually uses from the keyring's secret.
@@ -246,7 +251,11 @@ func (l *Local) load() error {
 		if when > math.MaxInt64 {
 			when = 0
 		}
-		l.m[h] = entry{tag: t, kind: rec[32], when: int64(when)}
+		if rec[32] == kindInvalid {
+			delete(l.m, h)
+		} else {
+			l.m[h] = entry{tag: t, kind: rec[32], when: int64(when)}
+		}
 		l.records++
 	}
 	return nil
@@ -336,8 +345,35 @@ func (l *Local) Forget(bucket, key string) error {
 	return l.appendLocked(h, Tag{}, kindTombstone)
 }
 
-func (l *Local) appendLocked(h nameHash, tag Tag, kind uint8) error {
-	now := l.now()
+// Invalidate implements Store.
+//
+// It writes no record: the index is rebuilt from the file, so an entry that is
+// dropped from both is simply absent, and absent is exactly the state wanted.
+// The superseded records for this key stay in the file until the next compaction
+// drops them, which is harmless because replay takes the last one and there is
+// no last one for a key with no live entry.
+func (l *Local) Invalidate(bucket, key string) error {
+	h := l.name(bucket, key)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed {
+		return errors.New("freshness: the index is closed")
+	}
+	if _, ok := l.m[h]; !ok {
+		return nil
+	}
+	// A record has to be written even though the map entry is simply removed:
+	// replay reads the file, and without it the entry just dropped would come
+	// back at the next start.
+	delete(l.m, h)
+	if err := l.writeRecordLocked(h, Tag{}, kindInvalid, l.now()); err != nil {
+		return err
+	}
+	return l.maintainLocked()
+}
+
+// writeRecordLocked appends one record and does not touch the map.
+func (l *Local) writeRecordLocked(h nameHash, tag Tag, kind uint8, now int64) error {
 	var rec [recordSize]byte
 	copy(rec[0:16], h[:])
 	copy(rec[16:32], tag[:])
@@ -349,9 +385,30 @@ func (l *Local) appendLocked(h nameHash, tag Tag, kind uint8) error {
 	if _, err := l.f.Write(rec[:]); err != nil {
 		return fmt.Errorf("freshness: appending to the index: %w", err)
 	}
-	l.m[h] = entry{tag: tag, kind: kind, when: now}
 	l.records++
 	l.sinceSync++
+	return nil
+}
+
+func (l *Local) appendLocked(h nameHash, tag Tag, kind uint8) error {
+	now := l.now()
+	if err := l.writeRecordLocked(h, tag, kind, now); err != nil {
+		// The entry is dropped rather than left behind. What is in the map is
+		// the *previous* write of this object, and keeping it would be the
+		// dangerous failure: the object that was just stored would read back as
+		// a rollback of itself, and a full disk would turn good objects
+		// unreadable. Forgetting degrades to trust on first use instead, which
+		// is the direction ADR-018 says to be wrong in.
+		delete(l.m, h)
+		return err
+	}
+	l.m[h] = entry{tag: tag, kind: kind, when: now}
+	return l.maintainLocked()
+}
+
+// maintainLocked syncs on the configured interval and compacts when the file has
+// grown past twice what it needs to hold.
+func (l *Local) maintainLocked() error {
 	if l.sinceSync >= l.syncEvery {
 		if err := l.f.Sync(); err != nil {
 			return fmt.Errorf("freshness: syncing the index: %w", err)

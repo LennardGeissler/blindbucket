@@ -94,13 +94,19 @@ func (p *Proxy) putObject(
 
 	pr, pw := io.Pipe()
 	encDone := make(chan error, 1)
+	// The salt is minted inside the encrypter and is what identifies this write
+	// for ADR-018, so it has to come back out. Same channel handoff UploadPart
+	// already uses for the same reason.
+	saltCh := make(chan [stream.SaltSize]byte, 1)
 	go func() {
 		ew, err := stream.NewEncryptWriter(pw, dek.Bytes(), stream.SegmentParams{Log2ChunkSize: p.log2C})
 		if err != nil {
+			close(saltCh)
 			_ = pw.CloseWithError(err)
 			encDone <- err
 			return
 		}
+		saltCh <- ew.Salt()
 		// A checksum failure surfaces from this copy, before Close. Close writes
 		// the final chunk, so a body that failed verification never becomes a
 		// complete segment and the upstream stores nothing.
@@ -159,6 +165,13 @@ func (p *Proxy) putObject(
 	// provider could report, which describes ciphertext.
 	echoVerifiedChecksums(w.Header(), r.Header, body.Trailer())
 
+	// After the upstream acknowledged, never before: an index entry for a write
+	// that did not land would make the next read of a perfectly good object look
+	// like a rollback.
+	if salt, ok := <-saltCh; ok {
+		p.recordFreshness(req.Bucket, req.Key, saltsOf(salt), log)
+	}
+
 	w.Header().Set("Content-Length", "0")
 	w.WriteHeader(http.StatusOK)
 	p.metrics.Bytes(obs.InPlain, plainLen)
@@ -209,6 +222,11 @@ func (p *Proxy) getObject(w http.ResponseWriter, r *http.Request, req s3api.Requ
 	plainLen, err := stream.OpenedSize(out.ContentLength, meta.Log2ChunkSize)
 	if err != nil {
 		return p.integrityError(log, "ciphertext size", err)
+	}
+
+	// Before the status line, like every other check that can refuse a read.
+	if apiErr := p.checkFreshness(req.Bucket, req.Key, saltsOf(reader.Salt()), log); apiErr != nil {
+		return apiErr
 	}
 
 	copyResponseHeaders(w.Header(), out.Header)
@@ -341,6 +359,17 @@ func (p *Proxy) getObjectRange(
 		return p.integrityError(log, "first chunk", err)
 	}
 
+	// A range must be checked too, or a client that reads by ranges -- which is
+	// every parallel downloader -- would bypass rollback detection entirely.
+	salt, ok := stream.SaltFromHeader(rawHeader)
+	if !ok {
+		return p.integrityError(log, "segment header",
+			errors.New("the segment header is too short to carry a salt"))
+	}
+	if apiErr := p.checkFreshness(req.Bucket, req.Key, saltsOf(salt), log); apiErr != nil {
+		return apiErr
+	}
+
 	copyResponseHeaders(w.Header(), out.Header)
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, plainLen))
@@ -440,6 +469,12 @@ func (p *Proxy) deleteObject(
 	}
 
 	p.at(hookDelManifest, req)
+
+	// A tombstone, not a dropped entry: an index that simply forgot would let a
+	// provider ignore this delete and keep serving the object with nothing to
+	// disagree.
+	p.forgetFreshness(req.Bucket, req.Key, log)
+
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }

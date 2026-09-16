@@ -398,6 +398,12 @@ func (p *Proxy) completeMultipartUpload(
 	}
 	p.at(hookUpComplete, req)
 
+	// The object is visible, so the write it is can be written down. After the
+	// acknowledgement for the reason PutObject records after its own: an index
+	// entry for a completion that failed would make the next read of whatever is
+	// actually there look like a rollback.
+	p.recordFreshness(req.Bucket, req.Key, manifestSalts(m), log)
+
 	// Step 5: and only now, the manifest of the version just replaced. Best
 	// effort -- a failure here leaves an orphan for gc, which is harmless,
 	// whereas retrying in the request would delay a completed upload.

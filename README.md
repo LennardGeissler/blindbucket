@@ -475,7 +475,7 @@ the gateway already costs per request.
 | — | `CopyObject` and `UploadPartCopy`, deferred from M5 | **done** |
 | — | Vault Transit and AWS KMS as root-key sources, deferred from M5 | **done** |
 | — | Cryptographically verifiable audit log, hash-chained and signed | **done** |
-| M6 | Stretch: name encryption, presigned URLs, rollback protection | name encryption **done**; the rest open |
+| M6 | Stretch: name encryption, presigned URLs, rollback protection | name encryption and rollback detection **done**; presigned URLs open |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
 clients" actually means for anything over 8 MiB. M3.5 existed to get its coordination rules
@@ -487,8 +487,13 @@ AWS credential chain is not used — KMS credentials are configured explicitly
 ([ADR-013](docs/adr/ADR-013-root-key-sources.md)). Object tags are refused rather than
 stored, because the provider would hold them in plaintext
 ([ADR-012](docs/adr/ADR-012-copy-semantics.md)). `ListMultipartUploads` is refused
-permanently and says why. Object-name encryption covers every operation the gateway
-serves, with one bound: a listing is read whole and sorted before any of it is served,
+permanently and says why. Rollback detection is off by default and bounded in three ways
+that are stated rather than implied: the first read of any object is trusted, a copied
+object is trusted once more after the copy, and a tag says *which* write and not *which is
+newer* — so where several instances write the same objects, a peer's write and a
+provider's rollback look the same
+([ADR-018](docs/adr/ADR-018-rollback-detection.md)). Object-name encryption covers every
+operation the gateway serves, with one bound: a listing is read whole and sorted before any of it is served,
 so a prefix beyond `names.max_listing_keys` is refused rather than answered in an order
 that can make a client delete data ([ADR-017](docs/adr/ADR-017-listing-order-under-name-encryption.md)). The audit log is per instance and has no cross-instance
 order, and entries after its last checkpoint are chained but unsigned — both by

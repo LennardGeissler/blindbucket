@@ -60,6 +60,22 @@ func (l *partLayout) checkSalt(i int, got [stream.SaltSize]byte) error {
 	return nil
 }
 
+// salts returns the part salts in part order, for the freshness tag of ADR-018.
+//
+// Empty when the manifest predates BBM2 and records none. Nothing can be said
+// about such an object's identity, and an all-zero salt per part would be a
+// confident wrong answer rather than an absent one.
+func (l *partLayout) salts() [][stream.SaltSize]byte {
+	if !l.hasSalts {
+		return nil
+	}
+	out := make([][stream.SaltSize]byte, len(l.parts))
+	for i := range l.parts {
+		out[i] = l.parts[i].Salt
+	}
+	return out
+}
+
 // newPartLayout computes the geometry of the parts a manifest describes.
 func newPartLayout(parts []manifest.Part, log2C uint8, hasSalts bool) (*partLayout, error) {
 	if len(parts) == 0 {
@@ -459,6 +475,11 @@ func (p *Proxy) getMultipartObject(
 		return p.integrityError(log, "first chunk", err)
 	}
 
+	// Before the status line, like every other check that can refuse a read.
+	if apiErr := p.checkFreshness(req.Bucket, req.Key, layout.salts(), log); apiErr != nil {
+		return apiErr
+	}
+
 	copyResponseHeaders(w.Header(), out.Header)
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Content-Length", strconv.FormatInt(layout.totalPlain, 10))
@@ -563,6 +584,13 @@ func (p *Proxy) getMultipartRange(
 
 	if err := chain.VerifyFirst(); err != nil {
 		return p.integrityError(log, "first chunk", err)
+	}
+
+	// The salts come from the manifest, which is itself bound to bucket, key and
+	// manifest id (FORMAT.md §10.3) -- so an old manifest served with an old
+	// object is a different tag, and this catches the pair.
+	if apiErr := p.checkFreshness(req.Bucket, req.Key, layout.salts(), log); apiErr != nil {
+		return apiErr
 	}
 
 	length := rangeLength(spans)

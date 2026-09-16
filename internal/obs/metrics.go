@@ -35,6 +35,7 @@ const (
 	KindManifest  = "manifest"
 	KindToken     = "token"
 	KindSize      = "size"
+	KindFreshness = "freshness"
 )
 
 // Metrics is the gateway's instrument panel.
