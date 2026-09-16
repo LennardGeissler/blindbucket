@@ -189,10 +189,35 @@ names, which breaks the relationship between `max-keys` and what comes back.
 **Delimiters other than `/`.** The segment structure is built on `/`. A client
 asking for `delimiter=-` cannot be served from the stored layout.
 
-**Key length.** Each segment grows by 16 bytes plus encoding overhead. With
-base32 (case-insensitive, safe in every S3 key) that is roughly 1.6×, so the
-usable key length drops from 1024 bytes to something closer to 600. That is a
-hard limit clients will hit and must be an explicit error, not a truncation.
+**Key length — one number will not do.** Each segment grows by a 16-byte
+synthetic IV and then by base32's 1.6×. This section first quoted the 1.6× alone
+and put the usable key length near 600 bytes, which is the *best* case rather
+than the case: the IV is charged per **segment**, so the expansion is driven by
+how many segments a key has and not by how long it is.
+
+Measured by `BenchmarkKeyExpansion`, as the longest plaintext key of each shape
+that still encrypts to a legal 1024-byte S3 key:
+
+| Key shape | Longest plaintext key | Expansion |
+|---|---:|---:|
+| one long segment | 624 B | 1.64× |
+| realistic tree, long leaf (`photos/2026/03/14/…`) | 560 B | 1.83× |
+| segments of 8 | 214 B | 4.79× |
+| segments of 4 | 128 B | 8.00× |
+
+So 600 bytes was right for a key that is one long segment, and wrong by a factor
+of nearly five for a deep path of short ones. The usable length is somewhere
+between **128 and 624 bytes**, and which end a deployment gets is a property of
+its naming convention rather than of this design.
+
+A separate figure, for storage overhead rather than for the limit: over keys of
+typical length and depth — mean 34.4 bytes, `BenchmarkMeanKeyLength` — the mean
+expansion is 5.3×, because short segments pay the full 16-byte IV each. Those
+keys are nowhere near the limit; the two numbers answer different questions and
+should not be quoted for each other.
+
+The limit is hard, clients will hit it, and it must be an explicit error rather
+than a truncation.
 
 **Migration.** Objects already stored under cleartext names stay that way; the
 gateway would have to read both. Switching a bucket over means rewriting every

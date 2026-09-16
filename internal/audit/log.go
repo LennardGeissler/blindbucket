@@ -569,10 +569,17 @@ func (n *nameCoder) encode(bucket, key string) (string, string, error) {
 // encrypt.
 //
 // The fallback exists because S3 allows a 1024-byte key while the per-segment
-// encryption of ADR-015 grows one by roughly 1.6x, so a legal key can have no
+// encryption of ADR-015 grows one past that, so a legal key can have no
 // encrypted form that is itself a legal key. Refusing to log such a request
 // would let a client silence the audit log by choosing a long enough name, which
 // is worse than logging a name that cannot be read back.
+//
+// Where the threshold sits depends on the key's shape rather than on one
+// multiplier: 624 bytes for a key that is one long segment, 128 for a path of
+// four-character segments, because the 16-byte IV is charged per segment. Deep
+// paths therefore reach the digest much earlier than the flat 1.6x this comment
+// used to quote would suggest. BenchmarkKeyExpansion measures it; ADR-017
+// records why the old figure was wrong.
 func (n *nameCoder) encodeOne(name string) (string, error) {
 	if name == "" {
 		return "", nil

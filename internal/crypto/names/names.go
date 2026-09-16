@@ -74,8 +74,15 @@ const (
 // case-insensitive filesystem, an S3 gateway over SMB -- would then map two
 // distinct objects onto one key and lose one of them. Base32's alphabet has no
 // case pairs, so the mapping survives a case-folding store. It costs about 1.6x
-// in length against 1.33x, which is why ADR-015 puts the usable key length at
-// roughly 600 bytes rather than 1024.
+// in length against base64url's 1.33x.
+//
+// That 1.6x is the encoding alone, and it is not the expansion a key sees. Each
+// segment also carries a 16-byte synthetic IV, so what drives the total is the
+// number of segments rather than the length: a key that is one long segment
+// expands 1.64x and may be 624 bytes, while a path of four-character segments
+// expands 8x and may be 128. BenchmarkKeyExpansion measures the four shapes; an
+// earlier version of ADR-015 quoted only the 1.6x and so named the best case as
+// though it were the rule.
 var encoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
 // ErrName reports a stored key this keyring did not produce: not valid base32,
