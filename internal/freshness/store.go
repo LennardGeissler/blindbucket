@@ -51,8 +51,9 @@ var (
 	ErrDeleted = errors.New("freshness: this key was deleted and the provider produced an object anyway")
 )
 
-// Stats describes what an index is holding, for the metrics endpoint and for
-// `blindbucket freshness`.
+// Stats describes what an index is holding. The gateway prints it at startup,
+// which is where an operator sees the object count the memory cost of ADR-018 is
+// proportional to.
 type Stats struct {
 	// Objects and Tombstones are live entries. Objects is the number the memory
 	// cost of ADR-018 is proportional to.
