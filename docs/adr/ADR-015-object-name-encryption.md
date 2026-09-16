@@ -1,9 +1,9 @@
 # ADR-015 — Object name encryption: deterministic, per path segment
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-12
 **Milestone:** M6
-**Would implement:** `internal/crypto/names`, `internal/proxy` (every operation), `internal/manifest`
+**Implements:** `internal/crypto/names`, `internal/proxy` (every operation), `internal/rotate`, `internal/objcopy`
 
 ## Context
 

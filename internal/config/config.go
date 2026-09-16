@@ -198,6 +198,23 @@ type Names struct {
 	// key; a gateway configured this way against a keyring without one refuses
 	// to start rather than serving with names in clear.
 	Encrypt bool `yaml:"encrypt"`
+
+	// MaxListingKeys bounds how many keys one listing will sort at once.
+	//
+	// The provider orders by the encrypted key, so a listing is only in the
+	// client's order once its whole prefix has been read -- and the client waits
+	// on every one of those round trips. The bound therefore comes from a
+	// latency budget rather than a memory one: 100 000 keys is about 2.3 seconds
+	// to the first page against a same-region provider and 20 MiB held while it
+	// happens. A prefix past the bound is refused rather than served in an order
+	// the client cannot use. Zero means the default. See ADR-017.
+	MaxListingKeys int `yaml:"max_listing_keys"`
+
+	// MaxConcurrentListings bounds how many of those run at once, because the
+	// memory is per listing in flight rather than per gateway: the bound above
+	// at 64 clients would be 1.27 GiB. Listings past it wait. Zero means the
+	// default.
+	MaxConcurrentListings int `yaml:"max_concurrent_listings"`
 }
 
 // Crypto configures the segment format.

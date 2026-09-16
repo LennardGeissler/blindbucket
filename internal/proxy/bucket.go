@@ -25,50 +25,22 @@ const maxDeleteBody = 2 << 20
 // authenticated in any case, which docs/THREAT_MODEL.md states plainly. The
 // authenticated size is established when an object is actually read.
 func (p *Proxy) listObjects(w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger) *s3api.Error {
-	query := r.URL.Query()
+	// With names encrypted the provider orders by a key the client never chose,
+	// so a listing cannot be forwarded and patched up -- it has to be read whole
+	// and sorted. That is a different shape of request and lives on its own.
 	if p.names != nil {
-		translated, apiErr := p.encryptedListingQuery(query)
-		if apiErr != nil {
-			return apiErr
-		}
-		query = translated
+		return p.serveEncryptedListing(w, r, req, log)
 	}
 
-	result, err := p.upstream.ListObjects(r.Context(), req.Bucket, query)
+	result, err := p.upstream.ListObjects(r.Context(), req.Bucket, r.URL.Query())
 	if err != nil {
 		return translateUpstream(err)
-	}
-
-	// Names come back as the provider stores them, so they are turned back into
-	// the client's -- and put into the client's order -- before anything else
-	// reads them. Reserved-prefix filtering happens in there too, because it has
-	// to run against the stored key.
-	if p.names != nil {
-		if apiErr := p.decryptListing(result, r.URL.Query(), log); apiErr != nil {
-			return apiErr
-		}
 	}
 
 	kept := make([]upstream.ObjectEntry, 0, len(result.Contents))
 	for _, entry := range result.Contents {
 		if strings.HasPrefix(entry.Key, s3api.ReservedPrefix) {
 			continue
-		}
-		// A multipart object needs its part count, and the ETag suffix S3 appends
-		// is where a listing can get one -- there is no per-object metadata here
-		// to read a manifest id from. See docs/FORMAT.md section 7.2.
-		segments := int64(1)
-		if count, ok := partCountFromETag(entry.ETag); ok {
-			segments = count
-		}
-		if plain, err := stream.OpenedSizeSegments(entry.Size, p.log2C, segments); err == nil {
-			entry.Size = plain
-		} else {
-			// Not a size this format produces at the configured chunk size: a
-			// foreign object, or one written under a different setting. Its own
-			// size is a better answer than a wrong conversion.
-			log.Debug("listing size left unconverted",
-				"key", entry.Key, "size", entry.Size, "segments", segments)
 		}
 		kept = append(kept, entry)
 	}
@@ -82,6 +54,7 @@ func (p *Proxy) listObjects(w http.ResponseWriter, r *http.Request, req s3api.Re
 		prefixes = append(prefixes, cp)
 	}
 	result.CommonPrefixes = prefixes
+	p.convertListedSizes(result, log)
 
 	// Filtering can leave a page with fewer entries than MaxKeys, or none at
 	// all, while IsTruncated stays true. That is S3-conformant -- a client must
@@ -92,6 +65,36 @@ func (p *Proxy) listObjects(w http.ResponseWriter, r *http.Request, req s3api.Re
 	}
 
 	return writeXML(w, http.StatusOK, result)
+}
+
+// convertListedSizes rewrites the ciphertext sizes a listing reports into
+// plaintext ones.
+//
+// The conversion uses the configured chunk size, because a listing carries no
+// per-object metadata to read one from. That makes the sizes a hint: they are
+// right for every object this deployment wrote, and they are not authenticated
+// in any case, which docs/THREAT_MODEL.md states plainly. The authenticated size
+// is established when an object is actually read.
+func (p *Proxy) convertListedSizes(result *upstream.ListBucketResult, log *slog.Logger) {
+	for i, entry := range result.Contents {
+		// A multipart object needs its part count, and the ETag suffix S3 appends
+		// is where a listing can get one -- there is no per-object metadata here
+		// to read a manifest id from. See docs/FORMAT.md section 7.2.
+		segments := int64(1)
+		if count, ok := partCountFromETag(entry.ETag); ok {
+			segments = count
+		}
+		plain, err := stream.OpenedSizeSegments(entry.Size, p.log2C, segments)
+		if err != nil {
+			// Not a size this format produces at the configured chunk size: a
+			// foreign object, or one written under a different setting. Its own
+			// size is a better answer than a wrong conversion.
+			log.Debug("listing size left unconverted",
+				"key", entry.Key, "size", entry.Size, "segments", segments)
+			continue
+		}
+		result.Contents[i].Size = plain
+	}
 }
 
 // touchesReservedPrefix reports whether a common prefix would reveal the

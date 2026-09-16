@@ -1,11 +1,11 @@
 package proxy
 
 import (
+	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"net/url"
-	"slices"
-	"strings"
 
 	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
 	"github.com/LennardGeissler/blindbucket/internal/s3api"
@@ -83,128 +83,145 @@ func (p *Proxy) nameEncryptionGate(op s3api.Operation) *s3api.Error {
 			"encryption is on. See ADR-015 and ADR-017.", op)
 }
 
-// encryptedListingQuery rewrites a client's listing query for the provider, or
-// refuses a shape this tier cannot serve correctly.
+// serveEncryptedListing answers a listing when object names are encrypted.
 //
-// ADR-017 serves listings in three tiers, of which this is the first: a prefix
-// whose whole result fits in one upstream page is decrypted and sorted in place,
-// which is free, exactly correct, and the overwhelmingly common listing. The
-// buffered tier and its bound are not built yet, so everything that would need
-// them is refused here rather than answered in an order the client cannot use.
+// The provider orders by the stored key, so nothing can be served until the
+// whole prefix has been read, decrypted and sorted -- ADR-017 measured what an
+// unsorted listing does to a client, and it is delete objects that exist. What
+// is served from that sorted prefix is then ordinary S3 paging.
 //
-// The separators survive encryption, so a delimiter of "/" groups at exactly the
-// segment boundaries it would have grouped at in plaintext, and the provider's
-// own grouping can be reused rather than reimplemented.
-func (p *Proxy) encryptedListingQuery(query url.Values) (url.Values, *s3api.Error) {
-	// Pagination in means pagination out, and a page of an encrypted listing is
-	// only correct once the whole prefix has been sorted -- which is the tier
-	// that does not exist yet.
-	for _, param := range []string{"continuation-token", "marker", "start-after"} {
-		if query.Get(param) != "" {
-			return nil, s3api.ErrNotImplemented.WithMessage(
-				"%s is not available while object-name encryption is on: a page of an "+
-					"encrypted listing is only in the client's order once the whole "+
-					"prefix has been read and sorted, and that tier is not built yet "+
-					"(ADR-017)", param)
-		}
-	}
-	if d := query.Get("delimiter"); d != "" && d != "/" {
-		return nil, s3api.ErrNotImplemented.WithMessage(
+// The resume state is one string, the last key already served, which the client
+// hands back as a continuation token, a marker or start-after depending on which
+// listing it is using. Nothing is kept on the gateway that an answer depends on;
+// listbuffer.go has why that matters.
+func (p *Proxy) serveEncryptedListing(
+	w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger,
+) *s3api.Error {
+	query := r.URL.Query()
+	v2 := req.Op == s3api.OpListObjectsV2
+
+	delimiter := query.Get("delimiter")
+	if delimiter != "" && delimiter != "/" {
+		return s3api.ErrNotImplemented.WithMessage(
 			"delimiter=%q is not available while object-name encryption is on: the "+
 				"stored layout is built on '/', which is the one separator that "+
-				"survives encryption, so no other delimiter can be served from it", d)
-	}
-
-	out := make(url.Values, len(query))
-	for k, v := range query {
-		out[k] = v
+				"survives encryption, so no other delimiter can be served from it",
+			delimiter)
 	}
 
 	prefix := query.Get("prefix")
-	stored, whole, err := p.names.EncryptPrefix(prefix)
+	storedPrefix, whole, err := p.names.EncryptPrefix(prefix)
 	if err != nil {
-		return nil, s3api.ErrInternal
+		return s3api.ErrInternal
 	}
 	if !whole {
 		// "photos/2026" against a segment "2026-01": a partial segment has no
 		// encrypted form that is a prefix of anything. Serving it means listing
 		// the parent and filtering on decrypted names, which changes what
-		// max-keys counts -- its own decision, not this tier's.
-		return nil, s3api.ErrNotImplemented.WithMessage(
+		// max-keys counts -- its own decision, and not one this makes.
+		return s3api.ErrNotImplemented.WithMessage(
 			"prefix=%q does not end on a '/' boundary, and while object-name "+
 				"encryption is on a prefix must: encryption is per path segment, so a "+
 				"partial segment has no encrypted form to match against (ADR-015)", prefix)
 	}
-	if stored == "" {
-		out.Del("prefix")
-	} else {
-		out.Set("prefix", stored)
+
+	maxKeys, apiErr := listingMaxKeys(query)
+	if apiErr != nil {
+		return apiErr
 	}
-	return out, nil
+	after, apiErr := listingCursor(query, v2)
+	if apiErr != nil {
+		return apiErr
+	}
+	// Only an opaque token this gateway minted marks a continuation. A marker or
+	// start-after the client chose is a fresh listing that happens to begin in
+	// the middle, and it must see everything written up to now.
+	continuing := v2 && query.Get("continuation-token") != ""
+
+	rows, apiErr := p.sortedPrefix(
+		r.Context(), req.Bucket, prefix, storedPrefix, delimiter, continuing, log)
+	if apiErr != nil {
+		return apiErr
+	}
+
+	result := &upstream.ListBucketResult{
+		Xmlns: s3ListXmlns, Name: req.Bucket, Prefix: prefix, Delimiter: delimiter,
+	}
+	if v2 {
+		result.ContinuationToken = query.Get("continuation-token")
+		result.StartAfter = query.Get("start-after")
+	} else {
+		result.Marker = query.Get("marker")
+	}
+	servePage(result, rows, after, maxKeys, v2)
+	p.convertListedSizes(result, log)
+	if v2 {
+		result.KeyCount = len(result.Contents) + len(result.CommonPrefixes)
+	}
+	return writeXML(w, http.StatusOK, result)
 }
 
-// decryptListing turns a provider's answer back into the client's names, in the
-// client's order.
+// sortedPrefix returns the whole prefix in the client's order, reading it from
+// the provider unless this is the continuation of a listing already in progress.
 //
-// The reserved prefix is filtered before anything is decrypted: the gateway's
-// own objects are stored under unencrypted keys, so feeding one to the decrypter
-// would fail on an object that was never encrypted in the first place.
-func (p *Proxy) decryptListing(
-	result *upstream.ListBucketResult, query url.Values, log *slog.Logger,
-) *s3api.Error {
-	if result.IsTruncated {
-		return s3api.ErrNotImplemented.WithMessage(
-			"this prefix is larger than one page, and while object-name encryption is " +
-				"on the gateway can only serve a listing it can sort whole: the " +
-				"provider orders by the encrypted key, so a partial answer would " +
-				"reach the client in an arbitrary order -- which makes some clients " +
-				"delete objects that exist. Narrow the prefix, or raise max-keys " +
-				"enough for the whole prefix to come back at once (ADR-017)")
+// **A first page is never served from the cache.** S3 has been strongly
+// read-after-write consistent since 2020 and clients lean on it hard: `aws s3
+// sync` lists the destination before it uploads anything, and if that listing
+// were served again afterwards from a snapshot taken before the writes, the next
+// sync would see an empty prefix and upload everything twice. Found exactly that
+// way, with the real client.
+//
+// A *continuation* is different, and caching one is not merely safe but more
+// correct: S3 does not promise that keys written during a paginated listing
+// appear in it, so serving every page of one walk from the snapshot the first
+// page took is the behaviour a client expects. That is also the only place the
+// cache was ever worth having, since it is what turns an n-page walk from
+// n prefix reads into one.
+//
+// The semaphore is taken only around a read, because that is what holds the
+// memory. A cache hit costs nothing and does not queue.
+func (p *Proxy) sortedPrefix(
+	ctx context.Context, bucket, prefix, storedPrefix, delimiter string,
+	continuing bool, log *slog.Logger,
+) ([]listingRow, *s3api.Error) {
+	if continuing {
+		if rows, ok := p.listCache.get(bucket, prefix, delimiter); ok {
+			return rows, nil
+		}
+	}
+	select {
+	case p.listings <- struct{}{}:
+		defer func() { <-p.listings }()
+	case <-ctx.Done():
+		return nil, s3api.ErrInternal
+	}
+	// Another page of the same walk may have filled it while this one queued.
+	if continuing {
+		if rows, ok := p.listCache.get(bucket, prefix, delimiter); ok {
+			return rows, nil
+		}
 	}
 
-	kept := make([]upstream.ObjectEntry, 0, len(result.Contents))
-	for _, entry := range result.Contents {
-		if strings.HasPrefix(entry.Key, s3api.ReservedPrefix) {
-			continue
-		}
-		plain, err := p.names.DecryptKey(entry.Key)
-		if err != nil {
-			// Something in the bucket this keyring did not write. GetObject
-			// answers ObjectNotEncrypted for the same case; a listing has no
-			// way to present a name it cannot read, so it leaves it out.
-			log.Warn("a stored key in this listing is not one this keyring produced",
-				"err", err)
-			continue
-		}
-		entry.Key = plain
-		kept = append(kept, entry)
+	rows, apiErr := p.bufferPrefix(ctx, bucket, storedPrefix, delimiter, log)
+	if apiErr != nil {
+		return nil, apiErr
 	}
-	result.Contents = kept
+	p.listCache.put(bucket, prefix, delimiter, rows)
+	return rows, nil
+}
 
-	prefixes := make([]upstream.CommonPrefix, 0, len(result.CommonPrefixes))
-	for _, cp := range result.CommonPrefixes {
-		plain, err := p.names.DecryptKey(strings.TrimSuffix(cp.Prefix, "/"))
-		if err != nil {
-			log.Warn("a common prefix in this listing is not one this keyring produced",
-				"err", err)
-			continue
+// listingCursor reads the resume point out of whichever parameter this listing
+// version spells it with.
+//
+// v1's marker and v2's start-after are plaintext object keys, which is exactly
+// what the cursor is, so they are honoured directly. v2's continuation-token is
+// opaque and minted here, so it carries the same key encoded.
+func listingCursor(query url.Values, v2 bool) (string, *s3api.Error) {
+	if v2 {
+		if token := query.Get("continuation-token"); token != "" {
+			return decodeCursor(token)
 		}
-		prefixes = append(prefixes, upstream.CommonPrefix{Prefix: plain + "/"})
+		return query.Get("start-after"), nil
 	}
-	result.CommonPrefixes = prefixes
-
-	// The point of the exercise. Encrypted names sort differently from plaintext
-	// ones, and a listing that reaches a client out of order makes `aws s3 sync
-	// --delete` delete objects that exist -- measured in ADR-017.
-	slices.SortFunc(result.Contents, func(a, b upstream.ObjectEntry) int {
-		return strings.Compare(a.Key, b.Key)
-	})
-	slices.SortFunc(result.CommonPrefixes, func(a, b upstream.CommonPrefix) int {
-		return strings.Compare(a.Prefix, b.Prefix)
-	})
-
-	// The provider echoed the encrypted prefix back; the client asked with its
-	// own and must see its own.
-	result.Prefix = query.Get("prefix")
-	return nil
+	return query.Get("marker"), nil
 }

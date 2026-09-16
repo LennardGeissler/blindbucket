@@ -14,6 +14,38 @@ version 1 would keep being readable.
 
 ### Added
 
+**Listings under name encryption are paginated, which finishes M6's name
+encryption.** The provider orders by the encrypted key, so a prefix is read
+whole, decrypted and sorted before any of it is served; pages are then cut out of
+that. `names.max_listing_keys` bounds it (default 100 000, about 2.3 seconds to
+the first page against a same-region provider) and
+`names.max_concurrent_listings` bounds how many run at once, because the memory
+is per listing in flight. A prefix past the bound is refused with an error naming
+the limit.
+
+**[ADR-017](docs/adr/ADR-017-listing-order-under-name-encryption.md) was wrong
+about needing server state, and says so.** It expected a cache keyed by
+continuation token, and called that the gateway's first server-side state against
+[ADR-006](docs/adr/ADR-006-upload-token.md)'s deliberate statelessness. Building
+it showed the state is not needed: S3's own pagination parameters already carry
+the whole resume point. v1's `marker` and v2's `start-after` are plaintext keys,
+and v2's `continuation-token` is opaque but minted here, so it carries the same
+one. The resume state of an encrypted listing is a single string the client
+holds, and any instance can answer any page with no prior knowledge.
+
+**A cache remains, and never answers a first page.** That is a correctness rule,
+not tuning, and it was learned the hard way: `aws s3 sync` lists its destination
+*before* uploading, and the first build served that empty listing again
+afterwards, so the next sync saw an empty prefix and uploaded everything twice.
+S3 has been strongly read-after-write consistent since 2020 and clients lean on
+it. A *continuation* is the opposite case — S3 makes no promise that keys written
+mid-walk appear in it — so serving every page of one walk from its own snapshot
+is what a client expects. Both halves have a test, each checked by putting the
+bug back.
+
+ADR-015 and ADR-017 are now **Accepted**: name encryption went from a primitive
+nothing called to something every operation goes through.
+
 **Object-name encryption now covers every operation the gateway serves.**
 Multipart -- create, upload, complete, abort, list parts -- and both copy paths,
 plus tagging and bulk delete. A 40 MiB file round-trips through the AWS CLI with

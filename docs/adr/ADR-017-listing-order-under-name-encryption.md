@@ -1,6 +1,6 @@
 # ADR-017 — Listing order under name encryption: buffer and sort, bounded, or refuse
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-16
 **Milestone:** M6
 **Would implement:** `internal/proxy` (`listObjects`), `internal/config`
@@ -91,22 +91,24 @@ A bound on the prefix is therefore not by itself a bound on the gateway.
 
 ## Decision
 
-### Three tiers, because most listings are cheap
+### Read the prefix whole, sort it, serve pages out of it — or refuse
 
-**A prefix that fits in one upstream page is sorted in place.** If the provider
-answers with `IsTruncated: false`, the gateway holds the complete answer already:
-decrypt, sort, serve. No buffering beyond the page it was always going to hold,
-no extra round trip, no state. This is the overwhelmingly common listing, and it
-is exactly correct at zero cost — which is the single most important consequence
-of the measurements above, because it means the expensive machinery is reached
-only by prefixes that paginate.
+**Up to a configured bound, a prefix is read whole.** Page through it upstream at
+the provider's maximum, decrypt each key, sort by plaintext, and cut the client's
+page out of the result. The client's own page size has nothing to do with how
+many upstream requests this takes, so it does not drive them.
 
-**A prefix that paginates, up to a configured bound, is buffered.** Page through
-it upstream, decrypt each key, sort by plaintext, serve pages from the result.
+**Beyond the bound, refuse**, with an S3 error naming the limit, rather than
+serve in the wrong order. The failure is loud, it names its cause, and it cannot
+silently delete anything.
 
-**A prefix beyond the bound is refused**, with an S3 error naming the limit and
-the prefix, rather than served in the wrong order. The failure is loud, it names
-its cause, and it cannot silently delete anything.
+This was drafted as three tiers, with a prefix that fits in one upstream page
+handled separately and described as the important case. It collapsed to two on
+contact with the code, and the separate path was not worth having: a prefix that
+fits in one page is already the loop above terminating after one request, so the
+"cheap tier" is what the general one does anyway. Two code paths where one will
+do is two places for a listing to be subtly wrong, and this is a listing — being
+subtly wrong here is what deletes data.
 
 ### The bound is chosen from latency, not from memory
 
@@ -125,26 +127,44 @@ A second, independent bound caps **concurrent buffered listings**, because the
 table above shows the per-prefix bound does not constrain the process. Listings
 beyond it wait rather than allocate.
 
-### Buffered listings need state, and that is new
+### Buffered listings need no state after all
 
-Serving page two of a buffered listing means having the sorted result. Two ways,
-and neither is free:
+This section originally said the sorted result had to be **cached, keyed by the
+continuation token**, and called that the gateway's first server-side state,
+against [ADR-006](ADR-006-upload-token.md) having gone to the trouble of a sealed
+upload token to avoid exactly that.
 
-Re-buffering per page is the rejected alternative below — it turns a full walk
-into `O(n²/1000)` upstream round trips. So the sorted result is **cached, keyed
-by the continuation token**, with a TTL.
+Writing it showed the state is not needed. S3's own pagination parameters are
+already "resume after this key": v1's `marker` and v2's `start-after` are
+plaintext object keys, and v2's `continuation-token` is opaque but minted by this
+gateway, so it can carry the same thing. **The entire resume state of an
+encrypted listing is one string — the last key already served — and the client
+holds it.**
 
-That makes listing the first stateful thing in the gateway, against a design
-whose statelessness is deliberate — [ADR-006](ADR-006-upload-token.md) went to
-the trouble of an encrypted upload token precisely to avoid server state. The
-difference is that this state is a *cache*: a miss is correct, merely slow, so a
-restart or a second instance re-buffers and answers correctly. The upload token
-could not be a cache, because a miss there would lose an upload. Stating the
-distinction is what keeps the two decisions consistent rather than contradictory.
+So any instance can answer any page with no prior knowledge: buffer the prefix,
+sort, skip past the cursor, serve. Statelessness is preserved, and the
+multi-instance case costs a re-read rather than a wrong answer.
 
-The multi-instance case follows: a client whose next page lands on another
-instance pays for a re-buffer. Correct, bounded by the same limit, and worth
-measuring before it is called acceptable.
+A cache remains, but purely as an optimisation: it turns an *n*-page walk from
+*n* prefix reads into one. It is never consulted for a first page, and that is a
+correctness rule rather than a tuning choice —
+
+**Read-after-write consistency is the constraint.** S3 has been strongly
+read-after-write consistent since 2020 and clients lean on it hard. `aws s3 sync`
+lists its destination *before* it uploads anything; serve that empty listing
+again from a snapshot afterwards and the next sync sees an empty prefix and
+uploads everything twice. That was measured, not predicted — it is what the first
+build of this tier did against the real client.
+
+A *continuation* is the opposite case, and caching one is not merely safe but
+more correct: S3 makes no promise that keys written during a paginated listing
+appear in it, so serving every page of one walk from the snapshot its first page
+took is the behaviour a client expects. So: a first page always reads, a
+continuation may be served from the snapshot its walk began with.
+
+The cache is therefore not state an answer depends on, which is what keeps this
+decision and ADR-006 consistent rather than contradictory. The upload token could
+not have been a cache, because a miss there would lose an upload.
 
 ## Alternatives considered
 
@@ -153,8 +173,13 @@ Bounded memory and no state, which is why ADR-015 kept it on the list. Rejected
 on arithmetic: each page must re-list the whole prefix to find what follows a
 given plaintext key, so a full walk of a million objects is 1000 pages × 1000
 round trips = **10⁶ upstream requests** where the buffered design makes 10³. At
-the 20 ms round trip above, that is five and a half hours. It solves the memory problem by
-making the feature unusable.
+the 20 ms round trip above, that is five and a half hours. It solves the memory
+problem by making the feature unusable.
+
+Worth noting after the fact: the shipped design *is* this one whenever the cache
+misses, because the cursor really is the last plaintext key. What was rejected is
+re-scanning as the only mechanism, not the cursor — which turned out to be the
+thing that made the state below unnecessary.
 
 **Buffer with no bound at all.** Rejected: the 1M row is not a hypothetical, and
 an unbounded buffer turns one client's large prefix into the gateway's memory
@@ -182,9 +207,9 @@ for sorted data is close to leaking the names.
   measurements above rather than as round numbers.
 - A new S3 error for a prefix past the bound, and a row in
   `docs/COMPATIBILITY.md` describing it as a real limit rather than a caveat.
-- A listing cache with a TTL, which is the gateway's first server-side state, and
-  the first thing a second instance can miss. Its hit rate under a paging client
-  is worth a metric.
+- A listing cache with a TTL. Not state an answer depends on, since a miss
+  re-reads and returns the same thing, and never consulted for a first page. Its
+  hit rate under a paging client is worth a metric.
 - `blindbucket_listing_buffered_keys` and a refusal counter, because a bound
   nobody can see being approached is a bound that will be discovered in
   production.

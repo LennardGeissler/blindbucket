@@ -475,7 +475,7 @@ the gateway already costs per request.
 | — | `CopyObject` and `UploadPartCopy`, deferred from M5 | **done** |
 | — | Vault Transit and AWS KMS as root-key sources, deferred from M5 | **done** |
 | — | Cryptographically verifiable audit log, hash-chained and signed | **done**, unreleased |
-| M6 | Stretch: name encryption, presigned URLs, rollback protection | **in progress** |
+| M6 | Stretch: name encryption, presigned URLs, rollback protection | name encryption **done**; the rest open |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
 clients" actually means for anything over 8 MiB. M3.5 existed to get its coordination rules
@@ -487,12 +487,10 @@ AWS credential chain is not used — KMS credentials are configured explicitly
 ([ADR-013](docs/adr/ADR-013-root-key-sources.md)). Object tags are refused rather than
 stored, because the provider would hold them in plaintext
 ([ADR-012](docs/adr/ADR-012-copy-semantics.md)). `ListMultipartUploads` is refused
-permanently and says why. Object-name encryption now covers every operation the gateway
-serves, but only the first of the three listing tiers in
-[ADR-017](docs/adr/ADR-017-listing-order-under-name-encryption.md): a prefix that comes
-back in one page is decrypted and sorted, and one that does not is refused rather than
-served in an order that can make a client delete data. The buffered tier is the open
-half. The audit log is per instance and has no cross-instance
+permanently and says why. Object-name encryption covers every operation the gateway
+serves, with one bound: a listing is read whole and sorted before any of it is served,
+so a prefix beyond `names.max_listing_keys` is refused rather than answered in an order
+that can make a client delete data ([ADR-017](docs/adr/ADR-017-listing-order-under-name-encryption.md)). The audit log is per instance and has no cross-instance
 order, and entries after its last checkpoint are chained but unsigned — both by
 design, both in [ADR-016](docs/adr/ADR-016-audit-log.md). And one benchmark cell is
 documented as the provider's behaviour rather than explained; the gateway's share of it is

@@ -135,16 +135,18 @@ Flags:
 	}
 
 	handler, err := proxy.New(proxy.Config{
-		Upstream:        client,
-		Keys:            ring,
-		Verifier:        verifier,
-		BaseDomain:      cfg.Server.BaseDomain,
-		Log2ChunkSize:   cfg.Crypto.Log2ChunkSize,
-		Logger:          log,
-		Metrics:         metrics,
-		Names:           nameEnc,
-		Audit:           auditLog,
-		AuditFailClosed: cfg.Audit.FailClosed,
+		Upstream:              client,
+		Keys:                  ring,
+		Verifier:              verifier,
+		BaseDomain:            cfg.Server.BaseDomain,
+		Log2ChunkSize:         cfg.Crypto.Log2ChunkSize,
+		Logger:                log,
+		Metrics:               metrics,
+		Names:                 nameEnc,
+		MaxListingKeys:        cfg.Names.MaxListingKeys,
+		MaxConcurrentListings: cfg.Names.MaxConcurrentListings,
+		Audit:                 auditLog,
+		AuditFailClosed:       cfg.Audit.FailClosed,
 	})
 	if err != nil {
 		return err

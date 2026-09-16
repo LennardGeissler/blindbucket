@@ -77,13 +77,16 @@ crypto:
 # under it.
 #
 # Every operation the gateway serves works with this on, multipart and both copy
-# paths included. The one remaining limit is which listings can be answered.
+# paths included.
 #
-# A listing is served when its whole result comes back in one page, which the
-# gateway then decrypts and sorts -- the provider orders by the stored key, and an
-# unsorted listing makes `aws s3 sync --delete` delete objects that exist. A
-# prefix larger than one page is refused rather than answered in an order the
-# client cannot use; raise max-keys or narrow the prefix (ADR-017).
+# Listings are read whole, sorted and then paged, because the provider orders by
+# the stored key and an unsorted listing makes `aws s3 sync --delete` delete
+# objects that exist. That is why there is a bound: the client waits on every
+# upstream round trip the sort needs, so the limit comes from a latency budget
+# rather than a memory one. A prefix past it is refused rather than answered in an
+# order the client cannot use (ADR-017).
+#   max_listing_keys: 100000         # ~2.3 s to the first page in-region, ~20 MiB
+#   max_concurrent_listings: 8       # the memory is per listing in flight
 # names:
 #   encrypt: true
 

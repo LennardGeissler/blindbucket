@@ -7,6 +7,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -270,33 +271,28 @@ func TestEncryptedListingGroupsOnDelimiter(t *testing.T) {
 	}
 }
 
-// TestEncryptedListingRefusesWhatItCannotSort covers the shapes this tier hands
-// back an error for instead of an answer the client cannot use.
+// TestEncryptedListingRefusesWhatItCannotSort covers the two shapes that stay
+// refused, because they are the ones no amount of buffering answers.
 func TestEncryptedListingRefusesWhatItCannotSort(t *testing.T) {
 	option, enc := withEncryptedNames(t)
 	h := newHarness(t, option)
 	ctx := context.Background()
 
 	for _, key := range []string{"many/a.txt", "many/b.txt", "many/c.txt"} {
-		s, err := enc.EncryptKey(key)
+		stored, err := enc.EncryptKey(key)
 		if err != nil {
 			t.Fatalf("EncryptKey: %v", err)
 		}
 		resp := h.put(t, key, []byte("x"), nil)
 		_ = resp.Body.Close()
-		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, s) })
+		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
 	}
 
-	for _, tc := range []struct {
-		name, query, wants string
-	}{
-		{"a truncated prefix", "list-type=2&prefix=many/&max-keys=2", "larger than one page"},
+	for _, tc := range []struct{ name, query, wants string }{
 		// The substrings avoid apostrophes on purpose: the message is XML-escaped
 		// by the time it reaches the client.
 		{"a partial segment", "list-type=2&prefix=man", "does not end on a"},
 		{"another delimiter", "list-type=2&delimiter=-", "one separator that survives"},
-		{"a continuation token", "list-type=2&continuation-token=abc", "continuation-token"},
-		{"a start-after", "list-type=2&start-after=many/a.txt", "start-after"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			status, body, _ := h.listQuery(t, tc.query)
@@ -308,6 +304,134 @@ func TestEncryptedListingRefusesWhatItCannotSort(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestEncryptedListingRefusesAPrefixPastTheBound: past the bound the answer is
+// an error naming the limit, never a listing in an order the client cannot use.
+func TestEncryptedListingRefusesAPrefixPastTheBound(t *testing.T) {
+	option, enc := withEncryptedNames(t)
+	h := newHarness(t, option, func(cfg *Config) { cfg.MaxListingKeys = 3 })
+	ctx := context.Background()
+
+	for i := range 5 {
+		key := fmt.Sprintf("bounded/%02d.txt", i)
+		stored, err := enc.EncryptKey(key)
+		if err != nil {
+			t.Fatalf("EncryptKey: %v", err)
+		}
+		resp := h.put(t, key, []byte("x"), nil)
+		_ = resp.Body.Close()
+		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+	}
+
+	status, body, _ := h.listQuery(t, "list-type=2&prefix=bounded/")
+	if status != http.StatusNotImplemented {
+		t.Fatalf("returned %d, want 501: %s", status, body)
+	}
+	if !strings.Contains(body, "more than 3 keys") {
+		t.Errorf("the refusal does not name the bound: %s", body)
+	}
+}
+
+// TestEncryptedListingPaginates walks a prefix in small pages and checks that
+// what comes back is the whole prefix, once each, in the client's order.
+//
+// ADR-017 in one test: the provider orders by the encrypted
+// key, so every page is cut out of a prefix that was read and sorted whole. The
+// resume point is the last key served, which the client hands back -- as a
+// continuation token for v2, as a marker for v1.
+func TestEncryptedListingPaginates(t *testing.T) {
+	option, enc := withEncryptedNames(t)
+	h := newHarness(t, option)
+	ctx := context.Background()
+
+	var want []string
+	for i := range 11 {
+		key := fmt.Sprintf("paged/%02d.txt", i)
+		want = append(want, key)
+		stored, err := enc.EncryptKey(key)
+		if err != nil {
+			t.Fatalf("EncryptKey: %v", err)
+		}
+		resp := h.put(t, key, []byte("x"), nil)
+		_ = resp.Body.Close()
+		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+	}
+
+	t.Run("v2 continuation token", func(t *testing.T) {
+		var got []string
+		query := "list-type=2&prefix=paged/&max-keys=3"
+		for page := 0; ; page++ {
+			if page > 20 {
+				t.Fatal("the listing did not terminate")
+			}
+			status, body, result := h.listQuery(t, query)
+			if status != http.StatusOK {
+				t.Fatalf("page %d returned %d: %s", page, status, body)
+			}
+			for _, e := range result.Contents {
+				got = append(got, e.Key)
+			}
+			if !result.IsTruncated {
+				if result.NextContinuationToken != "" {
+					t.Error("a final page carries a continuation token")
+				}
+				break
+			}
+			if result.NextContinuationToken == "" {
+				t.Fatalf("page %d is truncated but names no continuation token", page)
+			}
+			query = "list-type=2&prefix=paged/&max-keys=3&continuation-token=" +
+				url.QueryEscape(result.NextContinuationToken)
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("paged listing:\n got %v\nwant %v", got, want)
+		}
+	})
+
+	t.Run("v1 marker", func(t *testing.T) {
+		var got []string
+		query := "prefix=paged/&max-keys=4"
+		for page := 0; ; page++ {
+			if page > 20 {
+				t.Fatal("the listing did not terminate")
+			}
+			status, body, result := h.listQuery(t, query)
+			if status != http.StatusOK {
+				t.Fatalf("page %d returned %d: %s", page, status, body)
+			}
+			for _, e := range result.Contents {
+				got = append(got, e.Key)
+			}
+			if !result.IsTruncated {
+				break
+			}
+			if result.NextMarker == "" {
+				t.Fatalf("page %d is truncated but names no marker", page)
+			}
+			query = "prefix=paged/&max-keys=4&marker=" + url.QueryEscape(result.NextMarker)
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("paged listing:\n got %v\nwant %v", got, want)
+		}
+	})
+
+	// start-after is a plaintext key, and it is the cursor spelled the way a
+	// client spells it when it picks its own resume point.
+	t.Run("start-after", func(t *testing.T) {
+		status, body, result := h.listQuery(t,
+			"list-type=2&prefix=paged/&start-after="+url.QueryEscape("paged/08.txt"))
+		if status != http.StatusOK {
+			t.Fatalf("returned %d: %s", status, body)
+		}
+		var got []string
+		for _, e := range result.Contents {
+			got = append(got, e.Key)
+		}
+		if w := []string{"paged/09.txt", "paged/10.txt"}; !slices.Equal(got, w) {
+			t.Errorf("start-after gave %v, want %v", got, w)
+		}
+	})
 }
 
 // TestEncryptedNamesRotate is a regression test for a real defect: a rotation
@@ -560,5 +684,112 @@ func TestEncryptedNamesUploadPartCopy(t *testing.T) {
 	}
 	if got := readBodyBytes(t, get); !bytes.Equal(got, whole[first:last+1]) {
 		t.Errorf("the copied range is %d bytes, want %d", len(got), last-first+1)
+	}
+}
+
+// TestEncryptedListingIsReadAfterWriteConsistent is a regression test for the
+// listing cache, and for the reason a first page is never served from it.
+//
+// `aws s3 sync` lists the destination before it uploads anything. When that
+// empty listing was cached and served again afterwards, the next sync saw an
+// empty prefix and uploaded everything a second time. S3 has been strongly
+// read-after-write consistent since 2020 and clients lean on it, so a listing
+// that a write has overtaken is a wrong answer, not a stale one.
+func TestEncryptedListingIsReadAfterWriteConsistent(t *testing.T) {
+	option, enc := withEncryptedNames(t)
+	h := newHarness(t, option)
+	ctx := context.Background()
+
+	// The listing that populates the cache: the prefix is empty.
+	status, body, first := h.listQuery(t, "list-type=2&prefix=rw/")
+	if status != http.StatusOK {
+		t.Fatalf("the first listing returned %d: %s", status, body)
+	}
+	if len(first.Contents) != 0 {
+		t.Fatalf("the prefix is not empty to begin with: %d keys", len(first.Contents))
+	}
+
+	for _, key := range []string{"rw/a.txt", "rw/b.txt"} {
+		stored, err := enc.EncryptKey(key)
+		if err != nil {
+			t.Fatalf("EncryptKey: %v", err)
+		}
+		resp := h.put(t, key, []byte("x"), nil)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("PUT %s returned %d", key, resp.StatusCode)
+		}
+		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+	}
+
+	status, body, second := h.listQuery(t, "list-type=2&prefix=rw/")
+	if status != http.StatusOK {
+		t.Fatalf("the second listing returned %d: %s", status, body)
+	}
+	var got []string
+	for _, e := range second.Contents {
+		got = append(got, e.Key)
+	}
+	if want := []string{"rw/a.txt", "rw/b.txt"}; !slices.Equal(got, want) {
+		t.Errorf("a listing taken after the writes returned %v, want %v", got, want)
+	}
+}
+
+// TestEncryptedListingContinuationUsesOneSnapshot is the other half: within one
+// walk, a page is cut out of the prefix as it was when the walk began. S3 makes
+// no promise that keys written during a paginated listing turn up in it, and
+// serving every page from one snapshot is what a client expects.
+func TestEncryptedListingContinuationUsesOneSnapshot(t *testing.T) {
+	option, enc := withEncryptedNames(t)
+	h := newHarness(t, option)
+	ctx := context.Background()
+
+	var want []string
+	for i := range 6 {
+		key := fmt.Sprintf("snap/%d.txt", i)
+		want = append(want, key)
+		stored, err := enc.EncryptKey(key)
+		if err != nil {
+			t.Fatalf("EncryptKey: %v", err)
+		}
+		resp := h.put(t, key, []byte("x"), nil)
+		_ = resp.Body.Close()
+		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+	}
+
+	status, body, page1 := h.listQuery(t, "list-type=2&prefix=snap/&max-keys=3")
+	if status != http.StatusOK {
+		t.Fatalf("page 1 returned %d: %s", status, body)
+	}
+	if !page1.IsTruncated || page1.NextContinuationToken == "" {
+		t.Fatal("page 1 should be truncated and carry a token")
+	}
+
+	// A key that sorts inside the first page's range, written mid-walk. It must
+	// not appear in page two, because page two continues the snapshot.
+	intruder := "snap/0a.txt"
+	stored, err := enc.EncryptKey(intruder)
+	if err != nil {
+		t.Fatalf("EncryptKey: %v", err)
+	}
+	resp := h.put(t, intruder, []byte("x"), nil)
+	_ = resp.Body.Close()
+	t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+
+	var got []string
+	for _, e := range page1.Contents {
+		got = append(got, e.Key)
+	}
+	status, body, page2 := h.listQuery(t,
+		"list-type=2&prefix=snap/&max-keys=3&continuation-token="+
+			url.QueryEscape(page1.NextContinuationToken))
+	if status != http.StatusOK {
+		t.Fatalf("page 2 returned %d: %s", status, body)
+	}
+	for _, e := range page2.Contents {
+		got = append(got, e.Key)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("the walk returned %v, want the six keys it began with: %v", got, want)
 	}
 }

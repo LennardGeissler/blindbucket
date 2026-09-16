@@ -59,6 +59,10 @@ type Config struct {
 	// Names maps object keys to the keys the provider stores them under
 	// (ADR-015). Nil leaves names in clear, which is the default.
 	Names *names.Encrypter
+	// MaxListingKeys and MaxConcurrentListings bound the buffered listing tier
+	// of ADR-017. Zero means the default.
+	MaxListingKeys        int
+	MaxConcurrentListings int
 
 	Audit *audit.Writer
 	// AuditFailClosed refuses requests once the audit log cannot be written,
@@ -78,7 +82,13 @@ type Proxy struct {
 	metrics    *obs.Metrics
 	stall      time.Duration
 
-	names *names.Encrypter
+	names          *names.Encrypter
+	maxListingKeys int
+	// listings bounds concurrent buffered listings; the memory a listing holds
+	// is per listing in flight, so a per-prefix bound alone does not bound the
+	// process.
+	listings  chan struct{}
+	listCache *listingCache
 
 	audit           *audit.Writer
 	auditFailClosed bool
@@ -110,6 +120,14 @@ func New(cfg Config) (*Proxy, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	maxListingKeys := cfg.MaxListingKeys
+	if maxListingKeys <= 0 {
+		maxListingKeys = defaultMaxListingKeys
+	}
+	maxConcurrent := cfg.MaxConcurrentListings
+	if maxConcurrent <= 0 {
+		maxConcurrent = defaultMaxConcurrentListings
+	}
 	return &Proxy{
 		upstream:   cfg.Upstream,
 		keys:       cfg.Keys,
@@ -120,7 +138,10 @@ func New(cfg Config) (*Proxy, error) {
 		metrics:    cfg.Metrics,
 		stall:      cfg.StallTimeout,
 
-		names: cfg.Names,
+		names:          cfg.Names,
+		maxListingKeys: maxListingKeys,
+		listings:       make(chan struct{}, maxConcurrent),
+		listCache:      newListingCache(listingCacheTTL, maxConcurrent*2),
 
 		audit:           cfg.Audit,
 		auditFailClosed: cfg.AuditFailClosed,
