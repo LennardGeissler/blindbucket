@@ -104,6 +104,12 @@ Flags:
 		fmt.Fprintf(os.Stderr,
 			"\nthis keyring has no audit key; `keygen --add-audit-key` adds one\n")
 	}
+	if _, ok := ring.NameKey(); !ok {
+		fmt.Fprintf(os.Stderr,
+			"\nthis keyring has no object-name key; `keygen --add-name-key` adds one.\n"+
+				"  Add it before encrypting names, not after: the key decides where every\n"+
+				"  object is stored, so it cannot be changed once objects exist under it.\n")
+	}
 	return nil
 }
 

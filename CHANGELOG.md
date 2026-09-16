@@ -14,6 +14,33 @@ version 1 would keep being readable.
 
 ### Added
 
+**An object-name key in the keyring**, the first piece of M6 that the gateway
+will need rather than the crypto it already has. `internal/crypto/names` has
+been able to map an object key to a stored key since it shipped, but the only
+key it was ever handed belonged to the audit log. This is the one
+[ADR-015](docs/adr/ADR-015-object-name-encryption.md) actually specifies: one per
+keyring, generated at `keygen`, and -- the property the design turns on --
+**untouched by rotation**. Rotation replaces the key that wraps data keys; a
+rotation that also changed stored names would rename every object in the bucket
+at once and leave none of them findable. Changing this key is a migration, not a
+rotation, and `keygen` refuses to replace one for that reason.
+
+It is deliberately not the audit log's name key, which `AuditKey` derives for
+itself, so that an entry in a log and the name of an object are different opaque
+strings for the same object. A test asserts they are not the same bytes, and
+another asserts the wrapped key cannot be unwrapped as a KEK or as the audit
+secret -- all three are 32 bytes, so domain separation in the associated data is
+the only thing that tells them apart.
+
+New keyrings get one. **`keygen --add-name-key`** gives an existing keyring one,
+and `keys list` says so when a keyring has none. The keyring format stays at
+version 1 and the field is optional, as [ADR-016](docs/adr/ADR-016-audit-log.md)
+did for the audit key: a keyring written before this loads unchanged.
+
+Inert until something encrypts names. The proxy does not yet -- that needs
+[ADR-017](docs/adr/ADR-017-listing-order-under-name-encryption.md)'s listing
+work first.
+
 **A cryptographically verifiable audit log.** The gateway can keep a record of
 what it served — which credential, which operation, which object, what came
 back — in a form an intruder cannot quietly edit. Every entry carries the hash of

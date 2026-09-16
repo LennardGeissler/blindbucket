@@ -38,6 +38,8 @@ Flags:
 		add      = fs.Bool("add", false, "add a key to an existing keyring instead of creating one")
 		addAudit = fs.Bool("add-audit-key", false,
 			"add an audit-log signing key to an existing keyring; new keyrings get one anyway")
+		addName = fs.Bool("add-name-key", false,
+			"add an object-name key to an existing keyring; new keyrings get one anyway")
 		act  = fs.Bool("activate", true, "with --add, make the new key the active one")
 		conf = fs.String("config", "",
 			"configuration file naming the root-key provider (default: a passphrase)")
@@ -62,10 +64,10 @@ Flags:
 	}
 
 	switch {
-	case *addAudit && !*add:
-		return addAuditKey(ctx, *out, keysCfg, &pass)
+	case (*addAudit || *addName) && !*add:
+		return addStandaloneKeys(ctx, *out, *addAudit, *addName, keysCfg, &pass)
 	case *add:
-		return addKey(ctx, *out, *kid, *act, *addAudit, keysCfg, &pass)
+		return addKey(ctx, *out, *kid, *act, *addAudit, *addName, keysCfg, &pass)
 	}
 	return createKeyring(ctx, *out, *kid, keysCfg, &pass)
 }
@@ -131,6 +133,15 @@ func createKeyring(
 		return err
 	}
 	ring.SetAuditKey(audit)
+	// And a name key, on the same reasoning: 32 more wrapped bytes, inert until
+	// names are encrypted, against having to reseal a running deployment's
+	// keyring on the day they are. Unlike the audit key it has no public half to
+	// record, so there is nothing to print.
+	name, err := keys.NewNameKey()
+	if err != nil {
+		return err
+	}
+	ring.SetNameKey(name)
 
 	data, err := sealKeyring(ctx, ring, cfg, pass, true)
 	if err != nil {
@@ -167,26 +178,26 @@ func printAuditPublicKey(ring *keys.Keyring) error {
 	return nil
 }
 
-// addAuditKey gives an existing keyring an audit key.
-func addAuditKey(ctx context.Context, path string, cfg config.Keys, pass *passphraseFlags) error {
+// addStandaloneKeys gives an existing keyring an audit key, a name key, or both,
+// without adding a KEK.
+func addStandaloneKeys(
+	ctx context.Context, path string, withAudit, withName bool,
+	cfg config.Keys, pass *passphraseFlags,
+) error {
 	ring, err := openKeyring(ctx, path, cfg, pass)
 	if err != nil {
 		return err
 	}
-	// Refused rather than replaced. A new audit key is a new public key, and
-	// every log written under the old one stops verifying against the keyring --
-	// which is indistinguishable, to whoever checks it later, from the logs
-	// having been forged.
-	if _, exists := ring.AuditKey(); exists {
-		return fmt.Errorf("%s already has an audit key; replacing it would leave every "+
-			"log written under the old one unverifiable against this keyring", path)
+	if withAudit {
+		if err := attachAuditKey(ring, path); err != nil {
+			return err
+		}
 	}
-
-	audit, err := keys.NewAuditKey()
-	if err != nil {
-		return err
+	if withName {
+		if err := attachNameKey(ring, path); err != nil {
+			return err
+		}
 	}
-	ring.SetAuditKey(audit)
 
 	updated, err := sealKeyring(ctx, ring, cfg, pass, false)
 	if err != nil {
@@ -195,8 +206,57 @@ func addAuditKey(ctx context.Context, path string, cfg config.Keys, pass *passph
 	if err := writeKeyring(path, updated); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "added an audit key to %s\n", path)
-	return printAuditPublicKey(ring)
+	if withAudit {
+		fmt.Fprintf(os.Stderr, "added an audit key to %s\n", path)
+	}
+	if withName {
+		fmt.Fprintf(os.Stderr, "added an object-name key to %s\n", path)
+	}
+	if withAudit {
+		return printAuditPublicKey(ring)
+	}
+	return nil
+}
+
+// attachAuditKey generates an audit key and installs it, refusing to replace one.
+//
+// Refused rather than replaced. A new audit key is a new public key, and every
+// log written under the old one stops verifying against the keyring -- which is
+// indistinguishable, to whoever checks it later, from the logs having been
+// forged.
+func attachAuditKey(ring *keys.Keyring, path string) error {
+	if _, exists := ring.AuditKey(); exists {
+		return fmt.Errorf("%s already has an audit key; replacing it would leave every "+
+			"log written under the old one unverifiable against this keyring", path)
+	}
+	audit, err := keys.NewAuditKey()
+	if err != nil {
+		return err
+	}
+	ring.SetAuditKey(audit)
+	return nil
+}
+
+// attachNameKey generates an object-name key and installs it, refusing to
+// replace one.
+//
+// Refused for a harder reason than the audit key's. Every object written while
+// names were encrypted is stored under a name derived from this key, and no
+// record of the old key remains anywhere: replacing it does not rename those
+// objects, it makes them unfindable. Moving to a new name key is a rewrite of
+// every object's key, which ADR-015 describes as a migration.
+func attachNameKey(ring *keys.Keyring, path string) error {
+	if _, exists := ring.NameKey(); exists {
+		return fmt.Errorf("%s already has a name key; replacing it would leave every "+
+			"object stored under an encrypted name unfindable, because nothing "+
+			"records the old key", path)
+	}
+	name, err := keys.NewNameKey()
+	if err != nil {
+		return err
+	}
+	ring.SetNameKey(name)
+	return nil
 }
 
 // sealedBy names the root-key source for the operator's confirmation line.
@@ -212,7 +272,7 @@ func sealedBy(cfg config.Keys) string {
 }
 
 func addKey(
-	ctx context.Context, path, kid string, activate, withAudit bool,
+	ctx context.Context, path, kid string, activate, withAudit, withName bool,
 	cfg config.Keys, pass *passphraseFlags,
 ) error {
 	ring, err := openKeyring(ctx, path, cfg, pass)
@@ -228,15 +288,14 @@ func addKey(
 		}
 	}
 	if withAudit {
-		if _, exists := ring.AuditKey(); exists {
-			return fmt.Errorf("%s already has an audit key; replacing it would leave every "+
-				"log written under the old one unverifiable against this keyring", path)
-		}
-		audit, err := keys.NewAuditKey()
-		if err != nil {
+		if err := attachAuditKey(ring, path); err != nil {
 			return err
 		}
-		ring.SetAuditKey(audit)
+	}
+	if withName {
+		if err := attachNameKey(ring, path); err != nil {
+			return err
+		}
 	}
 
 	// Re-sealed rather than patched: a new root key on every write means a
@@ -251,6 +310,9 @@ func addKey(
 	}
 
 	fmt.Fprintf(os.Stderr, "added key %q to %s (active key: %q)\n", kid, path, ring.ActiveKID())
+	if withName {
+		fmt.Fprintf(os.Stderr, "added an object-name key to %s\n", path)
+	}
 	if withAudit {
 		return printAuditPublicKey(ring)
 	}

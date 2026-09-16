@@ -36,6 +36,11 @@ type Keyring struct {
 	// logging existed has none, which is why it is a pointer and why every
 	// reader has to handle its absence rather than assume a zero key.
 	audit *AuditKey
+	// name is the optional object-name key, for the same reason: a keyring
+	// written before name encryption existed has none. It is absent rather than
+	// zero so that a gateway configured to encrypt names against such a keyring
+	// fails at startup instead of encrypting everything under a key of zeroes.
+	name *NameKey
 }
 
 // NewKeyring returns an empty keyring.
@@ -130,6 +135,20 @@ func (r *Keyring) SetAuditKey(k *AuditKey) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.audit = k
+}
+
+// SetNameKey installs the object-name key, replacing any existing one.
+func (r *Keyring) SetNameKey(k *NameKey) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.name = k
+}
+
+// NameKey returns the object-name key, and whether the keyring has one.
+func (r *Keyring) NameKey() (*NameKey, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.name, r.name != nil
 }
 
 // AuditKey returns the audit-log key, and whether the keyring has one.
@@ -276,6 +295,10 @@ type keyringFile struct {
 	// optional rather than a format version bump so that a keyring written
 	// before audit logging existed keeps loading unchanged.
 	Audit *auditEntry `json:"audit_key,omitempty"`
+
+	// Name is the wrapped object-name key, absent in a keyring written before
+	// name encryption existed.
+	Name *nameEntry `json:"name_key,omitempty"`
 }
 
 // auditEntry is the audit key as it is stored: the secret wrapped under the root
@@ -286,6 +309,14 @@ type keyringFile struct {
 // unchecked: openKeyring re-derives it from the unwrapped secret and refuses a
 // file where the two disagree, so an attacker who swaps in a public key they
 // hold cannot make a forged log verify against this keyring.
+// nameEntry is the wrapped object-name key. Unlike auditEntry it records
+// nothing in clear: a name key has no public half, so there is nothing about it
+// an unwrapping could be checked against, and nothing worth an attacker's edit
+// that the AEAD does not already catch.
+type nameEntry struct {
+	Wrapped string `json:"wrapped"`
+}
+
 type auditEntry struct {
 	Wrapped   string `json:"wrapped"`
 	PublicKey string `json:"public_key"`
@@ -373,11 +404,44 @@ func (r *Keyring) marshal(rootKey []byte, ref RootKeyRef, params *KDFParams) ([]
 		file.Audit = entry
 	}
 
+	if r.name != nil {
+		entry, err := sealName(rootKey, r.name)
+		if err != nil {
+			return nil, err
+		}
+		file.Name = entry
+	}
+
 	out, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return append(out, '\n'), nil
+}
+
+// sealName wraps the object-name key.
+func sealName(rootKey []byte, key *NameKey) (*nameEntry, error) {
+	secret := key.Secret()
+	defer clear(secret)
+	wrapped, err := sealKey(rootKey, secret, nameAAD())
+	if err != nil {
+		return nil, err
+	}
+	return &nameEntry{Wrapped: base64.StdEncoding.EncodeToString(wrapped)}, nil
+}
+
+// openName unwraps the object-name key.
+func openName(entry *nameEntry, rootKey []byte, wrongKeyHint string) (*NameKey, error) {
+	wrapped, err := base64.StdEncoding.DecodeString(entry.Wrapped)
+	if err != nil {
+		return nil, fmt.Errorf("keys: the name key is not valid base64: %w", err)
+	}
+	secret, err := openKey(rootKey, wrapped, nameAAD())
+	if err != nil {
+		return nil, fmt.Errorf("%w (%s)", err, wrongKeyHint)
+	}
+	defer clear(secret)
+	return NameKeyFromSecret(secret)
 }
 
 // sealAudit wraps the audit secret and records its public key.
@@ -496,6 +560,13 @@ func openKeyring(file keyringFile, rootKey []byte, wrongKeyHint string) (*Keyrin
 			return nil, err
 		}
 		ring.audit = audit
+	}
+	if file.Name != nil {
+		name, err := openName(file.Name, rootKey, wrongKeyHint)
+		if err != nil {
+			return nil, err
+		}
+		ring.name = name
 	}
 	return ring, nil
 }

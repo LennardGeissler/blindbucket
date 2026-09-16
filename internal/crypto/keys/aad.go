@@ -13,6 +13,7 @@ const (
 	aadFilePrefix   = "blindbucket/v1/dek-file"
 	aadKEKPrefix    = "blindbucket/v1/kek"
 	aadAuditPrefix  = "blindbucket/v1/audit-secret"
+	aadNamePrefix   = "blindbucket/v1/name-key"
 )
 
 // auditAAD is the associated data binding the audit secret to its purpose.
@@ -22,6 +23,16 @@ const (
 // fixed prefix is what stops a wrapped audit secret being unwrapped as a KEK, or
 // the reverse.
 func auditAAD() []byte { return []byte(aadAuditPrefix) }
+
+// nameAAD is the associated data binding the object-name key to its purpose.
+//
+// Fixed, for the same reason auditAAD is: there is one name key per keyring and
+// nothing to bind it to beyond the context. What the prefix buys is that a
+// wrapped name key cannot be unwrapped as a KEK or as an audit secret, which
+// matters more here than elsewhere -- the three are the same length, so without
+// domain separation the only thing distinguishing them would be where in the
+// file they were found.
+func nameAAD() []byte { return []byte(aadNamePrefix) }
 
 // MaxKIDLen bounds a key identifier.
 //
