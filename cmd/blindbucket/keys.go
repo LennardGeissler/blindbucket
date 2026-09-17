@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/LennardGeissler/blindbucket/internal/config"
+	"github.com/LennardGeissler/blindbucket/internal/obs"
 )
 
 func runKeys(ctx context.Context, args []string) error {
@@ -60,6 +62,7 @@ Flags:
 	var (
 		keyring = fs.String("keyring", "", "keyring file (required)")
 		conf    = fs.String("config", "", "configuration file naming the root-key provider")
+		jsonOut = fs.Bool("json", false, "emit the key list as JSON")
 		pass    passphraseFlags
 	)
 	pass.register(fs)
@@ -82,22 +85,30 @@ Flags:
 	}
 
 	now := time.Now().UTC()
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "KEY ID\tCREATED\tAGE\t")
-	for _, kid := range ring.KIDs() {
-		created, age := "unknown", ""
-		if t, ok := ring.Created(kid); ok && !t.IsZero() {
-			created = t.Format(time.RFC3339)
-			age = humanAge(now.Sub(t))
+	var jsonData []byte
+	if *jsonOut {
+		jsonData, err = marshalKeysJSON(now, ring)
+		if err != nil {
+			return err
 		}
-		marker := ""
-		if kid == ring.ActiveKID() {
-			marker = "active"
+	} else {
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		_, _ = fmt.Fprintln(w, "KEY ID\tCREATED\tAGE\t")
+		for _, kid := range ring.KIDs() {
+			created, age := "unknown", ""
+			if t, ok := ring.Created(kid); ok && !t.IsZero() {
+				created = t.Format(time.RFC3339)
+				age = humanAge(now.Sub(t))
+			}
+			marker := ""
+			if kid == ring.ActiveKID() {
+				marker = "active"
+			}
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", kid, created, age, marker)
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", kid, created, age, marker)
-	}
-	if err := w.Flush(); err != nil {
-		return err
+		if err := w.Flush(); err != nil {
+			return err
+		}
 	}
 
 	if _, ok := ring.AuditKey(); !ok {
@@ -114,7 +125,43 @@ Flags:
 				"  Add it before encrypting names, not after: the key decides where every\n"+
 				"  object is stored, so it cannot be changed once objects exist under it.\n")
 	}
+	if *jsonOut {
+		_, _ = os.Stdout.Write(jsonData)
+	}
 	return nil
+}
+
+type keyListJSON struct {
+	Keys []keyListEntryJSON `json:"keys"`
+}
+
+type keyListEntryJSON struct {
+	KID        string  `json:"kid"`
+	Created    *string `json:"created"`
+	AgeSeconds *int64  `json:"age_seconds"`
+	Active     bool    `json:"active"`
+}
+
+// marshalKeysJSON renders the key list as newline-terminated JSON with UTC timestamps.
+func marshalKeysJSON(now time.Time, ring obs.KeyringInfo) ([]byte, error) {
+	kids := ring.KIDs()
+	out := keyListJSON{Keys: make([]keyListEntryJSON, 0, len(kids))}
+	for _, kid := range kids {
+		entry := keyListEntryJSON{KID: kid, Active: kid == ring.ActiveKID()}
+		if t, ok := ring.Created(kid); ok && !t.IsZero() {
+			created := t.UTC().Format(time.RFC3339)
+			age := int64(now.Sub(t).Seconds())
+			entry.Created = &created
+			entry.AgeSeconds = &age
+		}
+		out.Keys = append(out.Keys, entry)
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return nil, err
+	}
+	data = append(data, '\n')
+	return data, nil
 }
 
 // humanAge renders a key's age at the resolution a rotation decision needs.
