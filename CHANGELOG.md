@@ -10,6 +10,16 @@ is version `1` and is specified in [docs/FORMAT.md](docs/FORMAT.md). A change to
 it would be a change to that number, announced here, and objects written under
 version 1 would keep being readable.
 
+## [Unreleased]
+
+### Added
+
+**`blindbucket keys list --json`.** The key listing can be emitted as
+structured JSON, for scripts and scheduled rotation checks. Timestamps are
+UTC RFC 3339 and every entry carries the key's age in seconds and whether it
+is active; a key with no recorded creation time has `null` for both rather
+than a zero date. Warnings stay on stderr, so stdout is only the document.
+
 ## [0.4.0] — 2026-09-16
 
 ### Added
