@@ -284,6 +284,7 @@ specification. Full detail and the exact commands are in
 | boto3 | works — including paginators, delimiters and `upload_file` | nothing |
 | MinIO `mc` | works — `cp`, `ls`, `mirror`, `cat` | nothing |
 | rclone | works | `--ignore-checksum`, and `allow_unsigned_payload` on the proxy |
+| s5cmd | works, `cp`, `ls`, `rm`, `mv`, `sync`, `pipe`, multipart | nothing |
 
 One call is deliberately not implemented: `ListMultipartUploads` returns 501. The
 upload ids this gateway issues are sealed tokens carrying the data key and the

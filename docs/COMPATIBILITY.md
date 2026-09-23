@@ -27,6 +27,7 @@ not a re-run of the whole matrix, and this document does not claim they are.
 | boto3 | 1.43.92 | **Works** | every commit, in CI | none |
 | MinIO client (`mc`) | RELEASE.2025-08-13 | **Works** | `v0.2.0` | `allow_unsigned_payload: true` on the proxy, for multipart only |
 | rclone | 1.75.1 | **Works with settings** | `v0.2.0` | `allow_unsigned_payload: true` on the proxy; `--ignore-checksum`; `--size-only` for `check` |
+| s5cmd | 2.3.0 | **Works** | main `311b28b` (`0.4.0` tree), 2026-09-20 | none, `--endpoint-url` only |
 
 Multipart included since M4: each client was run with a file over its own
 threshold, so the parts, the manifest and the size arithmetic are all exercised by
@@ -152,6 +153,42 @@ With those, `copy`, `sync`, `ls` and `check --size-only` all pass, both
 directions, on nested directories.
 
 ---
+
+## s5cmd
+
+s5cmd works with no settings beyond the endpoint. It was measured on 2026-09-20
+against a gateway built from main (`311b28b`, the `0.4.0` tree) with s5cmd
+2.3.0, using the same setup as every client above.
+
+```sh
+export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=us-east-1
+s5cmd --endpoint-url http://127.0.0.1:9000 <command>
+```
+
+| Command | Result |
+|---|---|
+| `s5cmd cp <file> s3://bucket/key` | works, signed PUT, no unsigned payload needed |
+| `s5cmd cp s3://bucket/key <file>` | works, identical SHA-256 |
+| `s5cmd cp` of 200 MiB | works, multipart on s5cmd's own threshold, identical SHA-256 |
+| `s5cmd ls s3://bucket/prefix/` | works, plaintext sizes, multipart size included |
+| `s5cmd ls s3://bucket/` | works, common prefixes shown as `DIR` |
+| `s5cmd head s3://bucket/key` | works, size, etag and content type as stored |
+| `s5cmd rm s3://bucket/key` | works |
+| `s5cmd rm 's3://bucket/prefix/*'` | works, a listing then `DeleteObjects` per object |
+| `s5cmd mv s3://bucket/a s3://bucket/b` | works, server-side copy, multipart objects included |
+| `s5cmd pipe` / `s5cmd cat` | works, streamed upload and download round-trip |
+| `s5cmd sync <dir> s3://bucket/p/` | works |
+| `s5cmd sync s3://bucket/p/* <dir>` | works, s5cmd itself requires a wildcard in the download source |
+
+s5cmd is the only client measured that needed nothing but the endpoint: the AWS
+CLI, `mc` and rclone all touch the unsigned-payload or checksum path that
+`allow_unsigned_payload` exists for, and s5cmd signs everything it sends. The
+two behaviours worth knowing are both s5cmd's own, not the gateway's. `head`
+of a deleted key answers "not found" rather than a permission error, and a
+download `sync` refuses a source without a wildcard before any request is made.
+
+The Go AWS SDK v2 signing path, which neither boto3 nor the AWS CLI exercises,
+carried every command above with no retries and no re-signing quirks.
 
 ## Known limits
 
