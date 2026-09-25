@@ -123,8 +123,9 @@ release, and the table would keep refusing it.
 
 **Probe once, at `serve` startup.** The gateway's request path uses no
 destination conditions, so it would be measuring something it does not need;
-rotation is the consumer. The package is shaped so that a `blindbucket probe`
-command can report it on its own later, which is where M7 is going.
+rotation is the consumer. The package is shaped so that it can also answer on
+its own, and `blindbucket probe` does: the same measurement, without the
+rotation, exiting non-zero where a guarded rotation would be refused.
 
 **Detect the lost write afterwards.** There is nothing to compare. The completion
 produces a new ETag whether or not a client wrote in between, and once the

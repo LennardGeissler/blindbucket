@@ -1,7 +1,8 @@
 // Command blindbucket is the CLI for the blindbucket S3 encryption gateway.
 //
 // It runs the gateway (serve), manages keyrings (keygen, rotate), removes
-// orphaned multipart manifests (gc), verifies the audit log (audit), and
+// orphaned multipart manifests (gc), measures what a provider does with
+// conditional writes (probe), verifies the audit log (audit), and
 // encrypts or decrypts a stream against a keyring with no provider in the way
 // (encrypt, decrypt) -- exercising exactly the code the proxy uses for object
 // bodies. The wire format and the decisions behind it are in docs/.
@@ -34,6 +35,7 @@ func commands() []command {
 		{"keys", "list the keys in a keyring, or retire one", runKeys},
 		{"gc", "remove orphaned multipart manifests", runGC},
 		{"rotate", "re-wrap data keys under a new KEK", runRotate},
+		{"probe", "measure the provider's conditional writes", runProbe},
 		{"audit", "verify the audit log, or print the key that verifies it", runAudit},
 		{"encrypt", "encrypt a stream into a blindbucket file", runEncrypt},
 		{"decrypt", "decrypt a blindbucket file", runDecrypt},
@@ -105,7 +107,5 @@ func usage(w *os.File) {
 	for _, c := range commands() {
 		_, _ = fmt.Fprintf(w, "  %-9s %s\n", c.name, c.summary)
 	}
-	_, _ = fmt.Fprintf(w, "\nPlanned:\n")
-	_, _ = fmt.Fprintf(w, "  %-9s %s\n", "inspect", "show an object's format details without decrypting (M6)")
 	_, _ = fmt.Fprintf(w, "\nRun `blindbucket <command> -h` for a command's flags.\n")
 }

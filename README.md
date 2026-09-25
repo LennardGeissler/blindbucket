@@ -243,7 +243,12 @@ That holds only where the provider enforces the condition, and Garage, for one,
 does not — it completes the write regardless. So a run measures both of its
 conditions against the provider before it touches an object, and refuses to
 start where either is not enforced, rather than trusting that it is
-([ADR-020](docs/adr/ADR-020-conditional-writes-measured.md)).
+([ADR-020](docs/adr/ADR-020-conditional-writes-measured.md)). To ask without
+rotating:
+
+```sh
+./bin/blindbucket probe --config blindbucket.yaml s3://blindbucket-dev   # exits 1 if unguarded
+```
 
 The last step is the one that actually retires the key. Rotation moves objects
 onto the new KEK but leaves the old one in the keyring, where it goes on opening

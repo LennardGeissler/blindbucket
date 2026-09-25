@@ -194,7 +194,8 @@ are enforced ([ADR-020](adr/ADR-020-conditional-writes-measured.md)). On Garage
 that means rotating with `--allow-unconditional`, which drops the guard, skips
 the measurement, prints a warning, and requires that nothing writes to the
 prefix meanwhile. R2 and Backblaze B2 are still unmeasured; the probe answers for
-them at the first run.
+them at the first run, and `blindbucket probe s3://<bucket>` asks without
+rotating.
 
 Garage also refuses `UploadPartCopy` from a source under 5 MiB, even as the only
 part of an upload, where AWS accepts it. A small single-part object with no
