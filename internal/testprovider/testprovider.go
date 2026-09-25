@@ -12,10 +12,14 @@
 package testprovider
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
+	"time"
 )
 
 // The environment variables, all optional except EndpointEnv.
@@ -34,7 +38,30 @@ const (
 	// tests run.
 	CopySourceIfMatchEnv = "BLINDBUCKET_TEST_S3_COPY_SOURCE_IF_MATCH"
 	CompleteIfMatchEnv   = "BLINDBUCKET_TEST_S3_COMPLETE_IF_MATCH"
+
+	// KeepEnv, set to anything, leaves a run's objects in the bucket instead of
+	// sweeping them, for looking at what a failing test wrote.
+	KeepEnv = "BLINDBUCKET_TEST_S3_KEEP"
 )
+
+// RunRoot is the common prefix of every run's objects. A bucket that the tests
+// share with nothing else can carry a lifecycle rule on it, which catches
+// whatever a crashed run could not sweep.
+const RunRoot = "bbtest/"
+
+var runPrefix = sync.OnceValue(func() string {
+	suffix := make([]byte, 4)
+	_, _ = rand.Read(suffix)
+	return RunRoot + time.Now().UTC().Format("20060102T150405") + "-" + hex.EncodeToString(suffix) + "/"
+})
+
+// RunPrefix is where this test process keeps its objects: one prefix per
+// process, so that two runs against the same bucket -- two CI jobs, say -- never
+// touch each other's objects, and a run can be swept as a whole when it ends.
+func RunPrefix() string { return runPrefix() }
+
+// Keep reports whether the run's objects should be left in place.
+func Keep() bool { return os.Getenv(KeepEnv) != "" }
 
 // Provider is the upstream the tests write to. The bucket must already exist:
 // creating one is a decision about cost and region that a test should not make
@@ -68,7 +95,7 @@ func Bucket() string { return envOr(BucketEnv, "blindbucket-test") }
 // none, so that `go test ./...` stays runnable without Docker.
 func Require(t testing.TB) Provider {
 	t.Helper()
-	p, err := fromEnv()
+	p, err := FromEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +105,10 @@ func Require(t testing.TB) Provider {
 	return p
 }
 
-func fromEnv() (Provider, error) {
+// FromEnv returns the configured provider without skipping, for code outside a
+// test -- a TestMain -- that has no test to skip. Its Endpoint is empty when no
+// provider is configured.
+func FromEnv() (Provider, error) {
 	for _, name := range []string{CopySourceIfMatchEnv, CompleteIfMatchEnv} {
 		switch v := os.Getenv(name); v {
 		case "", "enforced", "ignored", "refused":

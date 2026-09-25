@@ -39,7 +39,8 @@ func requireProvider(t *testing.T) *Client {
 // uniqueKey keeps parallel runs and reruns from colliding.
 func uniqueKey(t *testing.T, suffix string) string {
 	t.Helper()
-	return fmt.Sprintf("upstream-test/%s/%d/%s", t.Name(), time.Now().UnixNano(), suffix)
+	return fmt.Sprintf("%supstream-test/%s/%d/%s", testprovider.RunPrefix(),
+		t.Name(), time.Now().UnixNano(), suffix)
 }
 
 func TestIntegrationObjectLifecycle(t *testing.T) {

@@ -25,6 +25,7 @@ import (
 	"github.com/LennardGeissler/blindbucket/internal/auth"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/stream"
+	"github.com/LennardGeissler/blindbucket/internal/manifest"
 	"github.com/LennardGeissler/blindbucket/internal/testprovider"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
@@ -258,10 +259,31 @@ func readBody(t *testing.T, resp *http.Response) string {
 	return string(b)
 }
 
+// cleanupStored removes a stored object when the test ends, together with any
+// manifest it has. A test that stores under an encrypted name needs it: the
+// stored key is not under the run's prefix, so the sweep in TestMain cannot
+// find the object, and a manifest lives under a hash of the key, so deleting
+// the object alone would orphan it.
+func (h *harness) cleanupStored(t *testing.T, stored string) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_ = h.upstream.DeleteObject(ctx, testBucket, stored)
+		page, err := h.upstream.ListObjects(ctx, testBucket,
+			url.Values{"list-type": {"2"}, "prefix": {manifest.PrefixFor(stored)}})
+		if err != nil {
+			return
+		}
+		for _, entry := range page.Contents {
+			_ = h.upstream.DeleteObject(ctx, testBucket, entry.Key)
+		}
+	})
+}
+
 func testKey(t *testing.T, suffix string) string {
 	t.Helper()
-	return fmt.Sprintf("proxy-test/%s/%d/%s", strings.ReplaceAll(t.Name(), "/", "_"),
-		time.Now().UnixNano(), suffix)
+	return fmt.Sprintf("%sproxy-test/%s/%d/%s", testprovider.RunPrefix(),
+		strings.ReplaceAll(t.Name(), "/", "_"), time.Now().UnixNano(), suffix)
 }
 
 func TestIntegrationRoundTrip(t *testing.T) {
