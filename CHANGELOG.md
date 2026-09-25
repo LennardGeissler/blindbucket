@@ -12,6 +12,20 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Added
+
+**`blindbucket probe`.** Measures what a provider does with the two
+conditional writes rotation relies on — the same measurement a rotation makes
+before it starts ([ADR-020](docs/adr/ADR-020-conditional-writes-measured.md)),
+without the rotation. Prints each as enforced, ignored or refused, or emits
+JSON with `--json`, and exits 1 where a guarded rotation would be refused, so a
+script can ask the question. Needs the configuration, not the keyring.
+
+### Fixed
+
+**`blindbucket help` no longer lists `inspect` as planned for M6.** M6 closed
+without it.
+
 ## [0.5.0] — 2026-09-25
 
 ### Added
