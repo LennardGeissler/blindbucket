@@ -26,6 +26,14 @@ const (
 	SecretKeyEnv = "BLINDBUCKET_TEST_S3_SECRET_KEY"
 	BucketEnv    = "BLINDBUCKET_TEST_S3_BUCKET"
 	PathStyleEnv = "BLINDBUCKET_TEST_S3_PATH_STYLE"
+
+	// What the provider is expected to do with the two conditional writes
+	// rotation relies on: "enforced", "ignored" or "refused", as internal/probe
+	// names them. They are stated rather than measured, so that a provider
+	// changing its behaviour fails a test instead of quietly changing which
+	// tests run.
+	CopySourceIfMatchEnv = "BLINDBUCKET_TEST_S3_COPY_SOURCE_IF_MATCH"
+	CompleteIfMatchEnv   = "BLINDBUCKET_TEST_S3_COMPLETE_IF_MATCH"
 )
 
 // Provider is the upstream the tests write to. The bucket must already exist:
@@ -38,6 +46,17 @@ type Provider struct {
 	SecretKey string
 	Bucket    string
 	PathStyle bool
+
+	// CopySourceIfMatch and CompleteIfMatch are the expected outcomes, both
+	// "enforced" unless stated otherwise -- which is what MinIO does.
+	CopySourceIfMatch string
+	CompleteIfMatch   string
+}
+
+// Guarded reports whether the provider is expected to enforce both conditional
+// writes, which is what a rotation without --allow-unconditional needs.
+func (p Provider) Guarded() bool {
+	return p.CopySourceIfMatch == "enforced" && p.CompleteIfMatch == "enforced"
 }
 
 // Bucket is the bucket the tests use, and is read without a provider being
@@ -60,6 +79,13 @@ func Require(t testing.TB) Provider {
 }
 
 func fromEnv() (Provider, error) {
+	for _, name := range []string{CopySourceIfMatchEnv, CompleteIfMatchEnv} {
+		switch v := os.Getenv(name); v {
+		case "", "enforced", "ignored", "refused":
+		default:
+			return Provider{}, fmt.Errorf("%s=%q: want enforced, ignored or refused", name, v)
+		}
+	}
 	pathStyle := true
 	if v := os.Getenv(PathStyleEnv); v != "" {
 		parsed, err := strconv.ParseBool(v)
@@ -75,6 +101,9 @@ func fromEnv() (Provider, error) {
 		SecretKey: envOr(SecretKeyEnv, "minioadmin"),
 		Bucket:    Bucket(),
 		PathStyle: pathStyle,
+
+		CopySourceIfMatch: envOr(CopySourceIfMatchEnv, "enforced"),
+		CompleteIfMatch:   envOr(CompleteIfMatchEnv, "enforced"),
 	}, nil
 }
 

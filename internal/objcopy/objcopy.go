@@ -46,6 +46,12 @@ import (
 // MaxManifestBytes bounds a manifest read back from the provider.
 const MaxManifestBytes = 1 << 20
 
+// SmallObject is the ciphertext size below which a single-part object with
+// nothing to guard is copied with CopyObject rather than as a one-part upload.
+// It is S3's minimum part size: AWS lets the last part of an upload be smaller,
+// Garage refuses to copy such a source into a part at all (ADR-020).
+const SmallObject = 5 << 20
+
 // ErrPreconditionFailed reports that one of the conditional writes was refused:
 // the source changed between being read and being copied, or the destination
 // changed between being read and being published.
@@ -241,14 +247,30 @@ func rewrap(ctx context.Context, deps Deps, req Request) (objectmeta.Meta, []byt
 
 // publish writes the destination object.
 //
-// Both shapes go through a multipart upload, single-part objects included. A
-// plain CopyObject would work for those, but CompleteMultipartUpload is where
-// the conditional write lives, and a single part keeps the size arithmetic
-// identical (M = 1 gives the same result as a single-part object, FORMAT §7.2).
+// Both shapes go through a multipart upload, single-part objects included,
+// because CompleteMultipartUpload is where the conditional write lives, and a
+// single part keeps the size arithmetic identical (M = 1 gives the same result
+// as a single-part object, FORMAT §7.2). The exception is a small single-part
+// object with no condition to carry, which copyWhole handles.
 func publish(ctx context.Context, deps Deps, req Request,
 	next objectmeta.Meta, dek []byte,
 ) (*Result, error) {
 	src, dst := req.Source, req.Dest
+
+	metadata := map[string]string{}
+	for name, value := range dst.UserMetadata {
+		if strings.HasPrefix(strings.ToLower(name), objectmeta.Prefix) {
+			continue
+		}
+		metadata[name] = value
+	}
+
+	if !src.Meta.Multipart && req.DestIfMatch == "" && src.Info.TotalSize < SmallObject {
+		for name, value := range next.Headers() {
+			metadata[name] = value
+		}
+		return copyWhole(ctx, deps, req, next, metadata)
+	}
 
 	// Rule R1: the new version mints a new manifest id rather than pointing at
 	// the one the source uses. Two object versions sharing a manifest is the
@@ -269,13 +291,6 @@ func publish(ctx context.Context, deps Deps, req Request,
 		next.ManifestID, next.Multipart = id, true
 	}
 
-	metadata := map[string]string{}
-	for name, value := range dst.UserMetadata {
-		if strings.HasPrefix(strings.ToLower(name), objectmeta.Prefix) {
-			continue
-		}
-		metadata[name] = value
-	}
 	for name, value := range next.Headers() {
 		metadata[name] = value
 	}
@@ -351,6 +366,38 @@ func publish(ctx context.Context, deps Deps, req Request,
 		}
 	}
 
+	return &Result{ETag: out.ETag, LastModified: time.Now().UTC(), Meta: next}, nil
+}
+
+// copyWhole copies a small single-part object with one CopyObject.
+//
+// It is only reached when the destination carries no condition, so nothing the
+// multipart path guards is lost: the source condition goes on the CopyObject
+// itself, and there is no manifest to order against the write. The copy comes
+// out single-part, with an ETag without a -M suffix, which the size arithmetic
+// reads as the one segment it is.
+func copyWhole(ctx context.Context, deps Deps, req Request,
+	next objectmeta.Meta, metadata map[string]string,
+) (*Result, error) {
+	src, dst := req.Source, req.Dest
+	out, err := deps.Upstream.CopyObject(ctx, upstream.CopyObjectInput{
+		SourceBucket: src.Bucket, SourceKey: src.StoredKey,
+		Bucket: dst.Bucket, Key: dst.StoredKey,
+		ContentType:        dst.ContentType,
+		CacheControl:       dst.CacheControl,
+		ContentDisposition: dst.ContentDisposition,
+		ContentEncoding:    dst.ContentEncoding,
+		ContentLanguage:    dst.ContentLanguage,
+		Metadata:           metadata,
+		SourceIfMatch:      req.SourceIfMatch,
+	})
+	if err != nil {
+		if upstream.PreconditionFailed(err) {
+			return nil, ErrPreconditionFailed
+		}
+		return nil, fmt.Errorf("copying the object: %w", err)
+	}
+	req.at(HookComplete)
 	return &Result{ETag: out.ETag, LastModified: time.Now().UTC(), Meta: next}, nil
 }
 

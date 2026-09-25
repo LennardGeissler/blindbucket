@@ -20,6 +20,26 @@ UTC RFC 3339 and every entry carries the key's age in seconds and whether it
 is active; a key with no recorded creation time has `null` for both rather
 than a zero date. Warnings stay on stderr, so stdout is only the document.
 
+**A rotation measures the provider's conditional writes before it starts.**
+`blindbucket rotate` guards two windows with a precondition each, and a
+provider that ignores one looks exactly like one that allowed the write. Garage
+v2.4.1 ignores `If-Match` on `CompleteMultipartUpload`, so until now a rotation
+there could replace a client's concurrent write with the pre-rotation version
+and report success. A run now checks both preconditions against the provider
+with a probe object under `.blindbucket/probe/`, and refuses to start unless
+both are enforced, naming the one that is not. `--allow-unconditional` skips the
+check along with the guard. A dry run checks too. See
+[ADR-020](docs/adr/ADR-020-conditional-writes-measured.md).
+
+### Changed
+
+**A small single-part object with nothing to guard is copied with
+`CopyObject`.** Under 5 MiB, for a server-side copy and for a rotation under
+`--allow-unconditional`, one request replaces a one-part multipart upload.
+Garage refuses to copy a source that small into a part, so such copies failed
+there. A guarded rotation keeps the multipart path, where its second
+precondition lives.
+
 ### Fixed
 
 **`GetObjectTagging` against a provider without tagging.** Garage answers

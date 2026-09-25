@@ -150,10 +150,30 @@ jobs:
       - name: Run the integration tests
         env:
           BLINDBUCKET_TEST_S3_ENDPOINT: http://localhost:9002
-        run: go test -race -count=1 ./internal/upstream/... ./internal/proxy/...
+        run: go test -race -count=1 ./internal/upstream/... ./internal/proxy/... ./internal/probe/...
       - name: MinIO logs on failure
         if: failure()
         run: docker logs minio
+
+  # The same suite against an independent S3 implementation. Whatever the
+  # gateway has quietly come to rely on in MinIO shows up here first: the first
+  # run found a provider that ignores If-Match on completion (ADR-020).
+  integration-garage:
+    name: Integration (Garage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Start Garage
+        # The script prints `export NAME=value` lines; GITHUB_ENV wants them bare.
+        run: test/providers/garage.sh | sed -n 's/^export //p' >> "$GITHUB_ENV"
+      - name: Run the integration tests
+        run: go test -race -count=1 ./internal/upstream/... ./internal/proxy/... ./internal/probe/...
+      - name: Garage logs on failure
+        if: failure()
+        run: docker logs blindbucket-garage
 
   keyservices:
     name: Root-key sources (Vault, KMS)

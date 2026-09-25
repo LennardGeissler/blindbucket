@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,12 +18,30 @@ import (
 	"github.com/LennardGeissler/blindbucket/internal/crypto/stream"
 	"github.com/LennardGeissler/blindbucket/internal/objectmeta"
 	"github.com/LennardGeissler/blindbucket/internal/rotate"
+	"github.com/LennardGeissler/blindbucket/internal/testprovider"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
 // rotateConfig builds a run against the harness, adding a second KEK to rotate
 // onto.
+//
+// A guarded rotation is refused on a provider that does not enforce both
+// conditional writes, so these tests skip there. What the refusal looks like is
+// TestIntegrationRotateRefusedWithoutGuards; what rotation does on such a
+// provider is TestIntegrationRotateUnconditional.
 func (h *harness) rotateConfig(t *testing.T, prefix string) rotate.Config {
+	t.Helper()
+	if p := testprovider.Require(t); !p.Guarded() {
+		t.Skipf("the provider does not enforce both conditional writes "+
+			"(copy source: %s, completion: %s), so a guarded rotation is refused",
+			p.CopySourceIfMatch, p.CompleteIfMatch)
+	}
+	return h.unguardedRotateConfig(t, prefix)
+}
+
+// unguardedRotateConfig is rotateConfig without the skip, for the tests that
+// run on every provider.
+func (h *harness) unguardedRotateConfig(t *testing.T, prefix string) rotate.Config {
 	t.Helper()
 	const target = "rotated-key"
 	if !hasKID(h.keyring, target) {
@@ -86,6 +105,66 @@ func TestIntegrationRotateSinglePart(t *testing.T) {
 	}
 	if got := h.mustRead(t, key, "after rotation"); !bytes.Equal(got, payload) {
 		t.Error("rotation changed the plaintext")
+	}
+}
+
+// TestIntegrationRotateRefusedWithoutGuards: on a provider that ignores or
+// refuses a conditional write, a guarded rotation does not start, says which
+// guard is missing, and has touched nothing (ADR-020).
+func TestIntegrationRotateRefusedWithoutGuards(t *testing.T) {
+	h := newHarness(t)
+	if testprovider.Require(t).Guarded() {
+		t.Skip("the provider enforces both conditional writes; nothing to refuse")
+	}
+	key := testKey(t, "unguarded.bin")
+	h.store(t, key, randomBytes(t, 5000))
+	before := h.objectKID(t, key)
+
+	_, err := rotate.Run(t.Context(), h.unguardedRotateConfig(t, key))
+	var refusal *rotate.UnguardedError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("rotate.Run returned %v, want an UnguardedError", err)
+	}
+	if refusal.Conditions.Safe() {
+		t.Error("the refusal carries conditions that say it is safe")
+	}
+	if !strings.Contains(err.Error(), "--allow-unconditional") {
+		t.Errorf("the refusal does not name the way out: %v", err)
+	}
+	if after := h.objectKID(t, key); after != before {
+		t.Errorf("the refused run re-wrapped the object under %q", after)
+	}
+}
+
+// TestIntegrationRotateUnconditional runs where a guarded rotation cannot: with
+// --allow-unconditional, on every provider. It covers both copy paths -- a
+// small single-part object goes through CopyObject, which is the only way to
+// copy it on Garage, and a multipart object part by part.
+func TestIntegrationRotateUnconditional(t *testing.T) {
+	h := newHarness(t)
+	prefix := testKey(t, "unconditional")
+
+	small := randomBytes(t, 5000)
+	h.store(t, prefix+"/small.bin", small)
+	parts := [][]byte{randomBytes(t, testPart), randomBytes(t, 321)}
+	whole := h.mpuStore(t, prefix+"/multi.bin", parts)
+
+	cfg := h.unguardedRotateConfig(t, prefix+"/")
+	cfg.AllowUnconditional = true
+	result, err := rotate.Run(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	if result.Rotated != 2 || result.Failed != 0 {
+		t.Fatalf("rotated %d, failed %d; want 2 and 0 (%+v)", result.Rotated, result.Failed, *result)
+	}
+	for key, want := range map[string][]byte{prefix + "/small.bin": small, prefix + "/multi.bin": whole} {
+		if kid := h.objectKID(t, key); kid != cfg.TargetKID {
+			t.Errorf("%s wrapped under %q, want %q", key, kid, cfg.TargetKID)
+		}
+		if got := h.mustRead(t, key, "after rotation"); !bytes.Equal(got, want) {
+			t.Errorf("%s: rotation changed the plaintext", key)
+		}
 	}
 }
 

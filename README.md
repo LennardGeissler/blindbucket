@@ -233,6 +233,12 @@ with object size. Clients may keep writing throughout: the rotation's final writ
 is conditional on the ETag it started from, so a client write that lands in
 between wins and the object is skipped until the next run.
 
+That holds only where the provider enforces the condition, and Garage, for one,
+does not — it completes the write regardless. So a run measures both of its
+conditions against the provider before it touches an object, and refuses to
+start where either is not enforced, rather than trusting that it is
+([ADR-020](docs/adr/ADR-020-conditional-writes-measured.md)).
+
 The last step is the one that actually retires the key. Rotation moves objects
 onto the new KEK but leaves the old one in the keyring, where it goes on opening
 everything it ever wrapped — so a compromised key is still a working key until
@@ -483,6 +489,7 @@ the gateway already costs per request.
 | — | Vault Transit and AWS KMS as root-key sources, deferred from M5 | **done** |
 | — | Cryptographically verifiable audit log, hash-chained and signed | **done** |
 | M6 | Stretch: name encryption, presigned URLs, rollback protection | **done** |
+| M7 | The suite against providers other than MinIO: provider profiles, Garage, measured conditional writes | in progress |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
 clients" actually means for anything over 8 MiB. M3.5 existed to get its coordination rules

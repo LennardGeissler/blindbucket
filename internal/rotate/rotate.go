@@ -13,6 +13,10 @@
 // spec/tla/Multipart.tla produces a six-state counterexample for when the
 // conditional write is removed. So the final write carries If-Match with the
 // ETag seen at the start, and a 412 means the object changed and is skipped.
+//
+// That only holds on a provider that enforces the condition, and not every one
+// does: Garage v2.4.1 completes the upload regardless. So a run measures both
+// guards first and refuses to start without them (ADR-020).
 package rotate
 
 import (
@@ -32,6 +36,7 @@ import (
 	"github.com/LennardGeissler/blindbucket/internal/manifest"
 	"github.com/LennardGeissler/blindbucket/internal/objcopy"
 	"github.com/LennardGeissler/blindbucket/internal/objectmeta"
+	"github.com/LennardGeissler/blindbucket/internal/probe"
 	"github.com/LennardGeissler/blindbucket/internal/s3api"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
@@ -62,13 +67,15 @@ type Config struct {
 
 	Concurrency int
 	DryRun      bool
-	// AllowUnconditional drops the If-Match on the final write.
+	// AllowUnconditional drops the If-Match on the final write, and the
+	// measurement of whether the provider would have honoured it.
 	//
 	// It exists for providers that do not implement conditional writes, and it
 	// gives up invariant I2: a client write that lands mid-rotation is silently
 	// replaced by the pre-rotation version. Callers must not set it without the
 	// operator having said so, and must not run it while anything writes to the
-	// prefix.
+	// prefix. That promise is also why the probe is skipped: with nothing
+	// writing, neither guard has anything to catch.
 	AllowUnconditional bool
 
 	Log *slog.Logger
@@ -92,6 +99,32 @@ func (c Config) at(point, key string) {
 	if c.Hook != nil {
 		c.Hook(point, key)
 	}
+}
+
+// UnguardedError refuses a run on a provider that does not enforce both
+// conditional writes. It carries what was measured, so that the refusal can
+// say exactly which guard is missing and how.
+type UnguardedError struct {
+	Bucket     string
+	Conditions probe.Conditions
+}
+
+func (e *UnguardedError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "rotate: the provider behind %s does not enforce the conditional "+
+		"writes rotation relies on:", e.Bucket)
+	for _, check := range e.Conditions.Checks() {
+		if check.Outcome == probe.Enforced {
+			continue
+		}
+		fmt.Fprintf(&b, "\n  %s: %s", check.Name, check.Outcome)
+		if check.Detail != "" {
+			fmt.Fprintf(&b, " (%s)", check.Detail)
+		}
+	}
+	b.WriteString("\nA client write during the rotation could be lost. Rotate with " +
+		"--allow-unconditional once nothing writes to the prefix (ADR-020).")
+	return b.String()
 }
 
 // Result reports what a run did.
@@ -129,6 +162,19 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	}
 	if cfg.Log == nil {
 		cfg.Log = slog.Default()
+	}
+
+	// Before any object is touched, and in a dry run too: whether a real run
+	// would be safe is part of what a dry run is asked.
+	if !cfg.AllowUnconditional {
+		conditions, err := probe.ConditionalWrites(ctx, cfg.Upstream, cfg.Bucket)
+		if err != nil {
+			return nil, fmt.Errorf("rotate: measuring conditional writes: %w", err)
+		}
+		if !conditions.Safe() {
+			return nil, &UnguardedError{Bucket: cfg.Bucket, Conditions: conditions}
+		}
+		cfg.Log.Debug("provider enforces both conditional writes")
 	}
 
 	result := &Result{}
