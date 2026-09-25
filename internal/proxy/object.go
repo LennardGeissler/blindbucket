@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -698,6 +699,12 @@ func rejectUnsupportedUpload(r *http.Request) *s3api.Error {
 	return nil
 }
 
+// emptyTagging is a GetObjectTagging answer with no tags in it.
+type emptyTagging struct {
+	XMLName xml.Name `xml:"http://s3.amazonaws.com/doc/2006-03-01/ Tagging"`
+	TagSet  struct{} `xml:"TagSet"`
+}
+
 // getObjectTagging forwards the tagging sub-resource to the provider.
 //
 // The gateway writes no tags, so for an object it stored this is an empty set.
@@ -712,6 +719,18 @@ func (p *Proxy) getObjectTagging(
 	}
 	resp, err := p.upstream.ObjectPassthrough(r.Context(), http.MethodGet,
 		req.Bucket, storedKey, url.Values{"tagging": {""}})
+	if apiErr, ok := upstream.AsAPIError(err); ok && apiErr.Code == "NotImplemented" {
+		// A provider without tagging (Garage) holds no tags, so the empty set is
+		// its true answer rather than an invented one. It matters because the
+		// AWS CLI asks for tags before every multipart server-side copy, and a
+		// 502 here would fail the copy.
+		log.Debug("object tagging not implemented upstream, answered empty")
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusOK)
+			return nil
+		}
+		return writeXML(w, http.StatusOK, emptyTagging{})
+	}
 	if err != nil {
 		return translateUpstream(err)
 	}

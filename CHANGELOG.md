@@ -20,6 +20,15 @@ UTC RFC 3339 and every entry carries the key's age in seconds and whether it
 is active; a key with no recorded creation time has `null` for both rather
 than a zero date. Warnings stay on stderr, so stdout is only the document.
 
+### Fixed
+
+**`GetObjectTagging` against a provider without tagging.** Garage answers
+`NotImplemented`, which the gateway passed on as a 502 — and the AWS CLI asks
+for an object's tags before every multipart server-side copy, so the copy
+failed. A provider that does not implement tags holds none, so the gateway now
+answers with the empty set, which is the true answer rather than an invented
+one. Found by the first run of the integration suite against Garage.
+
 ## [0.4.0] — 2026-09-16
 
 ### Added
