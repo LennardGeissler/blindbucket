@@ -260,11 +260,9 @@ func TestIntegrationRotateMovesNoData(t *testing.T) {
 	}
 
 	counter := &countingTransport{base: http.DefaultTransport}
-	metered, err := upstream.New(upstream.Config{
-		Endpoint: os.Getenv(endpointEnv), Region: "us-east-1", PathStyle: true,
-		AccessKeyID: "minioadmin", SecretAccessKey: "minioadmin",
-		HTTPClient: &http.Client{Transport: counter},
-	})
+	meteredCfg := upstreamConfig(t)
+	meteredCfg.HTTPClient = &http.Client{Transport: counter}
+	metered, err := upstream.New(meteredCfg)
 	if err != nil {
 		t.Fatalf("upstream.New: %v", err)
 	}
@@ -396,11 +394,9 @@ func TestIntegrationRotateAtScale(t *testing.T) {
 	stored := int64(objects) * int64(len(payload))
 
 	counter := &countingTransport{base: http.DefaultTransport}
-	metered, err := upstream.New(upstream.Config{
-		Endpoint: os.Getenv(endpointEnv), Region: "us-east-1", PathStyle: true,
-		AccessKeyID: "minioadmin", SecretAccessKey: "minioadmin",
-		HTTPClient: &http.Client{Transport: counter},
-	})
+	meteredCfg := upstreamConfig(t)
+	meteredCfg.HTTPClient = &http.Client{Transport: counter}
+	metered, err := upstream.New(meteredCfg)
 	if err != nil {
 		t.Fatalf("upstream.New: %v", err)
 	}

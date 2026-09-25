@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 
@@ -234,11 +233,9 @@ func TestIntegrationCopyMovesNoData(t *testing.T) {
 	h.store(t, src, randomBytes(t, size))
 
 	counter := &countingTransport{base: http.DefaultTransport}
-	metered, err := upstream.New(upstream.Config{
-		Endpoint: os.Getenv(endpointEnv), Region: "us-east-1", PathStyle: true,
-		AccessKeyID: "minioadmin", SecretAccessKey: "minioadmin",
-		HTTPClient: &http.Client{Transport: counter},
-	})
+	meteredCfg := upstreamConfig(t)
+	meteredCfg.HTTPClient = &http.Client{Transport: counter}
+	metered, err := upstream.New(meteredCfg)
 	if err != nil {
 		t.Fatalf("upstream.New: %v", err)
 	}

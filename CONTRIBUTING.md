@@ -106,6 +106,21 @@ make bench                 # micro-benchmarks
 make vuln                  # govulncheck
 ```
 
+The provider tests default to the compose file's MinIO, so locally the endpoint
+is the only variable they need. Pointed anywhere else, they read the rest from
+the environment ([`internal/testprovider`](internal/testprovider/testprovider.go)):
+
+| Variable | Default |
+|---|---|
+| `BLINDBUCKET_TEST_S3_ENDPOINT` | none — the tests skip without it |
+| `BLINDBUCKET_TEST_S3_REGION` | `us-east-1` |
+| `BLINDBUCKET_TEST_S3_ACCESS_KEY` / `_SECRET_KEY` | `minioadmin` |
+| `BLINDBUCKET_TEST_S3_BUCKET` | `blindbucket-test` — must already exist |
+| `BLINDBUCKET_TEST_S3_PATH_STYLE` | `true` |
+
+The tests write to that bucket and overwrite objects behind the gateway's back,
+which is the point of them. Give them a bucket of their own.
+
 ### What CI will check
 
 Nothing here is a surprise if `make all` passes locally, except the jobs that

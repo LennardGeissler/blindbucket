@@ -5,47 +5,35 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/LennardGeissler/blindbucket/internal/testprovider"
 )
 
-// endpointEnv names the environment variable that points these tests at a real
-// S3-compatible provider. Without it they skip, so `go test ./...` stays
-// runnable without Docker.
+// These tests need a real S3-compatible provider and skip without one, so
+// `go test ./...` stays runnable without Docker. internal/testprovider lists
+// the variables that describe it; locally only the endpoint is needed.
 //
 //	docker compose up -d
 //	BLINDBUCKET_TEST_S3_ENDPOINT=http://localhost:9002 go test ./internal/upstream
-const endpointEnv = "BLINDBUCKET_TEST_S3_ENDPOINT"
-
-const testBucket = "blindbucket-test"
+var testBucket = testprovider.Bucket()
 
 func requireProvider(t *testing.T) *Client {
 	t.Helper()
-	endpoint := os.Getenv(endpointEnv)
-	if endpoint == "" {
-		t.Skipf("set %s to run these against a real provider (docker compose up -d)", endpointEnv)
-	}
-
+	p := testprovider.Require(t)
 	c, err := New(Config{
-		Endpoint:        endpoint,
-		Region:          envOr("BLINDBUCKET_TEST_S3_REGION", "us-east-1"),
-		PathStyle:       true,
-		AccessKeyID:     envOr("BLINDBUCKET_TEST_S3_ACCESS_KEY", "minioadmin"),
-		SecretAccessKey: envOr("BLINDBUCKET_TEST_S3_SECRET_KEY", "minioadmin"),
+		Endpoint:        p.Endpoint,
+		Region:          p.Region,
+		PathStyle:       p.PathStyle,
+		AccessKeyID:     p.AccessKey,
+		SecretAccessKey: p.SecretKey,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	return c
-}
-
-func envOr(name, fallback string) string {
-	if v := os.Getenv(name); v != "" {
-		return v
-	}
-	return fallback
 }
 
 // uniqueKey keeps parallel runs and reruns from colliding.

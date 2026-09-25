@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -26,6 +25,7 @@ import (
 	"github.com/LennardGeissler/blindbucket/internal/auth"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/stream"
+	"github.com/LennardGeissler/blindbucket/internal/testprovider"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
@@ -36,10 +36,12 @@ import (
 //
 //	docker compose up -d
 //	BLINDBUCKET_TEST_S3_ENDPOINT=http://localhost:9002 go test ./internal/proxy
-const (
-	endpointEnv = "BLINDBUCKET_TEST_S3_ENDPOINT"
-	testBucket  = "blindbucket-test"
+//
+// Any other provider works the same way; internal/testprovider lists the
+// variables that describe it.
+var testBucket = testprovider.Bucket()
 
+const (
 	clientAccessKey = "BBTESTACCESSKEY"
 	clientSecretKey = "bb-test-secret-key-not-a-real-one"
 )
@@ -97,6 +99,18 @@ type harness struct {
 	unsigned *http.Client
 }
 
+// upstreamConfig describes the provider under test to an upstream client, so
+// that a test building a client of its own -- one that counts requests, say --
+// talks to the same provider as the harness.
+func upstreamConfig(t *testing.T) upstream.Config {
+	t.Helper()
+	p := testprovider.Require(t)
+	return upstream.Config{
+		Endpoint: p.Endpoint, Region: p.Region, PathStyle: p.PathStyle,
+		AccessKeyID: p.AccessKey, SecretAccessKey: p.SecretKey,
+	}
+}
+
 // newHarness builds a gateway against a real provider.
 //
 // An option adjusts either the proxy configuration or the verifier's, for tests
@@ -107,15 +121,7 @@ type harness struct {
 // ignoring it.
 func newHarness(t *testing.T, options ...any) *harness {
 	t.Helper()
-	endpoint := os.Getenv(endpointEnv)
-	if endpoint == "" {
-		t.Skipf("set %s to run these against a real provider (docker compose up -d)", endpointEnv)
-	}
-
-	client, err := upstream.New(upstream.Config{
-		Endpoint: endpoint, Region: "us-east-1", PathStyle: true,
-		AccessKeyID: "minioadmin", SecretAccessKey: "minioadmin",
-	})
+	client, err := upstream.New(upstreamConfig(t))
 	if err != nil {
 		t.Fatalf("upstream.New: %v", err)
 	}
