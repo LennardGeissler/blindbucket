@@ -130,12 +130,13 @@ jobs:
           go-version-file: go.mod
       # MinIO is started with an explicit command rather than as a service
       # container, because it needs one ("server /data") and services cannot
-      # supply it.
+      # supply it. Chainguard's image, because MinIO no longer publishes one
+      # (see docker-compose.yml); it carries mc as well.
       - name: Start MinIO
         run: |
           docker run -d --name minio -p 9002:9000 \
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:latest server /data
+            cgr.dev/chainguard/minio:latest server /data
           for _ in $(seq 1 60); do
             if curl -sf http://localhost:9002/minio/health/live >/dev/null; then break; fi
             sleep 1
@@ -143,7 +144,7 @@ jobs:
           curl -sf http://localhost:9002/minio/health/live >/dev/null
       - name: Create the test bucket
         run: |
-          docker run --rm --network host --entrypoint sh quay.io/minio/mc:latest -c \
+          docker run --rm --network host --entrypoint sh cgr.dev/chainguard/minio:latest -c \
             "mc alias set local http://localhost:9002 minioadmin minioadmin && \
              mc mb --ignore-existing local/blindbucket-test"
       - name: Run the integration tests
@@ -227,12 +228,12 @@ jobs:
         run: |
           docker run -d --name minio -p 9002:9000 \
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:latest server /data
+            cgr.dev/chainguard/minio:latest server /data
           for _ in $(seq 1 60); do
             if curl -sf http://localhost:9002/minio/health/live >/dev/null; then break; fi
             sleep 1
           done
-          docker run --rm --network host --entrypoint sh quay.io/minio/mc:latest -c \
+          docker run --rm --network host --entrypoint sh cgr.dev/chainguard/minio:latest -c \
             "mc alias set local http://localhost:9002 minioadmin minioadmin && \
              mc mb --ignore-existing local/blindbucket-dev"
 

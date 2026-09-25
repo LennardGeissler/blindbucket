@@ -2,9 +2,13 @@
 #
 # MinIO is published on host port 9002, not its default 9000, so that a locally
 # running `blindbucket serve` can keep :9000 (the port used in blindbucket.yaml).
+#
+# The image is Chainguard's build of MinIO from source: MinIO stopped publishing
+# images to quay.io and Docker Hub, and pulls there now answer 401. This one also
+# carries `mc` and a shell, so it serves the one-shot bucket setup below too.
 services:
   minio:
-    image: quay.io/minio/minio:latest
+    image: cgr.dev/chainguard/minio:latest
     command: server /data --console-address ":9091"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -22,7 +26,7 @@ services:
 
   # One-shot: create the buckets the integration tests and the quickstart expect.
   createbuckets:
-    image: quay.io/minio/mc:latest
+    image: cgr.dev/chainguard/minio:latest
     depends_on:
       minio:
         condition: service_healthy
