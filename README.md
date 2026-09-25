@@ -19,19 +19,25 @@ Clients speak ordinary S3. The storage provider only ever sees ciphertext — ne
   as <code>make demo</code>.
 </sub></p>
 
-> **Status: `v0.4.0` — usable, and M6 is closed.** Standard S3 clients round-trip
+> **Status: `v0.5.0` — usable, and M7 is under way.** Standard S3 clients round-trip
 > through the gateway, multipart included: AWS CLI, boto3, `mc` and rclone all
 > work, and a 5 GiB `aws s3 cp` across two instances comes back with an identical
 > SHA-256. Key rotation, server-side copy, a signed audit log, object-name
 > encryption, metrics and health endpoints are in, and the keyring can be
 > unsealed by Vault Transit or AWS KMS instead of a passphrase.
 >
-> This release closes the last **No** in the threat model's own risk table.
-> **Rollback detection** tells that a provider served an older but genuine version
-> of an object — off by default, and worth reading
-> [what it does and does not promise](docs/THREAT_MODEL.md) first, because the
-> first read of any object is trusted. **Presigned URLs** are verified, for reads
-> only. See [Roadmap](#roadmap), [CHANGELOG.md](CHANGELOG.md) and
+> **Rollback detection** tells that a provider served an older but genuine
+> version of an object — off by default, and worth reading
+> [what it does and does not promise](docs/THREAT_MODEL.md) first. **Presigned
+> URLs** are verified, for reads only.
+>
+> This release is the first measured against a provider other than MinIO. The
+> integration suite now runs against **Garage** in CI too, and its first run
+> there found that Garage ignores the condition `blindbucket rotate` relies on to
+> never overwrite a client's write. So a rotation now measures the provider's
+> conditional writes before it starts, and refuses where they are not enforced
+> ([ADR-020](docs/adr/ADR-020-conditional-writes-measured.md)). See
+> [Roadmap](#roadmap), [CHANGELOG.md](CHANGELOG.md) and
 > [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 
 ---
@@ -141,7 +147,7 @@ in **[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)**.
 
 ```sh
 # Container: distroless, nonroot, no shell, 21 MB.
-docker pull ghcr.io/lennardgeissler/blindbucket:0.4.0
+docker pull ghcr.io/lennardgeissler/blindbucket:0.5.0
 
 # Or a binary, with checksums and an SBOM alongside it:
 #   https://github.com/LennardGeissler/blindbucket/releases

@@ -67,8 +67,8 @@ one person, a backport policy would be ceremony rather than a service.
 | Version | Supported |
 |---|---|
 | `main` | yes |
-| 0.4.x | yes |
-| 0.3.x and older | no — upgrade to 0.4.x |
+| 0.5.x | yes |
+| 0.4.x and older | no — upgrade to 0.5.x |
 
 Objects written by any released version stay readable: a change to the segment
 format would be a change to its version number, announced in the changelog.

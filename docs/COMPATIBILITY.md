@@ -6,7 +6,7 @@ reading a specification.
 
 **Measured:** the client matrix on 2026-09-12 against `v0.2.0`, with object names
 in the clear. **AWS CLI and boto3 are re-run against every commit** by the
-`Client compatibility` CI job, so their rows are current for `v0.4.0`; `mc` and
+`Client compatibility` CI job, so their rows are current for `v0.5.0`; `mc` and
 rclone have not been re-measured since, and are marked as of `v0.2.0` below.
 
 The **object-name encryption** rows were verified on 2026-09-16 with the AWS CLI

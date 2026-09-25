@@ -12,6 +12,8 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-25
+
 ### Added
 
 **`blindbucket keys list --json`.** The key listing can be emitted as
@@ -32,6 +34,16 @@ check along with the guard. A dry run checks too. See
 [ADR-020](docs/adr/ADR-020-conditional-writes-measured.md).
 
 ### Changed
+
+**`blindbucket rotate` can now refuse to start where it used to run.** On a
+provider that ignores or refuses either conditional write — Garage v2.4.1 among
+them — a rotation exits with an error naming the missing guard. That run was
+never safe; it now says so. Rotating there takes `--allow-unconditional`, with
+nothing writing to the prefix meanwhile.
+
+**`docker compose` takes MinIO from `cgr.dev/chainguard/minio`.** MinIO stopped
+publishing images, and `quay.io/minio/minio` now answers 401. Chainguard's is
+MinIO built from source, and carries `mc` too.
 
 **A small single-part object with nothing to guard is copied with
 `CopyObject`.** Under 5 MiB, for a server-side copy and for a rotation under
