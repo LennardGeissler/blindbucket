@@ -61,14 +61,14 @@ unless you ask otherwise.
 
 The wire format is the thing held stable before `1.0.0`; the Go API is not.
 Security fixes land on `main` and in a new patch release of the most recent
-minor version. Older minors are not backported — with two releases so far, a
-backport policy would be ceremony rather than a service.
+minor version. Older minors are not backported — for a project maintained by
+one person, a backport policy would be ceremony rather than a service.
 
 | Version | Supported |
 |---|---|
 | `main` | yes |
-| 0.2.x | yes |
-| 0.1.x | no — upgrade to 0.2.x |
+| 0.4.x | yes |
+| 0.3.x and older | no — upgrade to 0.4.x |
 
 Objects written by any released version stay readable: a change to the segment
 format would be a change to its version number, announced in the changelog.
@@ -91,7 +91,12 @@ Anything that breaks a guarantee stated in
   lets two plaintexts share a ciphertext.
 - **Authentication and authorisation bypass.** A SigV4 verification weakness, a
   signature that validates over a body that was not signed, or a credential
-  reaching a bucket outside the `buckets` list configured for it (A4).
+  reaching a bucket outside the `buckets` list configured for it (A4). That
+  includes presigned URLs: one accepted after its window, for anything but `GET`
+  or `HEAD`, or for another object than the one it signs
+  ([ADR-019](docs/adr/ADR-019-presigned-urls.md)).
+- **A rollback that detection accepts** outside the limits §5.1 lists, with
+  `freshness.index` set ([ADR-018](docs/adr/ADR-018-rollback-detection.md)).
 - **Upload token or manifest forgery.** A token a client can mint, alter or
   replay across objects; a manifest a provider can substitute
   ([ADR-006](docs/adr/ADR-006-upload-token.md),
@@ -124,11 +129,15 @@ the *reasoning* behind one is wrong, say so, and that is in scope as above.
   design, stated in §2 and in the README.
 - **Plaintext between client and proxy** (A6), except where TLS or a sidecar
   deployment is documented as covering it.
-- **Metadata visible to the provider** — object names, exact sizes, timestamps,
-  access patterns. Not hidden, by design (§4, §6).
-- **Rollback to an older genuine version of an object** (§5.1). Not currently
-  detectable, stated in the README and the threat model, and not changed by the
-  audit log.
+- **Metadata visible to the provider** — exact sizes, timestamps, access
+  patterns, and object names unless `names.encrypt` is on. With it on, a name is
+  confirmable by guessing rather than hidden, and a presigned URL still carries
+  it in clear (§4, §6).
+- **Rollback with detection off**, which is the default, and **the limits of
+  detection with it on** (§5.1): the first read of an object is trusted, so is a
+  copy's destination until it is read once, `HEAD` is not checked, and where
+  several instances write the same objects a peer's write and a rollback cannot
+  be told apart.
 - **Truncation of audit entries written after the last checkpoint** (§5.8). The
   gap is deliberate, `audit verify --expect` closes it, and a test asserts the
   undetectability so the limit cannot be lost silently.
