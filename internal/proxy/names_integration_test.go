@@ -47,7 +47,7 @@ func TestEncryptedNamesRoundTripThroughTheGateway(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncryptKey: %v", err)
 	}
-	t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+	h.cleanupStored(t, stored)
 
 	resp := h.put(t, key, body, nil)
 	_ = resp.Body.Close()
@@ -109,7 +109,7 @@ func TestEncryptedNamesServeRanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncryptKey: %v", err)
 	}
-	t.Cleanup(func() { _ = h.upstream.DeleteObject(context.Background(), testBucket, stored) })
+	h.cleanupStored(t, stored)
 
 	resp := h.put(t, key, body, nil)
 	_ = resp.Body.Close()
@@ -193,7 +193,6 @@ func (h *harness) listQuery(t *testing.T, query string) (int, string, upstream.L
 func TestEncryptedListingIsInTheClientsOrder(t *testing.T) {
 	option, enc := withEncryptedNames(t)
 	h := newHarness(t, option)
-	ctx := context.Background()
 
 	// Enough keys that agreement between the two orders would be a coincidence.
 	plain := []string{
@@ -212,7 +211,7 @@ func TestEncryptedListingIsInTheClientsOrder(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("PUT %s returned %d", key, resp.StatusCode)
 		}
-		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, s) })
+		h.cleanupStored(t, s)
 	}
 
 	status, body, got := h.listQuery(t, "list-type=2&prefix=docs/")
@@ -243,7 +242,6 @@ func TestEncryptedListingIsInTheClientsOrder(t *testing.T) {
 func TestEncryptedListingGroupsOnDelimiter(t *testing.T) {
 	option, enc := withEncryptedNames(t)
 	h := newHarness(t, option)
-	ctx := context.Background()
 
 	for _, key := range []string{"tree/a/1.txt", "tree/b/1.txt", "tree/top.txt"} {
 		s, err := enc.EncryptKey(key)
@@ -252,7 +250,7 @@ func TestEncryptedListingGroupsOnDelimiter(t *testing.T) {
 		}
 		resp := h.put(t, key, []byte("x"), nil)
 		_ = resp.Body.Close()
-		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, s) })
+		h.cleanupStored(t, s)
 	}
 
 	status, body, got := h.listQuery(t, "list-type=2&prefix=tree/&delimiter=/")
@@ -276,7 +274,6 @@ func TestEncryptedListingGroupsOnDelimiter(t *testing.T) {
 func TestEncryptedListingRefusesWhatItCannotSort(t *testing.T) {
 	option, enc := withEncryptedNames(t)
 	h := newHarness(t, option)
-	ctx := context.Background()
 
 	for _, key := range []string{"many/a.txt", "many/b.txt", "many/c.txt"} {
 		stored, err := enc.EncryptKey(key)
@@ -285,7 +282,7 @@ func TestEncryptedListingRefusesWhatItCannotSort(t *testing.T) {
 		}
 		resp := h.put(t, key, []byte("x"), nil)
 		_ = resp.Body.Close()
-		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+		h.cleanupStored(t, stored)
 	}
 
 	for _, tc := range []struct{ name, query, wants string }{
@@ -311,7 +308,6 @@ func TestEncryptedListingRefusesWhatItCannotSort(t *testing.T) {
 func TestEncryptedListingRefusesAPrefixPastTheBound(t *testing.T) {
 	option, enc := withEncryptedNames(t)
 	h := newHarness(t, option, func(cfg *Config) { cfg.MaxListingKeys = 3 })
-	ctx := context.Background()
 
 	for i := range 5 {
 		key := fmt.Sprintf("bounded/%02d.txt", i)
@@ -321,7 +317,7 @@ func TestEncryptedListingRefusesAPrefixPastTheBound(t *testing.T) {
 		}
 		resp := h.put(t, key, []byte("x"), nil)
 		_ = resp.Body.Close()
-		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+		h.cleanupStored(t, stored)
 	}
 
 	status, body, _ := h.listQuery(t, "list-type=2&prefix=bounded/")
@@ -343,7 +339,6 @@ func TestEncryptedListingRefusesAPrefixPastTheBound(t *testing.T) {
 func TestEncryptedListingPaginates(t *testing.T) {
 	option, enc := withEncryptedNames(t)
 	h := newHarness(t, option)
-	ctx := context.Background()
 
 	var want []string
 	for i := range 11 {
@@ -355,7 +350,7 @@ func TestEncryptedListingPaginates(t *testing.T) {
 		}
 		resp := h.put(t, key, []byte("x"), nil)
 		_ = resp.Body.Close()
-		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+		h.cleanupStored(t, stored)
 	}
 
 	t.Run("v2 continuation token", func(t *testing.T) {
@@ -444,7 +439,6 @@ func TestEncryptedListingPaginates(t *testing.T) {
 func TestEncryptedNamesRotate(t *testing.T) {
 	option, enc := withEncryptedNames(t)
 	h := newHarness(t, option)
-	ctx := context.Background()
 
 	const key = "rotate/me/please.bin"
 	body := bytes.Repeat([]byte("rotate"), 900)
@@ -452,7 +446,7 @@ func TestEncryptedNamesRotate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncryptKey: %v", err)
 	}
-	t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+	h.cleanupStored(t, stored)
 
 	resp := h.put(t, key, body, nil)
 	_ = resp.Body.Close()
@@ -523,7 +517,7 @@ func TestEncryptedNamesMultipartRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncryptKey: %v", err)
 	}
-	t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+	h.cleanupStored(t, stored)
 
 	whole := h.mpuStore(t, key, parts)
 
@@ -564,7 +558,7 @@ func TestEncryptedNamesMultipartRange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncryptKey: %v", err)
 	}
-	t.Cleanup(func() { _ = h.upstream.DeleteObject(context.Background(), testBucket, stored) })
+	h.cleanupStored(t, stored)
 
 	whole := h.mpuStore(t, key, parts)
 
@@ -601,7 +595,7 @@ func TestEncryptedNamesCopyObject(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EncryptKey: %v", err)
 		}
-		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+		h.cleanupStored(t, stored)
 	}
 
 	want := randomBytes(t, 4096)
@@ -650,7 +644,6 @@ func TestEncryptedNamesCopyObject(t *testing.T) {
 func TestEncryptedNamesUploadPartCopy(t *testing.T) {
 	option, enc := withEncryptedNames(t)
 	h := newHarness(t, option)
-	ctx := context.Background()
 
 	const src, dst = "copy/src/big.bin", "copy/dst/big.bin"
 	for _, key := range []string{src, dst} {
@@ -658,7 +651,7 @@ func TestEncryptedNamesUploadPartCopy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EncryptKey: %v", err)
 		}
-		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+		h.cleanupStored(t, stored)
 	}
 
 	whole := h.mpuStore(t, src, [][]byte{
@@ -698,7 +691,6 @@ func TestEncryptedNamesUploadPartCopy(t *testing.T) {
 func TestEncryptedListingIsReadAfterWriteConsistent(t *testing.T) {
 	option, enc := withEncryptedNames(t)
 	h := newHarness(t, option)
-	ctx := context.Background()
 
 	// The listing that populates the cache: the prefix is empty.
 	status, body, first := h.listQuery(t, "list-type=2&prefix=rw/")
@@ -719,7 +711,7 @@ func TestEncryptedListingIsReadAfterWriteConsistent(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("PUT %s returned %d", key, resp.StatusCode)
 		}
-		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+		h.cleanupStored(t, stored)
 	}
 
 	status, body, second := h.listQuery(t, "list-type=2&prefix=rw/")
@@ -742,7 +734,6 @@ func TestEncryptedListingIsReadAfterWriteConsistent(t *testing.T) {
 func TestEncryptedListingContinuationUsesOneSnapshot(t *testing.T) {
 	option, enc := withEncryptedNames(t)
 	h := newHarness(t, option)
-	ctx := context.Background()
 
 	var want []string
 	for i := range 6 {
@@ -754,7 +745,7 @@ func TestEncryptedListingContinuationUsesOneSnapshot(t *testing.T) {
 		}
 		resp := h.put(t, key, []byte("x"), nil)
 		_ = resp.Body.Close()
-		t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+		h.cleanupStored(t, stored)
 	}
 
 	status, body, page1 := h.listQuery(t, "list-type=2&prefix=snap/&max-keys=3")
@@ -774,7 +765,7 @@ func TestEncryptedListingContinuationUsesOneSnapshot(t *testing.T) {
 	}
 	resp := h.put(t, intruder, []byte("x"), nil)
 	_ = resp.Body.Close()
-	t.Cleanup(func() { _ = h.upstream.DeleteObject(ctx, testBucket, stored) })
+	h.cleanupStored(t, stored)
 
 	var got []string
 	for _, e := range page1.Contents {

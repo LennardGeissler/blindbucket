@@ -123,6 +123,16 @@ the environment ([`internal/testprovider`](internal/testprovider/testprovider.go
 The tests write to that bucket and overwrite objects behind the gateway's back,
 which is the point of them. Give them a bucket of their own.
 
+Each test process keeps its objects under a prefix of its own,
+`bbtest/<timestamp>-<random>/`, so two runs against one bucket never meet, and
+sweeps it when it ends: open uploads aborted, objects deleted, and the manifests
+they orphan collected by `gc` ([`internal/testprovider/sweep`](internal/testprovider/sweep/sweep.go)).
+Against a real provider that is not housekeeping but cost — an open upload is
+billed for its parts until it is aborted. Set `BLINDBUCKET_TEST_S3_KEEP=1` to
+leave a run's objects in place and look at them. A run that crashes cannot sweep,
+so a bucket on a real account should also carry a lifecycle rule on `bbtest/`
+that expires objects and aborts incomplete uploads after a day.
+
 The last two state what the provider does with the conditional writes rotation
 relies on. They are stated rather than measured on purpose: `internal/probe`
 fails when the provider's behaviour differs from them, so a provider that
