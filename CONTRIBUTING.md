@@ -83,10 +83,10 @@ without them**, so a green `go test ./...` is not proof that you ran everything:
 ```sh
 make test                  # unit tests, -race
 
-# Against a provider — internal/upstream and internal/proxy:
+# Against a provider — internal/upstream, internal/proxy, internal/probe:
 docker compose up -d
 BLINDBUCKET_TEST_S3_ENDPOINT=http://localhost:9002 \
-  go test ./internal/upstream ./internal/proxy
+  go test ./internal/upstream ./internal/proxy ./internal/probe
 
 # Against Vault and a KMS emulator — internal/rootkey:
 docker compose --profile keys up -d
@@ -117,9 +117,23 @@ the environment ([`internal/testprovider`](internal/testprovider/testprovider.go
 | `BLINDBUCKET_TEST_S3_ACCESS_KEY` / `_SECRET_KEY` | `minioadmin` |
 | `BLINDBUCKET_TEST_S3_BUCKET` | `blindbucket-test` — must already exist |
 | `BLINDBUCKET_TEST_S3_PATH_STYLE` | `true` |
+| `BLINDBUCKET_TEST_S3_COPY_SOURCE_IF_MATCH` | `enforced` — or `ignored`, `refused` |
+| `BLINDBUCKET_TEST_S3_COMPLETE_IF_MATCH` | `enforced` — or `ignored`, `refused` |
 
 The tests write to that bucket and overwrite objects behind the gateway's back,
 which is the point of them. Give them a bucket of their own.
+
+The last two state what the provider does with the conditional writes rotation
+relies on. They are stated rather than measured on purpose: `internal/probe`
+fails when the provider's behaviour differs from them, so a provider that
+changes shows up as a failing test rather than as a different set of tests
+running. Garage, the second provider CI runs against, comes up in one command:
+
+```sh
+eval "$(test/providers/garage.sh)"      # start it and export the variables
+go test ./internal/upstream ./internal/proxy ./internal/probe
+test/providers/garage.sh stop
+```
 
 ### What CI will check
 
@@ -128,7 +142,7 @@ need services:
 
 `go vet` and `golangci-lint` · `go mod tidy` leaves no diff · `go test -race` on
 both Go 1.24 and current · a 30-second fuzz smoke run · integration tests against
-MinIO · Vault and the KMS emulator · the boto3 and AWS CLI client scenarios,
+MinIO and Garage · Vault and the KMS emulator · the boto3 and AWS CLI client scenarios,
 including a multipart upload across **two gateway instances behind a
 round-robin balancer** — statelessness is tested, not asserted. Pull requests
 additionally get a `benchstat` comparison against the base commit, reported in

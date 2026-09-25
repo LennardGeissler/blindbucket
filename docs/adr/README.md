@@ -25,6 +25,7 @@ rejected options is not a decision, it is a default.
 | [017](ADR-017-listing-order-under-name-encryption.md) | Listing order under name encryption: buffer and sort, bounded, or refuse | Accepted | M6 |
 | [018](ADR-018-rollback-detection.md) | Rollback detection: a local freshness index, trust on first use | Accepted | M6 |
 | [019](ADR-019-presigned-urls.md) | Presigned URLs: verified, never issued, and only for reads | Accepted | M6 |
+| [020](ADR-020-conditional-writes-measured.md) | Conditional writes are measured before a rotation, not assumed | Accepted | M7 |
 
 Every entry is Accepted. 018 was Proposed while it was a decision without code, for the
 same reason 015 was: its decisions already constrained the code while the code did not yet

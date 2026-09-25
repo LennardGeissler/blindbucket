@@ -34,6 +34,12 @@ read at the start, and a 412 makes the object a skip rather than a silent
 overwrite. That is invariant I2 in spec/tla/, which has a six-state counterexample
 for the version without it.
 
+Not every provider enforces that condition, and one that ignores it looks exactly
+like one that allowed the write. So before touching anything, a run measures both
+conditions with a probe object under .blindbucket/probe/, and refuses to start if
+either is not enforced -- in a dry run too. --allow-unconditional skips the
+measurement along with the condition (ADR-020).
+
 Flags:
 `)
 		fs.PrintDefaults()

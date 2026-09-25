@@ -45,7 +45,7 @@ TOML
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 # Copied in rather than bind-mounted: Docker Desktop does not share the
 # temporary directory on macOS, and the image has no shell to write one with.
-docker create --name "$NAME" -p "$PORT:3900" "$IMAGE" >/dev/null
+docker create --name "$NAME" -p "$PORT:3900" -e RUST_LOG=garage=warn "$IMAGE" >/dev/null
 docker cp "$conf" "$NAME:/etc/garage.toml" >/dev/null
 docker start "$NAME" >/dev/null
 
@@ -70,4 +70,6 @@ export BLINDBUCKET_TEST_S3_REGION=$REGION
 export BLINDBUCKET_TEST_S3_ACCESS_KEY=$KEY_ID
 export BLINDBUCKET_TEST_S3_SECRET_KEY=$SECRET
 export BLINDBUCKET_TEST_S3_BUCKET=$BUCKET
+# Measured on v2.4.1: If-Match on CompleteMultipartUpload completes regardless.
+export BLINDBUCKET_TEST_S3_COMPLETE_IF_MATCH=ignored
 ENV

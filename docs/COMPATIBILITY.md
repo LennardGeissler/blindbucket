@@ -17,6 +17,12 @@ not a re-run of the whole matrix, and this document does not claim they are.
 
 **Setup:** `docker compose up -d`, `blindbucket serve`, path-style, 64 KiB chunks.
 
+**Providers.** The client matrix is measured against MinIO. The Go integration
+suite also runs against **Garage v2.4.1** since 2026-09-25
+(`test/providers/garage.sh`), and passes there; what Garage does differently is
+under [Conditional writes](#conditional-writes-for-rotation) below. AWS S3, R2 and
+B2 are not measured yet.
+
 ---
 
 ## Summary
@@ -161,30 +167,40 @@ These apply to every client.
 |---|---|---|
 | **`ListMultipartUploads`** | Returns `NotImplemented`, and will keep doing so. The upload ids this gateway issues are sealed tokens carrying the data key and the manifest id (ADR-006); neither can be reconstructed from the provider's listing, so the call could only return ids no client is able to use. Clients that abort their own uploads are unaffected — they hold the token already. | — |
 | **The shape of a part ETag** | An `UploadPart` answers with the provider's ETag followed by `.` and a sealed suffix carrying that part's segment salt — the only way a stateless gateway can learn, at completion, which attempt at a part number it is assembling ([ADR-014](adr/ADR-014-part-salts-in-the-manifest.md)). Clients echo it back unchanged, which is all S3 asks of them, and the AWS CLI, boto3, `mc` and rclone were each measured doing so. A client that assumes a part ETag is 32 hex characters would be surprised; none of the four is. The object's own ETag is untouched. | — |
-| **Object tags** | `PutObjectTagging`, `DeleteObjectTagging` and `x-amz-tagging` on an upload return `NotImplemented`: a tag is a key and a value the provider stores in plaintext, and this gateway does not take plaintext through a side door. `GetObjectTagging` is forwarded and answers an empty set for anything the gateway wrote. Refused rather than ignored, so a client never believes its object carries tags it does not ([ADR-012](adr/ADR-012-copy-semantics.md)). | — |
+| **Object tags** | `PutObjectTagging`, `DeleteObjectTagging` and `x-amz-tagging` on an upload return `NotImplemented`: a tag is a key and a value the provider stores in plaintext, and this gateway does not take plaintext through a side door. `GetObjectTagging` is forwarded and answers an empty set for anything the gateway wrote — and an empty set too where the provider has no tagging at all (Garage), because such a provider holds no tags. Refused rather than ignored, so a client never believes its object carries tags it does not ([ADR-012](adr/ADR-012-copy-semantics.md)). | — |
 | **Copy cost above the multipart threshold** | A server-side copy of a small object moves no data — 1.2 KB over the wire for a 600 KB object. Above the client's multipart threshold (8 MiB for the AWS CLI) the client switches to `UploadPartCopy`, and that path *cannot* stay inside the provider: a part is a segment with its own salt, so the range is decrypted and re-encrypted on the way through. Correct, and not free ([ADR-012](adr/ADR-012-copy-semantics.md)). | — |
 | **Copying a `versionId`** | Returns `NotImplemented`. This build does not implement versioned reads, and copying the current version instead of the one asked for would be the wrong kind of helpful. | — |
 | **Part sizes** | Every part but the last must be a multiple of the chunk size (FORMAT §7.3). The defaults of every client above satisfy this; a client configured with, say, 5.5 MiB parts is refused at completion with a message naming the fix. | — |
 
 ### Conditional writes, for rotation
 
-`blindbucket rotate` needs the provider to honour two preconditions, and whether
-MinIO does was left open at design time. Measured:
+`blindbucket rotate` needs the provider to honour two preconditions. Measured:
 
-| Precondition | MinIO | Used for |
-|---|---|---|
-| `x-amz-copy-source-if-match` on `UploadPartCopy` | **enforced** | the source changing between the HEAD and the copy |
-| `If-Match` on `CompleteMultipartUpload` | **enforced** | the target changing between the copy and the completion |
+| Precondition | MinIO | Garage v2.4.1 | Used for |
+|---|---|---|---|
+| `x-amz-copy-source-if-match` on `UploadPartCopy` | **enforced** | **enforced** | the source changing between the HEAD and the copy |
+| `If-Match` on `CompleteMultipartUpload` | **enforced** | **ignored** — completes over whatever is there | the target changing between the copy and the completion |
 
-Both answer `412 PreconditionFailed`, and in practice the copy refuses first —
-the rotation never gets as far as the completion. Either way the object is
-counted as skipped rather than overwritten, which is invariant I2 holding.
+On MinIO both answer `412 PreconditionFailed`, and in practice the copy refuses
+first — the rotation never gets as far as the completion. Either way the object
+is counted as skipped rather than overwritten, which is invariant I2 holding.
 
-A provider that silently *ignored* these headers would be worse than one that
-rejected them, because rotation would look safe while losing writes. That is what
-`--allow-unconditional` exists for: it makes dropping the guard an explicit
-decision with a warning, rather than something a provider does quietly. Whether
-R2 and Backblaze B2 enforce them is still untested.
+A provider that silently *ignores* a header is worse than one that rejects it,
+because rotation would look safe while losing writes — and Garage is that
+provider for the second one. So a rotation no longer takes this table on trust:
+before touching an object it measures both preconditions against the provider,
+with a probe object under `.blindbucket/probe/`, and refuses to start unless both
+are enforced ([ADR-020](adr/ADR-020-conditional-writes-measured.md)). On Garage
+that means rotating with `--allow-unconditional`, which drops the guard, skips
+the measurement, prints a warning, and requires that nothing writes to the
+prefix meanwhile. R2 and Backblaze B2 are still unmeasured; the probe answers for
+them at the first run.
+
+Garage also refuses `UploadPartCopy` from a source under 5 MiB, even as the only
+part of an upload, where AWS accepts it. A small single-part object with no
+condition to carry — every server-side copy, and every rotation under
+`--allow-unconditional` — is therefore copied with one `CopyObject` instead,
+which keeps the source precondition and works on both.
 
 ### Key services
 
