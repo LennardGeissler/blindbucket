@@ -72,4 +72,5 @@ aws cloudformation delete-stack --region eu-central-1 --stack-name blindbucket-t
 ```
 
 The key is scheduled for deletion, not deleted: KMS keeps it for seven days,
-during which it can be restored and still costs its monthly fee pro rata.
+during which it can be restored. A key pending deletion is not charged for
+([KMS pricing](https://aws.amazon.com/kms/pricing/)).
