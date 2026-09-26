@@ -72,6 +72,9 @@ one person, a backport policy would be ceremony rather than a service.
 
 Objects written by any released version stay readable: a change to the segment
 format would be a change to its version number, announced in the changelog.
+That is checked rather than promised — CI builds every release from its tag,
+stores objects through it, and reads them back with the current build
+([`test/upgrade/upgrade.sh`](test/upgrade/upgrade.sh)).
 
 ## Scope
 
