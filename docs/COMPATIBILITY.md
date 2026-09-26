@@ -20,8 +20,16 @@ not a re-run of the whole matrix, and this document does not claim they are.
 **Providers.** The client matrix is measured against MinIO. The Go integration
 suite also runs against **Garage v2.4.1** since 2026-09-25
 (`test/providers/garage.sh`), and passes there; what Garage does differently is
-under [Conditional writes](#conditional-writes-for-rotation) below. AWS S3, R2 and
-B2 are not measured yet.
+under [Conditional writes](#conditional-writes-for-rotation) below.
+
+**AWS S3** was measured on 2026-09-26 in `eu-central-1`: the Go integration
+suite — upstream, proxy and probe, 238 tests — passes against it, with
+virtual-host addressing and the temporary credentials of an OIDC role
+([`deploy/aws-test/`](../deploy/aws-test/), run by the manual `AWS` workflow).
+From a GitHub runner an ocean away that takes eight minutes rather than
+eighteen seconds, and the one test it broke was a test that assumed a fast
+provider, not the gateway. What that does not cover: the client matrix above
+was not re-run against AWS. R2 and B2 are not measured yet.
 
 ---
 
@@ -176,10 +184,10 @@ These apply to every client.
 
 `blindbucket rotate` needs the provider to honour two preconditions. Measured:
 
-| Precondition | MinIO | Garage v2.4.1 | Used for |
-|---|---|---|---|
-| `x-amz-copy-source-if-match` on `UploadPartCopy` | **enforced** | **enforced** | the source changing between the HEAD and the copy |
-| `If-Match` on `CompleteMultipartUpload` | **enforced** | **ignored** — completes over whatever is there | the target changing between the copy and the completion |
+| Precondition | MinIO | AWS S3 | Garage v2.4.1 | Used for |
+|---|---|---|---|---|
+| `x-amz-copy-source-if-match` on `UploadPartCopy` | **enforced** | **enforced** | **enforced** | the source changing between the HEAD and the copy |
+| `If-Match` on `CompleteMultipartUpload` | **enforced** | **enforced** | **ignored** — completes over whatever is there | the target changing between the copy and the completion |
 
 On MinIO both answer `412 PreconditionFailed`, and in practice the copy refuses
 first — the rotation never gets as far as the completion. Either way the object
@@ -211,11 +219,13 @@ Transit engine or from AWS KMS (ADR-013). Measured, not assumed:
 | Service | Version | Result |
 |---|---|---|
 | Vault Transit | `hashicorp/vault` dev mode, 2026-09 | **Works.** Seal a keyring, start the gateway with no passphrase anywhere, round-trip a 3 MB object with an identical SHA-256. Deleting the Transit key stops the next start with `encryption key not found`. |
-| AWS KMS | **the protocol, not the service** | Exercised against `nsmithuk/local-kms`, which speaks the KMS JSON API: `CreateKey`, `Encrypt`, `Decrypt`, SigV4 and all. What that establishes is that the client speaks KMS correctly. It is **not** a test against AWS, and this project has not run one. |
+| AWS KMS | AWS, `eu-central-1`, 2026-09-26 | **Works, for what was measured.** A root key sealed and opened again; the blob refused under a changed encryption context and under none; a blob sealed without a context, as keyrings before contexts were, still opens. Under a role that may use the key only with blindbucket's context or none. **Not measured against AWS:** a gateway started from a KMS-sealed keyring end to end, and what a disabled or deleted key does to the next start — both are what the Vault row covers and this one does not yet. |
 
-That asymmetry is deliberate rather than an oversight. An AWS account is not a
-build dependency, and "supports AWS KMS" without ever having called AWS would be
-a claim this document exists to avoid making.
+An AWS account is still not a build dependency. The regular CI runs the KMS
+tests against `nsmithuk/local-kms`, which speaks the KMS JSON API and
+establishes that the client speaks it correctly; the run against AWS is the
+manual one in [`deploy/aws-test/`](../deploy/aws-test/), because it is billed
+and measures the service rather than a change.
 
 Both are brought up with the compose profile the tests use:
 
@@ -229,7 +239,7 @@ BLINDBUCKET_TEST_KMS_ENDPOINT=http://127.0.0.1:4599 \
 
 | Limit | Detail |
 |---|---|
-| **The AWS credential chain** | Not used. KMS credentials are configured explicitly, so instance roles, web identity and SSO do not apply. A consequence of hand-writing the client rather than taking the SDK (ADR-013). |
+| **The AWS credential chain** | Not used. KMS credentials are configured explicitly, so instance roles, web identity and SSO do not apply on their own. Temporary credentials from any of them work when configured — `session_token` is honoured, and the AWS measurement ran on exactly that. A consequence of hand-writing the client rather than taking the SDK (ADR-013). |
 | **Changing a keyring's source** | There is no `blindbucket reseal`. Moving between a passphrase, Vault and KMS means creating a new keyring and rotating objects onto it. |
 | **Vault authentication** | A token. AppRole, Kubernetes auth and the rest are not implemented; a token from any of them can be configured. |
 
