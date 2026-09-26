@@ -80,20 +80,38 @@ func TestWarnsAboutExposedKeyFiles(t *testing.T) {
 // captureStderr collects what f writes to os.Stderr.
 func captureStderr(t *testing.T, f func()) string {
 	t.Helper()
+	return capture(t, &os.Stderr, f)
+}
+
+// captureStdout collects what f writes to os.Stdout.
+func captureStdout(t *testing.T, f func()) string {
+	t.Helper()
+	return capture(t, &os.Stdout, f)
+}
+
+// capture swaps one of the process's streams for a pipe while f runs and
+// returns what was written to it. The pipe is drained while f is still
+// writing, so output larger than a pipe buffer does not deadlock the test.
+// Nest two calls to capture both streams.
+func capture(t *testing.T, stream **os.File, f func()) string {
+	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
-	saved := os.Stderr
-	os.Stderr = w
+	read := make(chan []byte, 1)
+	go func() {
+		out, _ := io.ReadAll(r)
+		read <- out
+	}()
+
+	saved := *stream
+	*stream = w
+	defer func() { *stream = saved }()
 	f()
-	os.Stderr = saved
+	*stream = saved
 	if err := w.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	return string(out)
+	return string(<-read)
 }
