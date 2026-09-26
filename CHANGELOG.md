@@ -21,6 +21,15 @@ without the rotation. Prints each as enforced, ignored or refused, or emits
 JSON with `--json`, and exits 1 where a guarded rotation would be refused, so a
 script can ask the question. Needs the configuration, not the keyring.
 
+**`blindbucket gc --json`.** The collection summary as one JSON document, for
+the runs that are on a timer. Every count is always present, zero included, so
+a parser never has to tell zero from absent; `dry_run` is a field instead of
+the verb changing between "deleted" and "would delete"; the start is RFC 3339
+UTC and the duration a number of seconds. A run that could not process every
+manifest still prints its document, with the failure in a non-zero exit code
+and in `errors`, because the counts are what a monitoring system most needs
+when something went wrong.
+
 ### Fixed
 
 **`blindbucket help` no longer lists `inspect` as planned for M6.** M6 closed
