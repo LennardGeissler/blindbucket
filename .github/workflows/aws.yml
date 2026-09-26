@@ -57,8 +57,15 @@ jobs:
           # trip, and the suite takes minutes; without it the log is silent
           # until the end.
           go test -count=1 -v -timeout 25m ./internal/upstream/... ./internal/proxy/... 2>&1 |
-            tee suite.log | grep -E '^(=== RUN|--- |ok|FAIL|PASS|panic)'
+            tee suite.log | grep -E '^(=== RUN|\s*--- |ok|FAIL|PASS|panic)|_test\.go:[0-9]+:'
           test "${PIPESTATUS[0]}" -eq 0
+
+      - name: Keep the full log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-suite-log
+          path: suite.log
 
       - name: Root-key tests against KMS
         env:

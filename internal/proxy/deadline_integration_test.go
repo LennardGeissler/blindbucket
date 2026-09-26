@@ -5,8 +5,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"strconv"
 	"testing"
 	"time"
 )
@@ -22,6 +20,26 @@ func withStall(d time.Duration) func(*Config) {
 	return func(c *Config) { c.StallTimeout = d }
 }
 
+// withSendBuffer fixes the send buffer of every connection the gateway accepts.
+// Setting it also stops Linux from growing it, which it otherwise does up to
+// tcp_wmem's maximum of 4 MiB.
+func withSendBuffer(size int) func(net.Listener) net.Listener {
+	return func(l net.Listener) net.Listener { return sendBufferListener{l, size} }
+}
+
+type sendBufferListener struct {
+	net.Listener
+	size int
+}
+
+func (l sendBufferListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if tcp, ok := c.(*net.TCPConn); ok {
+		_ = tcp.SetWriteBuffer(l.size)
+	}
+	return c, err
+}
+
 // A client that stops reading must not hold its connection for ever. There is
 // deliberately no WriteTimeout, so without the renewed deadline nothing would
 // ever close this.
@@ -33,12 +51,14 @@ func withStall(d time.Duration) func(*Config) {
 // that delivers slowly -- AWS, from a runner an ocean away -- the object
 // trickles into them for longer than the client pauses. No write ever blocks,
 // the client resumes, and the download completes. That is the guard working as
-// specified, and the test failing. The client's receive buffer is therefore
-// pinned small, which makes the buffers fill in a fraction of a second on any
-// system and against any provider.
+// specified, and the test failing. Both ends are therefore pinned small -- the
+// client's receive buffer and the gateway's send buffer, since pinning only the
+// first left Linux room to queue 4 MiB on the second -- which makes them fill
+// in a fraction of a second on any system and against any provider.
 func TestIntegrationStalledDownloadIsDropped(t *testing.T) {
 	const stall = 2 * time.Second
-	h := newHarness(t, withStall(stall))
+	const buffer = 64 << 10
+	h := newHarness(t, withStall(stall), withSendBuffer(buffer))
 	key := testKey(t, "stalled.bin")
 
 	// Larger than the buffers, so the server's writes block once the client
@@ -46,12 +66,8 @@ func TestIntegrationStalledDownloadIsDropped(t *testing.T) {
 	// stall would never be observable.
 	h.store(t, key, randomBytes(t, 8<<20))
 
-	rcvbuf := 64 << 10
-	if v, err := strconv.Atoi(os.Getenv("BLINDBUCKET_TEST_STALL_RCVBUF")); err == nil {
-		rcvbuf = v // to reproduce the failure this pins against
-	}
 	client := &http.Client{Transport: &signingTransport{base: &http.Transport{
-		DialContext: (&net.Dialer{Control: receiveBuffer(rcvbuf)}).DialContext,
+		DialContext: (&net.Dialer{Control: receiveBuffer(buffer)}).DialContext,
 	}}}
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.url(key), nil)
 	if err != nil {
