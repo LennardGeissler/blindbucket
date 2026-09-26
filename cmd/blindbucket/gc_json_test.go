@@ -81,9 +81,9 @@ func TestMarshalGCJSON(t *testing.T) {
 	}
 }
 
-// gcConfig writes a configuration pointing at the provider under test. gc
-// reads the upstream section and nothing that needs a keyring.
-func gcConfig(t *testing.T, p testprovider.Provider) string {
+// providerConfig writes a configuration pointing at the provider under test
+// and at keyring. gc never opens the keyring, so its tests can name any path.
+func providerConfig(t *testing.T, p testprovider.Provider, keyring string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "blindbucket.yaml")
 	yaml := fmt.Sprintf(`server:
@@ -97,13 +97,13 @@ upstream:
   session_token: %q
 keys:
   provider: file
-  keyring: keyring.json
+  keyring: %s
 clients:
   - name: gc-test
     access_key_id: GCTESTKEY
     secret_access_key: gc-test-secret-key
     buckets: [%q]
-`, p.Endpoint, p.Region, p.PathStyle, p.AccessKey, p.SecretKey, p.SessionToken, p.Bucket)
+`, p.Endpoint, p.Region, p.PathStyle, p.AccessKey, p.SecretKey, p.SessionToken, keyring, p.Bucket)
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatalf("writing the config: %v", err)
 	}
@@ -115,7 +115,7 @@ clients:
 // over a shared test bucket would otherwise act on other runs' objects.
 func TestGCJSONThroughTheCommand(t *testing.T) {
 	p := testprovider.Require(t)
-	cfg := gcConfig(t, p)
+	cfg := providerConfig(t, p, "unused-keyring.json")
 	target := "s3://" + p.Bucket + "/" + testprovider.RunPrefix() + "gc-json/"
 
 	gcCmd := func(t *testing.T, extra ...string) (stdout, stderr string) {

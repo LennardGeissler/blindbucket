@@ -30,6 +30,13 @@ manifest still prints its document, with the failure in a non-zero exit code
 and in `errors`, because the counts are what a monitoring system most needs
 when something went wrong.
 
+**`blindbucket rotate --json`.** The rotation summary in the same shape as
+`gc --json`, and decided the same way on a partial failure. The target key id
+is a field of its own rather than a quote inside the verb line, since it is
+what the run was for, and `conflicted` above zero is the answer to "does this
+need running again". `unconditional` records whether the run gave up the
+guards.
+
 ### Fixed
 
 **`blindbucket help` no longer lists `inspect` as planned for M6.** M6 closed
