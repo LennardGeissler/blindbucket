@@ -5,10 +5,15 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: blindbucket integration tests against AWS S3 and KMS
 
 Parameters:
-  Repository:
+  SubjectPrefix:
     Type: String
-    Default: LennardGeissler/blindbucket
-    Description: owner/name of the GitHub repository whose workflows may assume the role
+    Default: repo:LennardGeissler@116653587/blindbucket@1365924106
+    Description: >-
+      The start of the OIDC token's sub claim for the repository, as
+      `gh api repos/<owner>/<repo>/actions/oidc/customization/sub` reports it
+      in sub_claim_prefix. With immutable subjects it carries the owner's and
+      the repository's numeric ids, so a repository later created under the
+      same name cannot assume the role.
   Environment:
     Type: String
     Default: aws
@@ -103,7 +108,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub repo:${Repository}:environment:${Environment}
+                token.actions.githubusercontent.com:sub: !Sub ${SubjectPrefix}:environment:${Environment}
       Policies:
         - PolicyName: test-bucket-and-key
           PolicyDocument:
@@ -114,11 +119,13 @@ Resources:
                 Action:
                   - s3:ListBucket
                   - s3:ListBucketMultipartUploads
+                  - s3:GetBucketLocation   # forwarded by the gateway (?location)
                 Resource: !GetAtt TestBucket.Arn
               - Sid: Objects
                 Effect: Allow
                 Action:
                   - s3:GetObject
+                  - s3:GetObjectTagging    # forwarded, and asked by the AWS CLI before a copy
                   - s3:PutObject
                   - s3:DeleteObject
                   - s3:AbortMultipartUpload

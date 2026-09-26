@@ -27,7 +27,7 @@ jobs:
     name: Integration (AWS S3, KMS)
     runs-on: ubuntu-latest
     environment: aws
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -53,7 +53,12 @@ jobs:
           export BLINDBUCKET_TEST_S3_SECRET_KEY="$AWS_SECRET_ACCESS_KEY"
           export BLINDBUCKET_TEST_S3_SESSION_TOKEN="$AWS_SESSION_TOKEN"
           go test -count=1 -v ./internal/probe/... 2>&1 | tee probe.log
-          go test -count=1 -timeout 20m ./internal/upstream/... ./internal/proxy/...
+          # -v: against a provider an ocean away every request costs a round
+          # trip, and the suite takes minutes; without it the log is silent
+          # until the end.
+          go test -count=1 -v -timeout 25m ./internal/upstream/... ./internal/proxy/... 2>&1 |
+            tee suite.log | grep -E '^(=== RUN|--- |ok|FAIL|PASS|panic)'
+          test "${PIPESTATUS[0]}" -eq 0
 
       - name: Root-key tests against KMS
         env:
