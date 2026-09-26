@@ -46,8 +46,10 @@ Clients speak ordinary S3. The storage provider only ever sees ciphertext — ne
 
 blindbucket is a reverse proxy that speaks the S3 API. It sits between any S3 client — AWS
 CLI, boto3, rclone, `mc`, your own backend — and any S3-compatible store (AWS S3,
-Cloudflare R2, MinIO, Backblaze B2). Uploads are encrypted in the stream, downloads are
-decrypted in the stream. For the client, only the endpoint changes:
+Cloudflare R2, MinIO, Backblaze B2). Measured so far against MinIO, Garage and AWS S3;
+R2 and B2 not yet ([COMPATIBILITY.md](docs/COMPATIBILITY.md)). Uploads are encrypted in
+the stream, downloads are decrypted in the stream. For the client, only the endpoint
+changes:
 
 ```
 aws s3 cp big.tar.zst s3://backups/ --endpoint-url http://localhost:9000
