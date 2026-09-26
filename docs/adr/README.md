@@ -26,8 +26,10 @@ rejected options is not a decision, it is a default.
 | [018](ADR-018-rollback-detection.md) | Rollback detection: a local freshness index, trust on first use | Accepted | M6 |
 | [019](ADR-019-presigned-urls.md) | Presigned URLs: verified, never issued, and only for reads | Accepted | M6 |
 | [020](ADR-020-conditional-writes-measured.md) | Conditional writes are measured before a rotation, not assumed | Accepted | M7 |
+| [021](ADR-021-what-1.0-promises.md) | What 1.0 promises: data at rest forever, interfaces per major, the rest not at all | Proposed | M10 |
 
-Every entry is Accepted. 018 was Proposed while it was a decision without code, for the
+Every entry is Accepted but 021, which is Proposed until `v1.0.0`: it decides
+what that release promises, so it takes effect with it. 018 was Proposed while it was a decision without code, for the
 same reason 015 was: its decisions already constrained the code while the code did not yet
 use them. 015 and 017 became Accepted together, when name encryption went from a primitive
 nothing called to something every operation goes through; 016 depended on 015 in the
