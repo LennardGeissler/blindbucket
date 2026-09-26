@@ -155,6 +155,34 @@ jobs:
         if: failure()
         run: docker logs minio
 
+  # Every released version writes, the current build reads. The promise that
+  # objects written by any release stay readable, checked on every change
+  # rather than stated (test/upgrade/upgrade.sh).
+  upgrade:
+    name: Upgrade (every release reads back)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the release tags are what it builds
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9002:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            cgr.dev/chainguard/minio:latest server /data
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:9002/minio/health/live >/dev/null; then break; fi
+            sleep 1
+          done
+          docker run --rm --network host --entrypoint sh cgr.dev/chainguard/minio:latest -c \
+            "mc alias set local http://localhost:9002 minioadmin minioadmin && \
+             mc mb --ignore-existing local/blindbucket-test"
+      - name: Read back what every release wrote
+        run: test/upgrade/upgrade.sh
+
   # The same suite against an independent S3 implementation. Whatever the
   # gateway has quietly come to rely on in MinIO shows up here first: the first
   # run found a provider that ignores If-Match on completion (ADR-020).

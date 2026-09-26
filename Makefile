@@ -93,6 +93,12 @@ ref-diff:
 	cd ref/python && python3 difftest.py --count $(COUNT)
 	cd ref/python && python3 difftest_names.py --count $(COUNT)
 
+# Every released version's objects, keyring and files read back by the current
+# build. Needs the compose file's MinIO and the AWS CLI; see test/upgrade/.
+.PHONY: upgrade-test
+upgrade-test:
+	test/upgrade/upgrade.sh
+
 # --- Demo recording (demo/) --------------------------------------------------
 
 # The terminal recording the README leads with. demo/README.md has the

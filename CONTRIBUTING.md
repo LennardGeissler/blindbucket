@@ -104,6 +104,7 @@ make ref-vectors           # the Python decoder against the known-answer vectors
 make ref-diff              # differential test, 100 000 inputs
 make bench                 # micro-benchmarks
 make vuln                  # govulncheck
+make upgrade-test          # every release writes, the current build reads (needs MinIO)
 ```
 
 The provider tests default to the compose file's MinIO, so locally the endpoint
@@ -154,7 +155,9 @@ need services:
 both Go 1.24 and current · a 30-second fuzz smoke run · integration tests against
 MinIO and Garage · Vault and the KMS emulator · the boto3 and AWS CLI client scenarios,
 including a multipart upload across **two gateway instances behind a
-round-robin balancer** — statelessness is tested, not asserted. Pull requests
+round-robin balancer** — statelessness is tested, not asserted · every released
+version, built from its tag, writes objects that the current build must read
+back. Pull requests
 additionally get a `benchstat` comparison against the base commit, reported in
 the job summary rather than failing the build.
 
