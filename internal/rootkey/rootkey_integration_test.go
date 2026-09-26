@@ -24,6 +24,11 @@ const (
 	vaultAddrEnv   = "BLINDBUCKET_TEST_VAULT_ADDR"
 	vaultTokenEnv  = "BLINDBUCKET_TEST_VAULT_TOKEN"
 	kmsEndpointEnv = "BLINDBUCKET_TEST_KMS_ENDPOINT"
+	// kmsKeyEnv points the KMS tests at an existing key in real AWS instead of
+	// the emulator. The credentials are the standard AWS_* variables, which is
+	// what aws-actions/configure-aws-credentials exports; the gateway itself
+	// never reads them (ADR-013), only this test does.
+	kmsKeyEnv = "BLINDBUCKET_TEST_KMS_KEY_ID"
 )
 
 func newTestVault(t *testing.T) *Vault {
@@ -45,9 +50,13 @@ func newTestVault(t *testing.T) *Vault {
 // this test.
 func newTestKMS(t *testing.T) *KMS {
 	t.Helper()
+	if key := os.Getenv(kmsKeyEnv); key != "" {
+		return newAWSKMS(t, key)
+	}
 	endpoint := os.Getenv(kmsEndpointEnv)
 	if endpoint == "" {
-		t.Skipf("set %s to run these (docker compose --profile keys up -d)", kmsEndpointEnv)
+		t.Skipf("set %s to run these (docker compose --profile keys up -d), "+
+			"or %s for a key in real AWS", kmsEndpointEnv, kmsKeyEnv)
 	}
 	// The emulator accepts any credentials; these are not secrets.
 	cfg := KMSConfig{
@@ -73,6 +82,30 @@ func newTestKMS(t *testing.T) *KMS {
 
 	cfg.KeyID = created.KeyMetadata.KeyID
 	k, err = NewKMS(cfg)
+	if err != nil {
+		t.Fatalf("NewKMS: %v", err)
+	}
+	return k
+}
+
+// newAWSKMS returns a KMS source for an existing key in AWS. It creates
+// nothing: the key belongs to deploy/aws-test, and the role the tests run under
+// may only encrypt and decrypt with it.
+func newAWSKMS(t *testing.T, keyID string) *KMS {
+	t.Helper()
+	region := os.Getenv("AWS_REGION")
+	if region == "" {
+		region = os.Getenv("AWS_DEFAULT_REGION")
+	}
+	if region == "" || os.Getenv("AWS_ACCESS_KEY_ID") == "" {
+		t.Fatalf("%s is set, but AWS_REGION and the AWS_* credentials are not", kmsKeyEnv)
+	}
+	k, err := NewKMS(KMSConfig{
+		Region: region, KeyID: keyID,
+		AccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
+		SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+		SessionToken:    os.Getenv("AWS_SESSION_TOKEN"),
+	})
 	if err != nil {
 		t.Fatalf("NewKMS: %v", err)
 	}

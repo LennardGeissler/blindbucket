@@ -30,7 +30,7 @@ func TestMain(m *testing.M) {
 func sweepRun(p testprovider.Provider) {
 	client, err := upstream.New(upstream.Config{
 		Endpoint: p.Endpoint, Region: p.Region, PathStyle: p.PathStyle,
-		AccessKeyID: p.AccessKey, SecretAccessKey: p.SecretKey,
+		AccessKeyID: p.AccessKey, SecretAccessKey: p.SecretKey, SessionToken: p.SessionToken,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sweep: %v\n", err)

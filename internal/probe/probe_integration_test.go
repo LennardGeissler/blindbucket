@@ -19,7 +19,7 @@ func TestIntegrationConditionalWrites(t *testing.T) {
 	p := testprovider.Require(t)
 	client, err := upstream.New(upstream.Config{
 		Endpoint: p.Endpoint, Region: p.Region, PathStyle: p.PathStyle,
-		AccessKeyID: p.AccessKey, SecretAccessKey: p.SecretKey,
+		AccessKeyID: p.AccessKey, SecretAccessKey: p.SecretKey, SessionToken: p.SessionToken,
 	})
 	if err != nil {
 		t.Fatalf("upstream.New: %v", err)

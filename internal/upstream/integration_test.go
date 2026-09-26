@@ -29,6 +29,7 @@ func requireProvider(t *testing.T) *Client {
 		PathStyle:       p.PathStyle,
 		AccessKeyID:     p.AccessKey,
 		SecretAccessKey: p.SecretKey,
+		SessionToken:    p.SessionToken,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

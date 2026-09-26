@@ -28,8 +28,11 @@ const (
 	RegionEnv    = "BLINDBUCKET_TEST_S3_REGION"
 	AccessKeyEnv = "BLINDBUCKET_TEST_S3_ACCESS_KEY"
 	SecretKeyEnv = "BLINDBUCKET_TEST_S3_SECRET_KEY"
-	BucketEnv    = "BLINDBUCKET_TEST_S3_BUCKET"
-	PathStyleEnv = "BLINDBUCKET_TEST_S3_PATH_STYLE"
+	// SessionTokenEnv goes with temporary credentials, which is what an OIDC
+	// role in CI hands out.
+	SessionTokenEnv = "BLINDBUCKET_TEST_S3_SESSION_TOKEN"
+	BucketEnv       = "BLINDBUCKET_TEST_S3_BUCKET"
+	PathStyleEnv    = "BLINDBUCKET_TEST_S3_PATH_STYLE"
 
 	// What the provider is expected to do with the two conditional writes
 	// rotation relies on: "enforced", "ignored" or "refused", as internal/probe
@@ -67,12 +70,13 @@ func Keep() bool { return os.Getenv(KeepEnv) != "" }
 // creating one is a decision about cost and region that a test should not make
 // on a real account.
 type Provider struct {
-	Endpoint  string
-	Region    string
-	AccessKey string
-	SecretKey string
-	Bucket    string
-	PathStyle bool
+	Endpoint     string
+	Region       string
+	AccessKey    string
+	SecretKey    string
+	SessionToken string
+	Bucket       string
+	PathStyle    bool
 
 	// CopySourceIfMatch and CompleteIfMatch are the expected outcomes, both
 	// "enforced" unless stated otherwise -- which is what MinIO does.
@@ -129,8 +133,10 @@ func FromEnv() (Provider, error) {
 		Region:    envOr(RegionEnv, "us-east-1"),
 		AccessKey: envOr(AccessKeyEnv, "minioadmin"),
 		SecretKey: envOr(SecretKeyEnv, "minioadmin"),
-		Bucket:    Bucket(),
-		PathStyle: pathStyle,
+
+		SessionToken: os.Getenv(SessionTokenEnv),
+		Bucket:       Bucket(),
+		PathStyle:    pathStyle,
 
 		CopySourceIfMatch: envOr(CopySourceIfMatchEnv, "enforced"),
 		CompleteIfMatch:   envOr(CompleteIfMatchEnv, "enforced"),

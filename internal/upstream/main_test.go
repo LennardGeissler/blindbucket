@@ -28,7 +28,7 @@ func TestMain(m *testing.M) {
 func sweepRun(p testprovider.Provider) error {
 	c, err := New(Config{
 		Endpoint: p.Endpoint, Region: p.Region, PathStyle: p.PathStyle,
-		AccessKeyID: p.AccessKey, SecretAccessKey: p.SecretKey,
+		AccessKeyID: p.AccessKey, SecretAccessKey: p.SecretKey, SessionToken: p.SessionToken,
 	})
 	if err != nil {
 		return err

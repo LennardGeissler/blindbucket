@@ -1,0 +1,148 @@
+# What the integration suite needs to run against real AWS, and nothing else:
+# a bucket of its own, a KMS key, and a role GitHub Actions can assume without a
+# stored access key. See deploy/aws-test/README.md.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: blindbucket integration tests against AWS S3 and KMS
+
+Parameters:
+  Repository:
+    Type: String
+    Default: LennardGeissler/blindbucket
+    Description: owner/name of the GitHub repository whose workflows may assume the role
+  Environment:
+    Type: String
+    Default: aws
+    Description: >-
+      GitHub environment the workflow must run in. Only jobs in it get the role,
+      so a pull request from a fork never does.
+  CreateOIDCProvider:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      An account holds one provider for token.actions.githubusercontent.com. Set
+      to false if another stack already created it.
+
+Conditions:
+  MakeProvider: !Equals [!Ref CreateOIDCProvider, "true"]
+
+Resources:
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: MakeProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  # The tests write, overwrite and delete behind the gateway's back, so the
+  # bucket holds nothing else. Every run sweeps what it wrote; the lifecycle
+  # rule is for the run that crashes before it can.
+  TestBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub blindbucket-test-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-everything-after-a-day
+            Status: Enabled
+            ExpirationInDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  # Seals a keyring in the root-key tests (ADR-013). The key policy leaves
+  # access to IAM; the role below is what grants it.
+  TestKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Delete
+    Properties:
+      Description: blindbucket integration tests
+      EnableKeyRotation: false
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AccountAdministers
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: "*"
+
+  TestKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/blindbucket-test
+      TargetKeyId: !Ref TestKey
+
+  GitHubRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: blindbucket-github-tests
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              # A reference rather than a spelled-out ARN, so that the provider
+              # exists before the role that trusts it.
+              Federated: !If
+                - MakeProvider
+                - !Ref GitHubOIDCProvider
+                - !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${Repository}:environment:${Environment}
+      Policies:
+        - PolicyName: test-bucket-and-key
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Bucket
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                Resource: !GetAtt TestBucket.Arn
+              - Sid: Objects
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:AbortMultipartUpload
+                  - s3:ListMultipartUploadParts
+                Resource: !Sub ${TestBucket.Arn}/*
+              # Only with the context every blindbucket keyring sends, or with
+              # none: a keyring sealed before contexts existed carries none and
+              # must still open, and the suite checks that it does. Any other
+              # value of the entry is refused.
+              - Sid: SealKeyrings
+                Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                Resource: !GetAtt TestKey.Arn
+                Condition:
+                  StringEqualsIfExists:
+                    kms:EncryptionContext:blindbucket: root-key
+
+Outputs:
+  Bucket:
+    Value: !Ref TestBucket
+  KeyArn:
+    Value: !GetAtt TestKey.Arn
+  RoleArn:
+    Description: the role-to-assume for aws-actions/configure-aws-credentials
+    Value: !GetAtt GitHubRole.Arn
