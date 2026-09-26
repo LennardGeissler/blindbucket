@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -159,6 +160,8 @@ func newHarness(t *testing.T, options ...any) *harness {
 			adjust(&cfg)
 		case func(*auth.Config):
 			// Applied above, before the verifier was built.
+		case func(net.Listener) net.Listener:
+			// Applied below, once the server exists.
 		default:
 			t.Fatalf("newHarness: %T is not a harness option", adjust)
 		}
@@ -168,7 +171,13 @@ func newHarness(t *testing.T, options ...any) *harness {
 		t.Fatalf("proxy.New: %v", err)
 	}
 
-	srv := httptest.NewServer(p)
+	srv := httptest.NewUnstartedServer(p)
+	for _, option := range options {
+		if wrap, ok := option.(func(net.Listener) net.Listener); ok {
+			srv.Listener = wrap(srv.Listener)
+		}
+	}
+	srv.Start()
 	t.Cleanup(srv.Close)
 
 	signing := srv.Client()
