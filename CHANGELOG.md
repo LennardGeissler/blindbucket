@@ -14,6 +14,12 @@ version 1 would keep being readable.
 
 ### Added
 
+**Build information in metrics and the startup log.**
+`blindbucket_build_info{version,go_version}` is a gauge fixed at 1, so dashboards
+can identify the running gateway and its Go toolchain without parsing logs.
+It is present before any traffic; development builds report `version="dev"`,
+matching `blindbucket version`. The existing startup log also carries `version`.
+
 **`blindbucket probe`.** Measures what a provider does with the two
 conditional writes rotation relies on — the same measurement a rotation makes
 before it starts ([ADR-020](docs/adr/ADR-020-conditional-writes-measured.md)),

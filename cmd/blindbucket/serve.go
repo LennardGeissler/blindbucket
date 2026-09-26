@@ -83,7 +83,7 @@ Flags:
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(
 		collectors.ProcessCollectorOpts{}))
-	metrics := obs.NewMetrics(registry)
+	metrics := obs.NewMetrics(registry, obs.MetricsConfig{Version: version})
 	metrics.KeyringLoaded(ring)
 
 	client, err := upstream.New(upstream.Config{
@@ -224,6 +224,7 @@ Flags:
 	}
 
 	log.Info("blindbucket listening",
+		"version", version,
 		"addr", listener.Addr().String(),
 		"upstream", cfg.Upstream.Endpoint,
 		"active_kid", ring.ActiveKID(),

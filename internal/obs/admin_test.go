@@ -3,9 +3,11 @@ package obs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -76,7 +78,7 @@ func TestPprofIsOffByDefault(t *testing.T) {
 // label sets, or an alert written against them silently never fires.
 func TestMetricsAreExported(t *testing.T) {
 	registry := prometheus.NewRegistry()
-	m := NewMetrics(registry)
+	m := NewMetrics(registry, MetricsConfig{})
 
 	m.Request("GetObject", 200, 0)
 	m.Upstream("HeadObject", 0)
@@ -110,11 +112,48 @@ func TestMetricsAreExported(t *testing.T) {
 	}
 }
 
+// Build information must be present before any traffic and stay local to its
+// registry, so separately configured gateways never inherit each other's labels.
+func TestBuildInfoIsExportedWithoutTraffic(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		version string
+		want    string
+	}{
+		{name: "release", version: "0.5.0", want: "0.5.0"},
+		{name: "development", version: "dev", want: "dev"},
+		{name: "default", want: "dev"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := prometheus.NewRegistry()
+			NewMetrics(registry, MetricsConfig{Version: tc.version})
+			h := handlerFor(t, AdminConfig{Registry: registry})
+			for scrape := 0; scrape < 2; scrape++ {
+				code, body := get(t, h, "/metrics")
+				if code != http.StatusOK {
+					t.Fatalf("metrics = %d, want 200", code)
+				}
+				want := fmt.Sprintf("blindbucket_build_info{go_version=%q,version=%q} 1\n",
+					runtime.Version(), tc.want)
+				if !strings.Contains(body, want) {
+					t.Errorf("missing from /metrics: %s", want)
+				}
+				if !strings.Contains(body, "# TYPE blindbucket_build_info gauge\n") {
+					t.Error("build information is not exported as a gauge")
+				}
+				if count := strings.Count(body, "\nblindbucket_build_info{"); count != 1 {
+					t.Errorf("build information has %d series, want 1", count)
+				}
+			}
+		})
+	}
+}
+
 // TestKeyringMetricsExposeKeyAge covers the number a rotation policy is written
 // against. Key age used to be visible only by opening the keyring by hand.
 func TestKeyringMetricsExposeKeyAge(t *testing.T) {
 	registry := prometheus.NewRegistry()
-	m := NewMetrics(registry)
+	m := NewMetrics(registry, MetricsConfig{})
 	m.KeyringLoaded(testKeyring{
 		active: "2026-09",
 		created: map[string]time.Time{
