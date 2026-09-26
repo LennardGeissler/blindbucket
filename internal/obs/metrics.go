@@ -1,6 +1,7 @@
 package obs
 
 import (
+	"runtime"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -66,9 +67,28 @@ type KeyringInfo interface {
 	Created(kid string) (time.Time, bool)
 }
 
+// MetricsConfig carries build information from the caller, so observability
+// does not need to reach into the executable's package to identify its build.
+type MetricsConfig struct {
+	// Version is the release version supplied by the executable. An empty
+	// value identifies a development build.
+	Version string
+}
+
 // NewMetrics registers the collectors and returns them.
-func NewMetrics(reg prometheus.Registerer) *Metrics {
+func NewMetrics(reg prometheus.Registerer, cfg MetricsConfig) *Metrics {
 	factory := promauto{reg}
+	if cfg.Version == "" {
+		cfg.Version = "dev"
+	}
+	// Set the only series at registration, rather than after the first request:
+	// an idle gateway still needs to identify the build an operator deployed.
+	buildInfo := factory.gaugeVec(prometheus.GaugeOpts{
+		Name: "blindbucket_build_info",
+		Help: "Build information for the gateway, with a constant value of 1.",
+	}, []string{"version", "go_version"})
+	buildInfo.WithLabelValues(cfg.Version, runtime.Version()).Set(1)
+
 	return &Metrics{
 		requests: factory.counterVec(prometheus.CounterOpts{
 			Name: "blindbucket_requests_total",

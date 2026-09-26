@@ -390,6 +390,11 @@ curl -s localhost:9100/metrics     # Prometheus
 upstream outage is worse than the outage. `/readyz` does, and says which half
 failed.
 
+`blindbucket_build_info{version,go_version}` is always 1 and identifies the
+running gateway and Go toolchain, even before any requests arrive. A development
+build reports `version="dev"`, matching `blindbucket version`; the startup log
+also includes the gateway version.
+
 The metric worth an alert is `blindbucket_integrity_failures_total{kind}`. It
 counts stored data that failed authentication, which means either a bug here or a
 provider modifying objects — and neither should be discovered by a user opening a
