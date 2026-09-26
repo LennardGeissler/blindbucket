@@ -108,7 +108,7 @@ func upstreamConfig(t *testing.T) upstream.Config {
 	p := testprovider.Require(t)
 	return upstream.Config{
 		Endpoint: p.Endpoint, Region: p.Region, PathStyle: p.PathStyle,
-		AccessKeyID: p.AccessKey, SecretAccessKey: p.SecretKey,
+		AccessKeyID: p.AccessKey, SecretAccessKey: p.SecretKey, SessionToken: p.SessionToken,
 	}
 }
 

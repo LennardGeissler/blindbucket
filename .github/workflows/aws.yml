@@ -1,0 +1,61 @@
+# The integration suite and the KMS tests against real AWS, in eu-central-1.
+#
+# Manual only: it costs a few cents a run and needs the resources that
+# deploy/aws-test/template.yaml creates. It runs in the `aws` environment,
+# which is the only place the role can be assumed from (the role's trust policy
+# names it), so a pull request from a fork never gets AWS credentials.
+#
+# The environment's variables, from the stack's outputs:
+#   AWS_ROLE_ARN   RoleArn
+#   AWS_BUCKET     Bucket
+#   AWS_KMS_KEY    KeyArn
+name: AWS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # the OIDC token the role is assumed with
+
+env:
+  GOTOOLCHAIN: local
+  AWS_REGION: eu-central-1
+
+jobs:
+  aws:
+    name: Integration (AWS S3, KMS)
+    runs-on: ubuntu-latest
+    environment: aws
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
+
+      # What AWS is expected to do with the two conditional writes rotation
+      # relies on is the default, "enforced". internal/probe checks it, and
+      # fails if AWS does otherwise.
+      - name: Provider tests against S3
+        env:
+          BLINDBUCKET_TEST_S3_ENDPOINT: https://s3.${{ env.AWS_REGION }}.amazonaws.com
+          BLINDBUCKET_TEST_S3_BUCKET: ${{ vars.AWS_BUCKET }}
+          BLINDBUCKET_TEST_S3_PATH_STYLE: "false"
+        run: |
+          export BLINDBUCKET_TEST_S3_REGION="$AWS_REGION"
+          export BLINDBUCKET_TEST_S3_ACCESS_KEY="$AWS_ACCESS_KEY_ID"
+          export BLINDBUCKET_TEST_S3_SECRET_KEY="$AWS_SECRET_ACCESS_KEY"
+          export BLINDBUCKET_TEST_S3_SESSION_TOKEN="$AWS_SESSION_TOKEN"
+          go test -count=1 -v ./internal/probe/... 2>&1 | tee probe.log
+          go test -count=1 -timeout 20m ./internal/upstream/... ./internal/proxy/...
+
+      - name: Root-key tests against KMS
+        env:
+          BLINDBUCKET_TEST_KMS_KEY_ID: ${{ vars.AWS_KMS_KEY }}
+        run: go test -count=1 -v -run 'KMS' ./internal/rootkey/...

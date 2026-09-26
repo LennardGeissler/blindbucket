@@ -1,0 +1,65 @@
+# Running the suite against AWS
+
+[`template.yaml`](template.yaml) creates what the integration suite and the
+KMS tests need in a real AWS account, and nothing more:
+
+- **a bucket of its own**, `blindbucket-test-<account id>`, with public access
+  blocked and a lifecycle rule that expires every object and aborts every
+  incomplete upload after a day. Each test run sweeps what it wrote; the rule
+  is for the run that crashes first.
+- **a KMS key**, `alias/blindbucket-test`, for sealing a keyring (ADR-013).
+- **a role for GitHub Actions**, assumed through OIDC, so no access key is ever
+  stored anywhere. Only workflows in this repository's `aws` environment can
+  assume it, and it may touch only that bucket and that key — the key only for
+  `Encrypt` and `Decrypt`, and only with the encryption context blindbucket
+  sends or with none.
+
+It costs about a dollar a month for the key, and fractions of a cent per run.
+
+## Setting it up
+
+With the AWS CLI logged in to the account (`aws login` is enough for a
+personal one):
+
+```sh
+aws cloudformation deploy \
+  --region eu-central-1 \
+  --stack-name blindbucket-test \
+  --template-file deploy/aws-test/template.yaml \
+  --capabilities CAPABILITY_NAMED_IAM
+
+aws cloudformation describe-stacks --region eu-central-1 \
+  --stack-name blindbucket-test --query 'Stacks[0].Outputs' --output table
+```
+
+If the account already has a GitHub OIDC provider, add
+`--parameter-overrides CreateOIDCProvider=false`.
+
+Then give the repository an `aws` environment carrying the three outputs as
+variables — not secrets, none of them is one:
+
+```sh
+gh api -X PUT repos/<owner>/<repo>/environments/aws
+gh variable set AWS_ROLE_ARN --env aws --body <RoleArn>
+gh variable set AWS_BUCKET   --env aws --body <Bucket>
+gh variable set AWS_KMS_KEY  --env aws --body <KeyArn>
+```
+
+## Running it
+
+```sh
+gh workflow run aws.yml
+```
+
+The run is manual on purpose: it is billed, and it measures a provider rather
+than a change.
+
+## Removing it
+
+```sh
+aws s3 rm s3://blindbucket-test-<account id> --recursive --region eu-central-1
+aws cloudformation delete-stack --region eu-central-1 --stack-name blindbucket-test
+```
+
+The key is scheduled for deletion, not deleted: KMS keeps it for seven days,
+during which it can be restored and still costs its monthly fee pro rata.
