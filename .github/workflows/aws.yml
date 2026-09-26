@@ -56,7 +56,7 @@ jobs:
           # -v: against a provider an ocean away every request costs a round
           # trip, and the suite takes minutes; without it the log is silent
           # until the end.
-          go test -count=1 -v -timeout 25m ./internal/upstream/... ./internal/proxy/... 2>&1 |
+          go test -count=1 -v -timeout 25m ./internal/upstream/... ./internal/proxy/... ./cmd/... 2>&1 |
             tee suite.log | grep -E '^(=== RUN|\s*--- |ok|FAIL|PASS|panic)|_test\.go:[0-9]+:'
           test "${PIPESTATUS[0]}" -eq 0
 

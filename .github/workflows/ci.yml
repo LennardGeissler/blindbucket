@@ -150,7 +150,7 @@ jobs:
       - name: Run the integration tests
         env:
           BLINDBUCKET_TEST_S3_ENDPOINT: http://localhost:9002
-        run: go test -race -count=1 ./internal/upstream/... ./internal/proxy/... ./internal/probe/...
+        run: go test -race -count=1 ./internal/upstream/... ./internal/proxy/... ./internal/probe/... ./cmd/...
       - name: MinIO logs on failure
         if: failure()
         run: docker logs minio
@@ -198,7 +198,7 @@ jobs:
         # The script prints `export NAME=value` lines; GITHUB_ENV wants them bare.
         run: test/providers/garage.sh | sed -n 's/^export //p' >> "$GITHUB_ENV"
       - name: Run the integration tests
-        run: go test -race -count=1 ./internal/upstream/... ./internal/proxy/... ./internal/probe/...
+        run: go test -race -count=1 ./internal/upstream/... ./internal/proxy/... ./internal/probe/... ./cmd/...
       - name: Garage logs on failure
         if: failure()
         run: docker logs blindbucket-garage
