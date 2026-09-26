@@ -49,17 +49,31 @@ Then give the repository an `aws` environment carrying the three outputs as
 variables — not secrets, none of them is one:
 
 ```sh
-gh api -X PUT repos/<owner>/<repo>/environments/aws
+gh api -X PUT repos/<owner>/<repo>/environments/aws --input - <<JSON
+{"reviewers": [{"type": "User", "id": $(gh api users/<owner> --jq .id)}],
+ "prevent_self_review": false,
+ "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
+JSON
+gh api -X POST repos/<owner>/<repo>/environments/aws/deployment-branch-policies -f name=main -f type=branch
 gh variable set AWS_ROLE_ARN --env aws --body <RoleArn>
 gh variable set AWS_BUCKET   --env aws --body <Bucket>
 gh variable set AWS_KMS_KEY  --env aws --body <KeyArn>
 ```
+
+That environment is the whole of the protection on the GitHub side, so it gets
+two rules. **Only `main`** may deploy to it, so a branch cannot run changed
+workflow code under the role. **Every run waits for the owner's approval**, so
+that neither a compromised account's token nor a merged workflow change that
+starts using the environment can spend money unseen. Self-review stays allowed:
+every run is started by the owner, and without it none could be approved.
 
 ## Running it
 
 ```sh
 gh workflow run aws.yml
 ```
+
+The run then waits in *Review deployments* on its page until it is approved.
 
 The run is manual on purpose: it is billed, and it measures a provider rather
 than a change.
