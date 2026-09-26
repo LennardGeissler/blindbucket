@@ -3,7 +3,10 @@ package proxy
 import (
 	"bytes"
 	"io"
+	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -22,17 +25,42 @@ func withStall(d time.Duration) func(*Config) {
 // A client that stops reading must not hold its connection for ever. There is
 // deliberately no WriteTimeout, so without the renewed deadline nothing would
 // ever close this.
+//
+// The guard fires on a write that blocks, and a write only blocks once the
+// socket buffers between gateway and client are full. So this test is only
+// about the guard if those buffers fill quickly, and on their own they do not
+// always: Linux grows loopback buffers to several MiB, and against a provider
+// that delivers slowly -- AWS, from a runner an ocean away -- the object
+// trickles into them for longer than the client pauses. No write ever blocks,
+// the client resumes, and the download completes. That is the guard working as
+// specified, and the test failing. The client's receive buffer is therefore
+// pinned small, which makes the buffers fill in a fraction of a second on any
+// system and against any provider.
 func TestIntegrationStalledDownloadIsDropped(t *testing.T) {
 	const stall = 2 * time.Second
 	h := newHarness(t, withStall(stall))
 	key := testKey(t, "stalled.bin")
 
-	// Larger than any socket buffer, so the server's writes block once the
-	// client stops reading. A small object would be handed to the kernel whole
-	// and the stall would never be observable.
+	// Larger than the buffers, so the server's writes block once the client
+	// stops reading. A small object would be handed to the kernel whole and the
+	// stall would never be observable.
 	h.store(t, key, randomBytes(t, 8<<20))
 
-	resp := h.do(t, http.MethodGet, key)
+	rcvbuf := 64 << 10
+	if v, err := strconv.Atoi(os.Getenv("BLINDBUCKET_TEST_STALL_RCVBUF")); err == nil {
+		rcvbuf = v // to reproduce the failure this pins against
+	}
+	client := &http.Client{Transport: &signingTransport{base: &http.Transport{
+		DialContext: (&net.Dialer{Control: receiveBuffer(rcvbuf)}).DialContext,
+	}}}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.url(key), nil)
+	if err != nil {
+		t.Fatalf("building request: %v", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET returned %d", resp.StatusCode)

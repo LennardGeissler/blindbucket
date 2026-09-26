@@ -32,8 +32,18 @@ aws cloudformation describe-stacks --region eu-central-1 \
   --stack-name blindbucket-test --query 'Stacks[0].Outputs' --output table
 ```
 
+The role trusts one repository, named by the prefix of the OIDC token's `sub`
+claim. The default is this repository's. For a fork, read yours and pass it:
+
+```sh
+gh api repos/<owner>/<repo>/actions/oidc/customization/sub --jq .sub_claim_prefix
+#   → --parameter-overrides SubjectPrefix=<that>
+```
+
+A repository with immutable subjects has numeric ids in it
+(`repo:owner@123/repo@456`), which is why it cannot be derived from the name.
 If the account already has a GitHub OIDC provider, add
-`--parameter-overrides CreateOIDCProvider=false`.
+`CreateOIDCProvider=false` to the overrides.
 
 Then give the repository an `aws` environment carrying the three outputs as
 variables — not secrets, none of them is one:
