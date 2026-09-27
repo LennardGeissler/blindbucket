@@ -51,7 +51,7 @@ Flags:
 		toKID   = fs.String("to-kid", "", "key id to wrap under; defaults to the active key")
 		workers = fs.Int("concurrency", 8, "objects to rotate at once")
 		dryRun  = fs.Bool("dry-run", false, "report what would be rotated, change nothing")
-		jsonOut = fs.Bool("json", false, "emit the summary as JSON")
+		jsonOut = jsonFlag(fs, "the summary")
 		uncond  = fs.Bool("allow-unconditional", false,
 			"write without If-Match; gives up I2, see the warning it prints")
 		verbose = fs.Bool("v", false, "log at debug level")

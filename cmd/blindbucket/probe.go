@@ -44,7 +44,7 @@ Flags:
 
 	var (
 		cfgPath = fs.String("config", "blindbucket.yaml", "configuration file")
-		jsonOut = fs.Bool("json", false, "emit the result as JSON")
+		jsonOut = jsonFlag(fs, "the result")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err

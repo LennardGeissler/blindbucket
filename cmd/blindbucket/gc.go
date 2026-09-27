@@ -48,7 +48,7 @@ Flags:
 		minAge  = fs.Duration("min-age", gc.DefaultMinAge,
 			"leave manifests younger than this alone; 0 disables the guard")
 		dryRun  = fs.Bool("dry-run", false, "report what would be deleted, delete nothing")
-		jsonOut = fs.Bool("json", false, "emit the summary as JSON")
+		jsonOut = jsonFlag(fs, "the summary")
 		verbose = fs.Bool("v", false, "log at debug level")
 		pass    passphraseFlags
 	)

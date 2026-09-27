@@ -62,7 +62,7 @@ Flags:
 	var (
 		keyring = fs.String("keyring", "", "keyring file (required)")
 		conf    = fs.String("config", "", "configuration file naming the root-key provider")
-		jsonOut = fs.Bool("json", false, "emit the key list as JSON")
+		jsonOut = jsonFlag(fs, "the key list")
 		pass    passphraseFlags
 	)
 	pass.register(fs)
