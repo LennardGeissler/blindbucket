@@ -32,7 +32,8 @@ Clients speak ordinary S3. The storage provider only ever sees ciphertext — ne
 > URLs** are verified, for reads only.
 >
 > The integration suite runs against three providers: MinIO and **Garage** on
-> every change, and **AWS S3 and KMS** on demand, where all 238 tests pass. Garage
+> every change, and **AWS S3 and KMS** on demand, where the suite passes and
+> boto3 and the AWS CLI go through a gateway whose keyring KMS seals. Garage
 > ignores the condition `blindbucket rotate` relies on to never overwrite a
 > client's write, so a rotation measures the provider's conditional writes before
 > it starts and refuses where they are not enforced

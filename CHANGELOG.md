@@ -12,6 +12,13 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Measured
+
+**A KMS-sealed gateway against AWS, end to end.** The manual AWS workflow now
+runs boto3 and the AWS CLI through a gateway whose keyring AWS KMS seals and
+whose upstream is the real bucket, and restarts it to open the keyring again
+([docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)). Passed on 2026-09-27.
+
 ### Fixed
 
 **Root-key credentials can be referenced, as the example always showed.**

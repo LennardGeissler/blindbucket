@@ -28,8 +28,13 @@ virtual-host addressing and the temporary credentials of an OIDC role
 ([`deploy/aws-test/`](../deploy/aws-test/), run by the manual `AWS` workflow).
 From a GitHub runner an ocean away that takes eight minutes rather than
 eighteen seconds, and the one test it broke was a test that assumed a fast
-provider, not the gateway. What that does not cover: the client matrix above
-was not re-run against AWS. R2 and B2 are not measured yet.
+provider, not the gateway. On 2026-09-27 the suite passed again, and the
+clients went through a gateway deployed as it would be on AWS — keyring sealed
+by KMS, upstream the real bucket, every credential a `${VAR}` reference to the
+role's session: boto3 1.43.103 ran all fourteen scenarios, and the AWS CLI
+round-tripped a 40 MiB multipart object, a range across a part boundary and a
+presigned GET, with what the bucket held checked to be ciphertext. R2 and B2 are
+not measured yet.
 
 ---
 
@@ -219,7 +224,7 @@ Transit engine or from AWS KMS (ADR-013). Measured, not assumed:
 | Service | Version | Result |
 |---|---|---|
 | Vault Transit | `hashicorp/vault` dev mode, 2026-09 | **Works.** Seal a keyring, start the gateway with no passphrase anywhere, round-trip a 3 MB object with an identical SHA-256. Deleting the Transit key stops the next start with `encryption key not found`. |
-| AWS KMS | AWS, `eu-central-1`, 2026-09-26 | **Works, for what was measured.** A root key sealed and opened again; the blob refused under a changed encryption context and under none; a blob sealed without a context, as keyrings before contexts were, still opens. Under a role that may use the key only with blindbucket's context or none. **Not measured against AWS:** a gateway started from a KMS-sealed keyring end to end, and what a disabled or deleted key does to the next start — both are what the Vault row covers and this one does not yet. |
+| AWS KMS | AWS, `eu-central-1`, 2026-09-26 and 27 | **Works.** A root key sealed and opened again; the blob refused under a changed encryption context and under none; a blob sealed without a context, as keyrings before contexts were, still opens. Under a role that may use the key only with blindbucket's context or none. End to end: `keygen` seals a keyring with the key, a configuration naming a passphrase is refused it, the gateway starts with no passphrase anywhere and serves the client matrix against S3, and a restart opens the keyring through KMS again and reads what the first process wrote. **Not measured against AWS:** what a disabled or deleted key does to the next start — the test role may not disable its own key, and should not be given that. |
 
 An AWS account is still not a build dependency. The regular CI runs the KMS
 tests against `nsmithuk/local-kms`, which speaks the KMS JSON API and
