@@ -174,14 +174,15 @@ a version number is for here.
 **Negative.**
 
 - Tier 2 is a list to keep. A metric renamed in passing is now a major version,
-  and review has to catch it; the metric names and JSON field sets are not yet
-  pinned by a test the way the formats are.
+  and review alone would not catch it, which is why the metric names and types
+  and the JSON field sets are pinned by tests the way the formats are.
 - New wire formats cost a configuration switch and a release of delay before
   they become the default.
 - The six-month window for a previous major is a commitment a project run by
   one person has to be able to keep.
 
-**Before `v1.0.0`**, then: FORMAT §16 marks format `1` stable; each `--json`
-command's help says to ignore unknown fields; a test pins the metric names; the
+**Before `v1.0.0`**, then: FORMAT §16 marks format `1` stable; the
 known-answer vectors are attached to the release as a versioned artifact; and
-this ADR is Accepted.
+this ADR is Accepted. Two items that were on this list are done: each `--json`
+command's help says to ignore unknown fields, and `internal/obs` pins every
+metric's name, type and label names (`TestMetricsAreAContract`).
