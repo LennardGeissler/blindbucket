@@ -90,6 +90,55 @@ keys:
 	}
 }
 
+// TestLoadResolvesRootKeyCredentials holds the root-key sources to the same
+// rule: a Vault token or a set of KMS credentials is as much a secret as the
+// upstream's, and a file that has to spell one out is a file that cannot be
+// committed or mounted from a ConfigMap.
+func TestLoadResolvesRootKeyCredentials(t *testing.T) {
+	t.Setenv("TEST_KMS_KEY", "resolved-kms-key")
+	t.Setenv("TEST_KMS_SECRET", "resolved-kms-secret")
+	t.Setenv("TEST_KMS_TOKEN", "resolved-kms-token")
+	t.Setenv("TEST_VAULT_TOKEN", "resolved-vault-token")
+
+	base := strings.TrimSuffix(minimal, "keys:\n  keyring: keyring.json\n")
+	cfg, err := Load(write(t, base+`
+keys:
+  provider: awskms
+  keyring: keyring.json
+  awskms:
+    region: eu-central-1
+    key_id: alias/blindbucket
+    access_key_id: ${TEST_KMS_KEY}
+    secret_access_key: ${TEST_KMS_SECRET}
+    session_token: ${TEST_KMS_TOKEN}
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	kms := cfg.Keys.AWSKMS
+	if kms.AccessKeyID != "resolved-kms-key" || kms.SecretAccessKey != "resolved-kms-secret" ||
+		kms.SessionToken != "resolved-kms-token" {
+		t.Errorf("awskms credentials = %q, %q, %q, want the resolved values",
+			kms.AccessKeyID, kms.SecretAccessKey, kms.SessionToken)
+	}
+
+	cfg, err = Load(write(t, base+`
+keys:
+  provider: vault
+  keyring: keyring.json
+  vault:
+    address: http://127.0.0.1:8200
+    token: ${TEST_VAULT_TOKEN}
+    key_name: blindbucket
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Keys.Vault.Token != "resolved-vault-token" {
+		t.Errorf("vault token = %q, want the resolved value", cfg.Keys.Vault.Token)
+	}
+}
+
 // TestLoadFailsOnMissingEnvReference matters because the alternative is starting
 // with an empty credential and failing on every request instead.
 func TestLoadFailsOnMissingEnvReference(t *testing.T) {

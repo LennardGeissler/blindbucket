@@ -69,7 +69,7 @@ keys:
   # that does it. Revoking the transit key locks every instance out at its next
   # restart.
   # vault:
-  #   address: ${VAULT_ADDR}
+  #   address: https://vault.internal:8200
   #   token: ${VAULT_TOKEN}
   #   mount: transit                     # where the engine is mounted
   #   key_name: blindbucket
@@ -82,6 +82,7 @@ keys:
   #   key_id: alias/blindbucket
   #   access_key_id: ${AWS_ACCESS_KEY_ID}
   #   secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+  #   session_token: ${AWS_SESSION_TOKEN}   # for temporary credentials
   #   endpoint: ""                       # override for an AWS-compatible endpoint
   #   # Added to the KMS encryption context, on top of the fixed
   #   # blindbucket=root-key entry every keyring carries. Not a secret: it is

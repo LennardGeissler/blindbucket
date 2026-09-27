@@ -405,9 +405,13 @@ func Load(path string) (*Config, error) {
 
 	// Credentials are only ever referenced, never written in the file.
 	for name, field := range map[string]*string{
-		"upstream.access_key_id":     &cfg.Upstream.AccessKeyID,
-		"upstream.secret_access_key": &cfg.Upstream.SecretAccessKey,
-		"upstream.session_token":     &cfg.Upstream.SessionToken,
+		"upstream.access_key_id":        &cfg.Upstream.AccessKeyID,
+		"upstream.secret_access_key":    &cfg.Upstream.SecretAccessKey,
+		"upstream.session_token":        &cfg.Upstream.SessionToken,
+		"keys.vault.token":              &cfg.Keys.Vault.Token,
+		"keys.awskms.access_key_id":     &cfg.Keys.AWSKMS.AccessKeyID,
+		"keys.awskms.secret_access_key": &cfg.Keys.AWSKMS.SecretAccessKey,
+		"keys.awskms.session_token":     &cfg.Keys.AWSKMS.SessionToken,
 	} {
 		if err := expandEnv(name, field); err != nil {
 			return nil, err

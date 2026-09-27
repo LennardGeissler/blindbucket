@@ -12,6 +12,16 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Fixed
+
+**Root-key credentials can be referenced, as the example always showed.**
+`keys.vault.token` and `keys.awskms.access_key_id`, `secret_access_key` and
+`session_token` now resolve a `${VAR}` reference like the upstream and client
+credentials do. Before, only those were resolved: the Vault token and the KMS
+credentials had to be written into the file, and the `${VAULT_TOKEN}` that
+`blindbucket.example.yaml` shows was sent to Vault as the literal string. The example's `${VAULT_ADDR}` was never
+resolved either, and an address is not a secret, so it is now written out.
+
 ## [0.6.0] — 2026-09-27
 
 ### Added
