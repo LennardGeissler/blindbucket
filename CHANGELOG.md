@@ -43,6 +43,17 @@ what the run was for, and `conflicted` above zero is the answer to "does this
 need running again". `unconditional` records whether the run gave up the
 guards.
 
+**Every release carries the test vectors.** `segment_v1.json` and
+`names_v1.json`, the known-answer vectors of `docs/FORMAT.md` §13 and §15.6,
+are attached to each release and listed in `checksums.txt`, for anyone
+testing a second implementation against format 1. They are named by the
+format version they pin rather than by the release, because they are the same
+files in every release that writes that format.
+
+**`--json` help says to ignore fields you do not know**, in all four commands
+that have it. Later releases may add fields to a document; they never remove,
+rename or retype one (ADR-021).
+
 ### Fixed
 
 **`blindbucket help` no longer lists `inspect` as planned for M6.** M6 closed

@@ -181,8 +181,9 @@ a version number is for here.
 - The six-month window for a previous major is a commitment a project run by
   one person has to be able to keep.
 
-**Before `v1.0.0`**, then: FORMAT §16 marks format `1` stable; the
-known-answer vectors are attached to the release as a versioned artifact; and
-this ADR is Accepted. Two items that were on this list are done: each `--json`
-command's help says to ignore unknown fields, and `internal/obs` pins every
-metric's name, type and label names (`TestMetricsAreAContract`).
+**Before `v1.0.0`**, then: FORMAT §16 marks format `1` stable, and this ADR is
+Accepted — both in the release commit itself. The other three items that were
+on this list are done: each `--json` command's help says to ignore unknown
+fields, `internal/obs` pins every metric's name, type and label names
+(`TestMetricsAreAContract`), and every release carries the known-answer
+vectors, named by the format version they pin and listed in `checksums.txt`.

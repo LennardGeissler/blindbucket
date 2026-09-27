@@ -42,6 +42,10 @@ archives:
 checksum:
   name_template: checksums.txt
   algorithm: sha256
+  # The vectors below are checksummed with the binaries, so a second
+  # implementation can verify what it tests against the same way.
+  extra_files:
+    - glob: ./testdata/vectors/*_v*.json
 
 sboms:
   - artifacts: archive
@@ -74,12 +78,21 @@ dockers_v2:
 release:
   draft: true
   prerelease: auto
+  # The known-answer vectors of FORMAT.md §13 and §15.6, for anyone writing a
+  # second implementation to test against. Named by the format version they
+  # pin rather than the release: segment_v1.json is the same file in every
+  # release that writes format 1, which is the point.
+  extra_files:
+    - glob: ./testdata/vectors/*_v*.json
   footer: |
     ## Verifying a download
 
     ```sh
     sha256sum -c checksums.txt --ignore-missing
     ```
+
+    `segment_v1.json` and `names_v1.json` are the known-answer vectors of
+    `docs/FORMAT.md`, for testing another implementation against format 1.
 
     The container image is `distroless/static:nonroot`: no shell, no package
     manager, and it runs as uid 65532. Mount the keyring read-only and give the

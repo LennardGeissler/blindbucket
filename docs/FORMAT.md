@@ -15,7 +15,8 @@ is `internal/upload`, section 14 is `internal/audit`, and section 15 is
 This document is the authoritative specification of the bytes blindbucket writes to
 object storage. It is written so that an independent implementation can interoperate
 with blindbucket using only this document and the test vectors in
-[`testdata/vectors/`](../testdata/vectors/).
+[`testdata/vectors/`](../testdata/vectors/), which every release also carries as
+downloads listed in its `checksums.txt`.
 
 That claim has been tested rather than asserted: [`ref/python/`](../ref/python/)
 holds a second decoder written from this document, and it agrees with the Go one
