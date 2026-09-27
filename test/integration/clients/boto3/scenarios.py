@@ -13,6 +13,7 @@ docs/COMPATIBILITY.md.
 Usage:
     BLINDBUCKET_ENDPOINT=http://127.0.0.1:9000 \
     BLINDBUCKET_BUCKET=blindbucket-dev \
+    [BLINDBUCKET_PREFIX=boto3-scenarios/] \
     AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... \
     python3 scenarios.py
 """
@@ -35,7 +36,9 @@ MIB = 1024 * 1024
 
 ENDPOINT = os.environ.get("BLINDBUCKET_ENDPOINT", "http://127.0.0.1:9000")
 BUCKET = os.environ.get("BLINDBUCKET_BUCKET", "blindbucket-dev")
-PREFIX = f"boto3-scenarios/{int(time.time() * 1e6)}/"
+# Against a shared bucket, BLINDBUCKET_PREFIX puts the run under a prefix that
+# the test suites' sweep already cleans up after.
+PREFIX = f"{os.environ.get('BLINDBUCKET_PREFIX', 'boto3-scenarios/')}{int(time.time() * 1e6)}/"
 
 s3 = boto3.client(
     "s3",

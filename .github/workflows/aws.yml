@@ -1,4 +1,5 @@
-# The integration suite and the KMS tests against real AWS, in eu-central-1.
+# The integration suite, the KMS tests, and the clients through a gateway whose
+# keyring KMS seals, against real AWS in eu-central-1.
 #
 # Manual only: it costs a few cents a run and needs the resources that
 # deploy/aws-test/template.yaml creates. It runs in the `aws` environment,
@@ -24,7 +25,7 @@ env:
 
 jobs:
   aws:
-    name: Integration (AWS S3, KMS)
+    name: Integration (AWS S3, KMS, clients)
     runs-on: ubuntu-latest
     environment: aws
     timeout-minutes: 40
@@ -71,3 +72,182 @@ jobs:
         env:
           BLINDBUCKET_TEST_KMS_KEY_ID: ${{ vars.AWS_KMS_KEY }}
         run: go test -count=1 -v -run 'KMS' ./internal/rootkey/...
+
+      # From here on the gateway runs as it would be deployed on AWS: its
+      # keyring's root key sealed by the KMS key, its upstream the real bucket,
+      # and every credential a ${VAR} reference to the role's session. Nothing
+      # below knows a passphrase.
+      - name: Keyring sealed by KMS
+        env:
+          AWS_KMS_KEY: ${{ vars.AWS_KMS_KEY }}
+          AWS_BUCKET: ${{ vars.AWS_BUCKET }}
+        run: |
+          set -euo pipefail
+          make build
+          cat > blindbucket.yaml <<YAML
+          server:
+            listen: "127.0.0.1:9000"
+          upstream:
+            endpoint: https://s3.${AWS_REGION}.amazonaws.com
+            region: ${AWS_REGION}
+            path_style: false
+            access_key_id: \${AWS_ACCESS_KEY_ID}
+            secret_access_key: \${AWS_SECRET_ACCESS_KEY}
+            session_token: \${AWS_SESSION_TOKEN}
+          clients:
+            - name: ci
+              access_key_id: CITESTKEY
+              secret_access_key: ci-test-secret-key
+              buckets: ["${AWS_BUCKET}"]
+          keys:
+            provider: awskms
+            keyring: keyring.json
+            awskms:
+              region: ${AWS_REGION}
+              key_id: ${AWS_KMS_KEY}
+              access_key_id: \${AWS_ACCESS_KEY_ID}
+              secret_access_key: \${AWS_SECRET_ACCESS_KEY}
+              session_token: \${AWS_SESSION_TOKEN}
+          YAML
+          ./bin/blindbucket keygen --config blindbucket.yaml --out keyring.json --kid aws 2>&1 |
+            tee keygen.log
+          grep -q 'sealed by AWS KMS key' keygen.log
+          test "$(jq -r .root_key.source keyring.json)" = awskms
+
+          # The keyring says who sealed it, and a gateway configured for a
+          # passphrase is refused rather than asked for one.
+          sed 's/provider: awskms/provider: file/' blindbucket.yaml > passphrase.yaml
+          if BLINDBUCKET_PASSPHRASE=anything ./bin/blindbucket keys list \
+              --config passphrase.yaml --keyring keyring.json > mismatch.log 2>&1; then
+            echo "a KMS-sealed keyring opened with a passphrase"; cat mismatch.log; exit 1
+          fi
+          grep -q 'is sealed by' mismatch.log
+
+      - name: Start the gateway
+        run: |
+          ./bin/blindbucket serve --config blindbucket.yaml > gateway.log 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -s -o /dev/null http://127.0.0.1:9000/; then break; fi
+            sleep 1
+          done
+          curl -s -o /dev/null http://127.0.0.1:9000/ || { cat gateway.log; exit 1; }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: boto3 scenarios
+        env:
+          AWS_ACCESS_KEY_ID: CITESTKEY
+          AWS_SECRET_ACCESS_KEY: ci-test-secret-key
+          AWS_SESSION_TOKEN: ""
+          AWS_DEFAULT_REGION: us-east-1
+          BLINDBUCKET_ENDPOINT: http://127.0.0.1:9000
+          BLINDBUCKET_BUCKET: ${{ vars.AWS_BUCKET }}
+          BLINDBUCKET_PREFIX: bbtest/clients-${{ github.run_id }}/boto3/
+        run: |
+          pip install --quiet boto3
+          python3 test/integration/clients/boto3/scenarios.py
+
+      # The client-side steps from ci.yml's compatibility job, against AWS: the
+      # aws-chunked trailer path, multipart above 8 MiB with a range across a
+      # part boundary, and presigned reads.
+      - name: AWS CLI scenarios
+        env:
+          AWS_ACCESS_KEY_ID: CITESTKEY
+          AWS_SECRET_ACCESS_KEY: ci-test-secret-key
+          AWS_SESSION_TOKEN: ""
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:9000
+          BUCKET: ${{ vars.AWS_BUCKET }}
+          PREFIX: bbtest/clients-${{ github.run_id }}/cli
+        run: |
+          set -euo pipefail
+          aws configure set default.s3.addressing_style path
+          aws configure set default.s3.multipart_threshold 8MB
+          aws configure set default.s3.multipart_chunksize 8MB
+          base="s3://$BUCKET/$PREFIX"
+
+          head -c 200000 /dev/urandom > payload.bin
+          aws s3 cp --no-progress payload.bin "$base/payload.bin"
+          aws s3 cp --no-progress "$base/payload.bin" restored.bin
+          cmp payload.bin restored.bin
+          test "$(aws s3 ls "$base/payload.bin" | awk '{print $3}')" = "200000"
+
+          head -c 41943040 /dev/urandom > big.bin        # 40 MiB, five parts
+          aws s3 cp --no-progress big.bin "$base/big.bin"
+          aws s3 cp --no-progress "$base/big.bin" big-restored.bin
+          cmp big.bin big-restored.bin
+          test "$(aws s3 ls "$base/big.bin" | awk '{print $3}')" = "41943040"
+          aws s3api get-object --bucket "$BUCKET" --key "$PREFIX/big.bin" \
+            --range bytes=8388598-8388618 slice.bin >/dev/null
+          dd if=big.bin of=expected-slice.bin bs=1 skip=8388598 count=21 status=none
+          cmp slice.bin expected-slice.bin
+
+          url=$(aws s3 presign "$base/payload.bin" --expires-in 300)
+          env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY curl -sf -o presigned.bin "$url"
+          cmp payload.bin presigned.bin
+
+      # Around the gateway, with the role's own credentials: what AWS holds is
+      # not what the client wrote.
+      - name: The bucket holds ciphertext
+        env:
+          BUCKET: ${{ vars.AWS_BUCKET }}
+          PREFIX: bbtest/clients-${{ github.run_id }}/cli
+        run: |
+          set -euo pipefail
+          aws s3 cp --no-progress "s3://$BUCKET/$PREFIX/payload.bin" raw.bin
+          if cmp -s payload.bin raw.bin; then echo "the stored object is the plaintext"; exit 1; fi
+          test "$(wc -c < raw.bin)" -gt 200000
+          aws s3 rm --recursive "s3://$BUCKET/$PREFIX/"
+
+      # A restart is the moment the root key is asked for again: a second
+      # gateway process opens the same keyring through KMS and reads what the
+      # first one wrote. Its own step, so that it starts with the role's
+      # credentials and not the client's.
+      - name: Write before a restart
+        env:
+          AWS_ACCESS_KEY_ID: CITESTKEY
+          AWS_SECRET_ACCESS_KEY: ci-test-secret-key
+          AWS_SESSION_TOKEN: ""
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:9000
+          BUCKET: ${{ vars.AWS_BUCKET }}
+          KEY: bbtest/clients-${{ github.run_id }}/restart.bin
+        run: aws s3 cp --no-progress payload.bin "s3://$BUCKET/$KEY"
+
+      - name: Restart the gateway
+        run: |
+          pkill -f 'blindbucket serve'
+          while pgrep -f 'blindbucket serve' >/dev/null; do sleep 0.2; done
+          ./bin/blindbucket serve --config blindbucket.yaml > gateway-restarted.log 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -s -o /dev/null http://127.0.0.1:9000/; then break; fi
+            sleep 1
+          done
+          curl -s -o /dev/null http://127.0.0.1:9000/ || { cat gateway-restarted.log; exit 1; }
+
+      - name: Read after the restart
+        env:
+          AWS_ACCESS_KEY_ID: CITESTKEY
+          AWS_SECRET_ACCESS_KEY: ci-test-secret-key
+          AWS_SESSION_TOKEN: ""
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:9000
+          BUCKET: ${{ vars.AWS_BUCKET }}
+          KEY: bbtest/clients-${{ github.run_id }}/restart.bin
+        run: |
+          set -euo pipefail
+          aws s3 cp --no-progress "s3://$BUCKET/$KEY" after-restart.bin
+          cmp payload.bin after-restart.bin
+          aws s3 rm "s3://$BUCKET/$KEY"
+
+      - name: Keep the gateway logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-gateway-logs
+          path: |
+            gateway*.log
+            keygen.log
+            mismatch.log
