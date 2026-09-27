@@ -16,6 +16,11 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Added
+
+**`make help`.** Lists documented Makefile targets by section without changing
+what a bare `make` runs.
+
 ## [1.0.0] — 2026-09-27
 
 The release that says what it promises. Nothing in the format changes: format
