@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -337,6 +338,31 @@ audit:
 	}
 }
 
+// TestCredentialSourcesAreAccepted: a section names a source instead of
+// keys, for every source ADR-024 defines, and "static" with keys is the same
+// as no source at all.
+func TestCredentialSourcesAreAccepted(t *testing.T) {
+	const clientsOK = `clients: [{name: c, access_key_id: k, secret_access_key: s, buckets: ["*"]}]`
+	for _, source := range []string{"env", "profile", "web_identity", "container", "imds", "chain"} {
+		body := fmt.Sprintf("upstream: {endpoint: \"http://x\", region: r, credential_source: %s}\n%s\n"+
+			"keys: {provider: awskms, keyring: k, awskms: {region: r, key_id: i, credential_source: %s}}\n",
+			source, clientsOK, source)
+		cfg, err := Load(write(t, body))
+		if err != nil {
+			t.Errorf("%s: %v", source, err)
+			continue
+		}
+		if cfg.Upstream.CredentialSource != source || cfg.Keys.AWSKMS.CredentialSource != source {
+			t.Errorf("%s: read as %q and %q", source, cfg.Upstream.CredentialSource,
+				cfg.Keys.AWSKMS.CredentialSource)
+		}
+	}
+	if _, err := Load(write(t, "upstream: {endpoint: \"http://x\", region: r, access_key_id: a, "+
+		"secret_access_key: b, credential_source: static}\n"+clientsOK+"\nkeys: {keyring: k}\n")); err != nil {
+		t.Errorf("static with keys: %v", err)
+	}
+}
+
 // TestValidationNamesTheProblem complements TestValidation, which only requires
 // a refusal: here each case must be refused for its own reason, so a check that
 // stopped working cannot hide behind another one that fires first.
@@ -371,6 +397,16 @@ func TestValidationNamesTheProblem(t *testing.T) {
 			"keys.awskms.key_id is required"},
 		"kms without credentials": {doc(upstreamOK, clientsOK,
 			`keys: {provider: awskms, keyring: k, awskms: {region: r, key_id: i}}`), "keys.awskms credentials are required"},
+		"upstream without keys or a source": {doc(`upstream: {endpoint: "http://x", region: r}`,
+			clientsOK, keysOK), "upstream credentials are required"},
+		"upstream with keys and a source": {doc(`upstream: {endpoint: "http://x", region: r, `+
+			`access_key_id: a, secret_access_key: b, credential_source: env}`, clientsOK, keysOK),
+			"set one or the other"},
+		"upstream with an unknown source": {doc(`upstream: {endpoint: "http://x", region: r, `+
+			`credential_source: sso}`, clientsOK, keysOK), `upstream.credential_source "sso" is not one of`},
+		"kms with keys and a source": {doc(upstreamOK, clientsOK,
+			`keys: {provider: awskms, keyring: k, awskms: {region: r, key_id: i, session_token: t, `+
+				`credential_source: web_identity}}`), "keys.awskms has keys"},
 		"a presign window that does not parse": {doc(`server: {presign: {max_expiry: "a week"}}`,
 			upstreamOK, clientsOK, keysOK), "max_expiry"},
 		"a negative presign window": {doc(`server: {presign: {max_expiry: "-1h"}}`,

@@ -282,6 +282,73 @@ jobs:
           cmp payload.bin after-reseal.bin
           aws s3 rm "s3://$BUCKET/$KEY"
 
+      # The gateway's own web identity (ADR-024), against real STS: the job's
+      # GitHub OIDC token stands in for the projected service-account token of
+      # IRSA, and the role's trust policy is the one the job itself assumed.
+      # No key is in the configuration or the environment, for the upstream
+      # or for KMS -- what the gateway uses, it resolved itself.
+      - name: A gateway on web identity
+        env:
+          AWS_KMS_KEY: ${{ vars.AWS_KMS_KEY }}
+          AWS_BUCKET: ${{ vars.AWS_BUCKET }}
+          ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value > web-identity-token
+          chmod 600 web-identity-token
+          cat > web-identity.yaml <<YAML
+          server:
+            listen: "127.0.0.1:9001"
+          admin:
+            listen: ""
+          upstream:
+            endpoint: https://s3.${AWS_REGION}.amazonaws.com
+            region: ${AWS_REGION}
+            path_style: false
+            credential_source: web_identity
+          clients:
+            - name: ci
+              access_key_id: CITESTKEY
+              secret_access_key: ci-test-secret-key
+              buckets: ["${AWS_BUCKET}"]
+          keys:
+            provider: awskms
+            keyring: keyring.json
+            awskms:
+              region: ${AWS_REGION}
+              key_id: ${AWS_KMS_KEY}
+              credential_source: web_identity
+          YAML
+          env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+            AWS_WEB_IDENTITY_TOKEN_FILE="$PWD/web-identity-token" AWS_ROLE_ARN="$ROLE_ARN" \
+            AWS_ROLE_SESSION_NAME="blindbucket-ci-${{ github.run_id }}" \
+            ./bin/blindbucket serve --config web-identity.yaml > gateway-web-identity.log 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -s -o /dev/null http://127.0.0.1:9001/; then break; fi
+            sleep 1
+          done
+          curl -s -o /dev/null http://127.0.0.1:9001/ || { cat gateway-web-identity.log; exit 1; }
+          grep -q '"msg":"upstream credentials".*web identity' gateway-web-identity.log
+
+      - name: Clients through the web-identity gateway
+        env:
+          AWS_ACCESS_KEY_ID: CITESTKEY
+          AWS_SECRET_ACCESS_KEY: ci-test-secret-key
+          AWS_SESSION_TOKEN: ""
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:9001
+          BUCKET: ${{ vars.AWS_BUCKET }}
+          KEY: bbtest/clients-${{ github.run_id }}/web-identity.bin
+        run: |
+          set -euo pipefail
+          aws configure set default.s3.addressing_style path
+          aws s3 cp --no-progress big.bin "s3://$BUCKET/$KEY"
+          aws s3 cp --no-progress "s3://$BUCKET/$KEY" web-identity.bin
+          cmp big.bin web-identity.bin
+          aws s3 rm "s3://$BUCKET/$KEY"
+          pkill -f 'serve --config web-identity.yaml'
+
       - name: Keep the gateway logs
         if: failure()
         uses: actions/upload-artifact@v4

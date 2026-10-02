@@ -12,7 +12,6 @@ import (
 
 	"github.com/LennardGeissler/blindbucket/internal/config"
 	"github.com/LennardGeissler/blindbucket/internal/rotate"
-	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
 func runRotate(ctx context.Context, args []string) error {
@@ -101,14 +100,7 @@ Flags:
 		return fmt.Errorf("%s holds no key %q (see `blindbucket keys list`)", cfg.Keys.Keyring, target)
 	}
 
-	client, err := upstream.New(upstream.Config{
-		Endpoint:        cfg.Upstream.Endpoint,
-		Region:          cfg.Upstream.Region,
-		PathStyle:       cfg.Upstream.PathStyle,
-		AccessKeyID:     cfg.Upstream.AccessKeyID,
-		SecretAccessKey: cfg.Upstream.SecretAccessKey,
-		SessionToken:    cfg.Upstream.SessionToken,
-	})
+	client, _, err := upstreamClient(cfg, nil)
 	if err != nil {
 		return err
 	}

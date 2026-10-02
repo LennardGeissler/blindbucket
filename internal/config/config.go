@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/LennardGeissler/blindbucket/internal/auth"
+	"github.com/LennardGeissler/blindbucket/internal/awscreds"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/stream"
 )
 
@@ -216,6 +218,10 @@ type Upstream struct {
 	AccessKeyID     string `yaml:"access_key_id"`
 	SecretAccessKey string `yaml:"secret_access_key"`
 	SessionToken    string `yaml:"session_token"`
+	// CredentialSource says where the upstream credentials come from when they
+	// are not the keys above: env, profile, web_identity, container, imds or
+	// chain (ADR-024). Empty means the keys, as "static" does.
+	CredentialSource string `yaml:"credential_source"`
 }
 
 // Keys configures where the root key that unlocks the keyring comes from.
@@ -255,6 +261,8 @@ type AWSKMSKeys struct {
 	AccessKeyID     string `yaml:"access_key_id"`
 	SecretAccessKey string `yaml:"secret_access_key"`
 	SessionToken    string `yaml:"session_token"`
+	// CredentialSource is the upstream's credential_source, for KMS.
+	CredentialSource string `yaml:"credential_source"`
 	// EncryptionContext is added to the AWS KMS encryption context of a keyring
 	// sealed by `keygen`, on top of the fixed "blindbucket" entry every one
 	// carries. Put something that identifies the deployment here, and a key
@@ -319,6 +327,7 @@ func (u Upstream) LogValue() slog.Value {
 		slog.String("access_key_id", u.AccessKeyID),
 		slog.String("secret_access_key", "[REDACTED]"),
 		slog.String("session_token", "[REDACTED]"),
+		slog.String("credential_source", u.CredentialSource),
 	)
 }
 
@@ -449,6 +458,30 @@ func expandEnv(name string, field *string) error {
 	return nil
 }
 
+// validateCredentials checks one section's AWS credentials: keys, or a source
+// to resolve them from, and never both (ADR-024). Neither is an error, as it
+// always was -- falling back to whatever the environment offers would let a
+// forgotten key quietly pick up an instance role.
+func validateCredentials(section, source, id, secret, token string) error {
+	switch source {
+	case "", awscreds.SourceStatic:
+		if id == "" || secret == "" {
+			return fmt.Errorf("%s credentials are required: access_key_id and secret_access_key, "+
+				"or a credential_source -- env, profile, web_identity, container, imds or chain "+
+				"(ADR-024)", section)
+		}
+		return nil
+	}
+	if !slices.Contains(awscreds.Sources, source) {
+		return fmt.Errorf("%s.credential_source %q is not one of %s", section, source,
+			strings.Join(awscreds.Sources, ", "))
+	}
+	if id != "" || secret != "" || token != "" {
+		return fmt.Errorf("%s has keys and credential_source %q; set one or the other", section, source)
+	}
+	return nil
+}
+
 // validate checks the root-key source names everything it needs.
 //
 // A missing field here is a process that starts and then cannot open its
@@ -473,10 +506,9 @@ func (k Keys) validate() error {
 			return fmt.Errorf("keys.awskms.region is required for provider \"awskms\"")
 		case k.AWSKMS.KeyID == "":
 			return fmt.Errorf("keys.awskms.key_id is required for provider \"awskms\"")
-		case k.AWSKMS.AccessKeyID == "" || k.AWSKMS.SecretAccessKey == "":
-			return fmt.Errorf("keys.awskms credentials are required for provider \"awskms\"")
 		}
-		return nil
+		return validateCredentials("keys.awskms", k.AWSKMS.CredentialSource,
+			k.AWSKMS.AccessKeyID, k.AWSKMS.SecretAccessKey, k.AWSKMS.SessionToken)
 	default:
 		return fmt.Errorf("keys.provider %q is not one of \"file\", \"vault\", \"awskms\"", k.Provider)
 	}
@@ -490,13 +522,15 @@ func (c *Config) validate() error {
 		return fmt.Errorf("upstream.endpoint is required")
 	case c.Upstream.Region == "":
 		return fmt.Errorf("upstream.region is required")
-	case c.Upstream.AccessKeyID == "" || c.Upstream.SecretAccessKey == "":
-		return fmt.Errorf("upstream credentials are required")
 	case len(c.Clients) == 0:
 		return fmt.Errorf("at least one entry under clients is required; " +
 			"the proxy does not serve unauthenticated requests")
 	case c.Keys.Keyring == "":
 		return fmt.Errorf("keys.keyring is required")
+	}
+	if err := validateCredentials("upstream", c.Upstream.CredentialSource,
+		c.Upstream.AccessKeyID, c.Upstream.SecretAccessKey, c.Upstream.SessionToken); err != nil {
+		return err
 	}
 	if err := c.Keys.validate(); err != nil {
 		return err

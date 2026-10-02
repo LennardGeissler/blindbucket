@@ -11,7 +11,6 @@ import (
 
 	"github.com/LennardGeissler/blindbucket/internal/config"
 	"github.com/LennardGeissler/blindbucket/internal/probe"
-	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
 // errUnguarded makes probe exit non-zero when a guarded rotation would be
@@ -69,14 +68,7 @@ Flags:
 	if err != nil {
 		return err
 	}
-	client, err := upstream.New(upstream.Config{
-		Endpoint:        cfg.Upstream.Endpoint,
-		Region:          cfg.Upstream.Region,
-		PathStyle:       cfg.Upstream.PathStyle,
-		AccessKeyID:     cfg.Upstream.AccessKeyID,
-		SecretAccessKey: cfg.Upstream.SecretAccessKey,
-		SessionToken:    cfg.Upstream.SessionToken,
-	})
+	client, _, err := upstreamClient(cfg, nil)
 	if err != nil {
 		return err
 	}

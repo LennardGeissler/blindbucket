@@ -36,6 +36,12 @@ type Config struct {
 	SecretAccessKey string
 	SessionToken    string
 
+	// Credentials supplies the credentials instead of the three fields above,
+	// and is asked before every request, so that a source whose credentials
+	// expire -- web identity, a container endpoint, the instance role --
+	// refreshes them behind it (ADR-024). Set it or the fields, not both.
+	Credentials aws.CredentialsProvider
+
 	// HTTPClient overrides the default transport. Mainly for tests.
 	HTTPClient *http.Client
 
@@ -62,7 +68,7 @@ type Client struct {
 	endpoint   *url.URL
 	region     string
 	pathStyle  bool
-	creds      aws.Credentials
+	creds      aws.CredentialsProvider
 	signer     *v4.Signer
 	httpClient *http.Client
 	maxRetries int
@@ -87,8 +93,21 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Region == "" {
 		return nil, errors.New("upstream: region is required")
 	}
-	if cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" {
+	creds := cfg.Credentials
+	switch {
+	case creds != nil && (cfg.AccessKeyID != "" || cfg.SecretAccessKey != "" || cfg.SessionToken != ""):
+		return nil, errors.New("upstream: credentials are configured twice, as keys and as a provider")
+	case creds == nil && (cfg.AccessKeyID == "" || cfg.SecretAccessKey == ""):
 		return nil, errors.New("upstream: credentials are required")
+	case creds == nil:
+		static := aws.Credentials{
+			AccessKeyID:     cfg.AccessKeyID,
+			SecretAccessKey: cfg.SecretAccessKey,
+			SessionToken:    cfg.SessionToken,
+		}
+		creds = aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+			return static, nil
+		})
 	}
 
 	httpClient := cfg.HTTPClient
@@ -104,11 +123,7 @@ func New(cfg Config) (*Client, error) {
 		endpoint:  endpoint,
 		region:    cfg.Region,
 		pathStyle: cfg.PathStyle,
-		creds: aws.Credentials{
-			AccessKeyID:     cfg.AccessKeyID,
-			SecretAccessKey: cfg.SecretAccessKey,
-			SessionToken:    cfg.SessionToken,
-		},
+		creds:     creds,
 		// S3 does not double-encode the path in the canonical request, unlike
 		// every other AWS service. Without this the signature is wrong for any
 		// key containing a character that needs escaping.
@@ -202,7 +217,11 @@ func (c *Client) sign(ctx context.Context, req *http.Request) error {
 	// S3 requires this header to be present and signed. The SDK's own
 	// middleware would set it; calling the signer directly means we do.
 	req.Header.Set("X-Amz-Content-Sha256", unsignedPayload)
-	return c.signer.SignHTTP(ctx, c.creds, req, unsignedPayload, "s3", c.region, c.now().UTC())
+	creds, err := c.creds.Retrieve(ctx)
+	if err != nil {
+		return fmt.Errorf("credentials: %w", err)
+	}
+	return c.signer.SignHTTP(ctx, creds, req, unsignedPayload, "s3", c.region, c.now().UTC())
 }
 
 // do signs and sends a request, returning the response only for 2xx statuses.

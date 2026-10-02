@@ -30,6 +30,10 @@ type KMSConfig struct {
 	SecretAccessKey string
 	SessionToken    string
 
+	// Credentials supplies the credentials instead of the three fields above
+	// (ADR-024). Set it or the fields, not both.
+	Credentials aws.CredentialsProvider
+
 	// Endpoint overrides the derived kms.<region>.amazonaws.com. It exists for
 	// LocalStack and for the AWS-compatible endpoints some environments front
 	// KMS with; leave it empty for AWS.
@@ -57,7 +61,7 @@ type KMS struct {
 	cfg      KMSConfig
 	client   *http.Client
 	signer   *v4.Signer
-	creds    aws.Credentials
+	creds    aws.CredentialsProvider
 	endpoint string
 }
 
@@ -92,10 +96,23 @@ func NewKMS(cfg KMSConfig) (*KMS, error) {
 		return nil, fmt.Errorf("rootkey: kms needs a region")
 	case strings.TrimSpace(cfg.KeyID) == "":
 		return nil, fmt.Errorf("rootkey: kms needs a key id")
-	case strings.TrimSpace(cfg.AccessKeyID) == "":
+	case cfg.Credentials != nil && (cfg.AccessKeyID != "" || cfg.SecretAccessKey != "" || cfg.SessionToken != ""):
+		return nil, fmt.Errorf("rootkey: kms credentials are configured twice, as keys and as a provider")
+	case cfg.Credentials == nil && strings.TrimSpace(cfg.AccessKeyID) == "":
 		return nil, fmt.Errorf("rootkey: kms needs an access key id")
-	case strings.TrimSpace(cfg.SecretAccessKey) == "":
+	case cfg.Credentials == nil && strings.TrimSpace(cfg.SecretAccessKey) == "":
 		return nil, fmt.Errorf("rootkey: kms needs a secret access key")
+	}
+	creds := cfg.Credentials
+	if creds == nil {
+		static := aws.Credentials{
+			AccessKeyID:     cfg.AccessKeyID,
+			SecretAccessKey: cfg.SecretAccessKey,
+			SessionToken:    cfg.SessionToken,
+		}
+		creds = aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+			return static, nil
+		})
 	}
 
 	endpoint := strings.TrimRight(cfg.Endpoint, "/")
@@ -110,14 +127,10 @@ func NewKMS(cfg KMSConfig) (*KMS, error) {
 		cfg.now = time.Now
 	}
 	return &KMS{
-		cfg:    cfg,
-		client: client,
-		signer: v4.NewSigner(),
-		creds: aws.Credentials{
-			AccessKeyID:     cfg.AccessKeyID,
-			SecretAccessKey: cfg.SecretAccessKey,
-			SessionToken:    cfg.SessionToken,
-		},
+		cfg:      cfg,
+		client:   client,
+		signer:   v4.NewSigner(),
+		creds:    creds,
 		endpoint: endpoint,
 	}, nil
 }
@@ -209,7 +222,11 @@ func (k *KMS) call(ctx context.Context, op string, in any, out any) error {
 	req.ContentLength = int64(len(payload))
 
 	sum := sha256.Sum256(payload)
-	if err := k.signer.SignHTTP(ctx, k.creds, req, hex.EncodeToString(sum[:]),
+	creds, err := k.creds.Retrieve(ctx)
+	if err != nil {
+		return fmt.Errorf("rootkey: kms credentials: %w", err)
+	}
+	if err := k.signer.SignHTTP(ctx, creds, req, hex.EncodeToString(sum[:]),
 		"kms", k.cfg.Region, k.cfg.now().UTC()); err != nil {
 		return fmt.Errorf("rootkey: signing the kms request: %w", err)
 	}

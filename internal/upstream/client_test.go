@@ -2,12 +2,17 @@ package upstream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
 )
 
 func testClient(t *testing.T, endpoint string) *Client {
@@ -358,6 +363,66 @@ func TestCompletionCarriesItsConditions(t *testing.T) {
 		if g := got.Get("If-None-Match"); g != tc.noneOf {
 			t.Errorf("If-None-Match = %q, want %q", g, tc.noneOf)
 		}
+	}
+}
+
+// TestEveryRequestAsksTheCredentialsProvider: credentials from a source that
+// refreshes them are asked for before each request, so a rotated key is used
+// from the next request on, and a source that fails stops the request before
+// anything is sent (ADR-024).
+func TestEveryRequestAsksTheCredentialsProvider(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu   sync.Mutex
+		seen []string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		_, rest, _ := strings.Cut(auth, "Credential=")
+		id, _, _ := strings.Cut(rest, "/")
+		mu.Lock()
+		seen = append(seen, id+" "+r.Header.Get("X-Amz-Security-Token"))
+		mu.Unlock()
+		w.Header().Set("ETag", `"e"`)
+	}))
+	defer srv.Close()
+
+	var n atomic.Int64
+	failing := atomic.Bool{}
+	provider := aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+		if failing.Load() {
+			return aws.Credentials{}, errors.New("the role may not be assumed")
+		}
+		return aws.Credentials{
+			AccessKeyID: fmt.Sprintf("ASIA%d", n.Add(1)), SecretAccessKey: "s", SessionToken: "token",
+		}, nil
+	})
+	c, err := New(Config{Endpoint: srv.URL, Region: "us-east-1", PathStyle: true, Credentials: provider})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	for range 2 {
+		if _, err := c.HeadObject(context.Background(), "bucket", "key"); err != nil {
+			t.Fatalf("HeadObject: %v", err)
+		}
+	}
+	if want := []string{"ASIA1 token", "ASIA2 token"}; !slices.Equal(seen, want) {
+		t.Errorf("signed with %v, want %v", seen, want)
+	}
+
+	failing.Store(true)
+	_, err = c.HeadObject(context.Background(), "bucket", "key")
+	if err == nil || !strings.Contains(err.Error(), "may not be assumed") {
+		t.Errorf("got %v, want the source's error", err)
+	}
+	if len(seen) != 2 {
+		t.Errorf("a request went out without credentials: %v", seen)
+	}
+
+	if _, err := New(Config{Endpoint: srv.URL, Region: "us-east-1", Credentials: provider,
+		AccessKeyID: "a", SecretAccessKey: "b"}); err == nil {
+		t.Error("keys and a provider were both accepted")
 	}
 }
 

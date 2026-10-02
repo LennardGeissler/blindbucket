@@ -27,15 +27,23 @@ func newRootKeySource(cfg config.Keys) (rootkey.Source, error) {
 			Namespace: cfg.Vault.Namespace,
 		})
 	case "awskms":
-		return rootkey.NewKMS(rootkey.KMSConfig{
-			Region:          cfg.AWSKMS.Region,
-			KeyID:           cfg.AWSKMS.KeyID,
-			AccessKeyID:     cfg.AWSKMS.AccessKeyID,
-			SecretAccessKey: cfg.AWSKMS.SecretAccessKey,
-			SessionToken:    cfg.AWSKMS.SessionToken,
-			Endpoint:        cfg.AWSKMS.Endpoint,
-			Context:         cfg.AWSKMS.EncryptionContext,
-		})
+		kcfg := rootkey.KMSConfig{
+			Region:   cfg.AWSKMS.Region,
+			KeyID:    cfg.AWSKMS.KeyID,
+			Endpoint: cfg.AWSKMS.Endpoint,
+			Context:  cfg.AWSKMS.EncryptionContext,
+		}
+		creds, err := awsCredentials(cfg.AWSKMS.CredentialSource, cfg.AWSKMS.Region)
+		if err != nil {
+			return nil, fmt.Errorf("kms credentials: %w", err)
+		}
+		if creds != nil {
+			kcfg.Credentials = creds
+		} else {
+			kcfg.AccessKeyID, kcfg.SecretAccessKey, kcfg.SessionToken =
+				cfg.AWSKMS.AccessKeyID, cfg.AWSKMS.SecretAccessKey, cfg.AWSKMS.SessionToken
+		}
+		return rootkey.NewKMS(kcfg)
 	default:
 		return nil, fmt.Errorf("unknown keys.provider %q", cfg.Provider)
 	}

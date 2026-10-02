@@ -12,7 +12,6 @@ import (
 
 	"github.com/LennardGeissler/blindbucket/internal/config"
 	"github.com/LennardGeissler/blindbucket/internal/gc"
-	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
 func runGC(ctx context.Context, args []string) error {
@@ -77,14 +76,7 @@ Flags:
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	client, err := upstream.New(upstream.Config{
-		Endpoint:        cfg.Upstream.Endpoint,
-		Region:          cfg.Upstream.Region,
-		PathStyle:       cfg.Upstream.PathStyle,
-		AccessKeyID:     cfg.Upstream.AccessKeyID,
-		SecretAccessKey: cfg.Upstream.SecretAccessKey,
-		SessionToken:    cfg.Upstream.SessionToken,
-	})
+	client, _, err := upstreamClient(cfg, nil)
 	if err != nil {
 		return err
 	}

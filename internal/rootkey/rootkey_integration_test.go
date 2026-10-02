@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 )
 
@@ -296,6 +298,16 @@ func TestSourcesValidateTheirConfiguration(t *testing.T) {
 	}
 	if _, err := NewKMS(KMSConfig{Region: "r", KeyID: "k"}); err == nil {
 		t.Error("a KMS source without credentials was accepted")
+	}
+	provider := aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+		return aws.Credentials{AccessKeyID: "a", SecretAccessKey: "s"}, nil
+	})
+	if _, err := NewKMS(KMSConfig{Region: "r", KeyID: "k", Credentials: provider}); err != nil {
+		t.Errorf("a KMS source with a credentials provider was refused: %v", err)
+	}
+	if _, err := NewKMS(KMSConfig{Region: "r", KeyID: "k", Credentials: provider,
+		AccessKeyID: "a", SecretAccessKey: "s"}); err == nil {
+		t.Error("a KMS source with keys and a provider was accepted")
 	}
 }
 

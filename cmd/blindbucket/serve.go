@@ -86,17 +86,23 @@ Flags:
 	metrics := obs.NewMetrics(registry, obs.MetricsConfig{Version: version})
 	metrics.KeyringLoaded(ring)
 
-	client, err := upstream.New(upstream.Config{
-		Endpoint:        cfg.Upstream.Endpoint,
-		Region:          cfg.Upstream.Region,
-		PathStyle:       cfg.Upstream.PathStyle,
-		AccessKeyID:     cfg.Upstream.AccessKeyID,
-		SecretAccessKey: cfg.Upstream.SecretAccessKey,
-		SessionToken:    cfg.Upstream.SessionToken,
-		ObserveRequest:  metrics.Upstream,
-	})
+	client, upstreamCreds, err := upstreamClient(cfg, metrics.Upstream)
 	if err != nil {
 		return err
+	}
+	if upstreamCreds != nil {
+		// Asked once now, so that a source that does not answer -- a role
+		// the token may not assume, IMDS out of reach -- stops the start
+		// rather than failing the first request.
+		got, err := upstreamCreds.Retrieve(ctx)
+		if err != nil {
+			return fmt.Errorf("upstream credentials: %w", err)
+		}
+		attrs := []any{"source", upstreamCreds.Source(), "access_key_id", got.AccessKeyID}
+		if got.CanExpire {
+			attrs = append(attrs, "expires", got.Expires.UTC().Format(time.RFC3339))
+		}
+		log.Info("upstream credentials", attrs...)
 	}
 
 	clients := make([]auth.Client, 0, len(cfg.Clients))
