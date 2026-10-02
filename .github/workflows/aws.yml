@@ -240,6 +240,46 @@ jobs:
           set -euo pipefail
           aws s3 cp --no-progress "s3://$BUCKET/$KEY" after-restart.bin
           cmp payload.bin after-restart.bin
+
+      # Off KMS and back on it (ADR-023): reseal opens what it sealed before it
+      # replaces the file, which is only a real check against a service that
+      # could refuse to decrypt -- this is the one place it runs against KMS
+      # itself rather than the emulator. The object written before the restart
+      # must still read afterwards: the keys inside never changed.
+      - name: Reseal to a passphrase and back to KMS
+        run: |
+          set -euo pipefail
+          pkill -f 'blindbucket serve'
+          while pgrep -f 'blindbucket serve' >/dev/null; do sleep 0.2; done
+          printf 'reseal-in-ci\n' > new-passphrase && chmod 600 new-passphrase
+          ./bin/blindbucket reseal --keyring keyring.json --config blindbucket.yaml \
+            --new-passphrase-file new-passphrase 2>&1 | tee reseal.log
+          test "$(jq -r '.root_key.source // "passphrase"' keyring.json)" = passphrase
+          BLINDBUCKET_PASSPHRASE=reseal-in-ci ./bin/blindbucket reseal --keyring keyring.json \
+            --to-config blindbucket.yaml 2>&1 | tee -a reseal.log
+          test "$(jq -r .root_key.source keyring.json)" = awskms
+          grep -q 'from AWS KMS key .* to a passphrase' reseal.log
+          grep -q 'from a passphrase to AWS KMS key' reseal.log
+          ./bin/blindbucket serve --config blindbucket.yaml > gateway-resealed.log 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -s -o /dev/null http://127.0.0.1:9000/; then break; fi
+            sleep 1
+          done
+          curl -s -o /dev/null http://127.0.0.1:9000/ || { cat gateway-resealed.log; exit 1; }
+
+      - name: Read after the reseals
+        env:
+          AWS_ACCESS_KEY_ID: CITESTKEY
+          AWS_SECRET_ACCESS_KEY: ci-test-secret-key
+          AWS_SESSION_TOKEN: ""
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:9000
+          BUCKET: ${{ vars.AWS_BUCKET }}
+          KEY: bbtest/clients-${{ github.run_id }}/restart.bin
+        run: |
+          set -euo pipefail
+          aws s3 cp --no-progress "s3://$BUCKET/$KEY" after-reseal.bin
+          cmp payload.bin after-reseal.bin
           aws s3 rm "s3://$BUCKET/$KEY"
 
       - name: Keep the gateway logs
@@ -251,3 +291,4 @@ jobs:
             gateway*.log
             keygen.log
             mismatch.log
+            reseal.log

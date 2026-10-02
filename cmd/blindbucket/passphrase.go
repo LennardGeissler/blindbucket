@@ -19,6 +19,11 @@ const passphraseEnv = "BLINDBUCKET_PASSPHRASE"
 // passphrase that protects a keyring.
 type passphraseFlags struct {
 	file string
+	// noEnv skips the environment variable. reseal's new passphrase sets it:
+	// the variable is where the current one comes from, and taking the same
+	// value for both would reseal a keyring under the passphrase it already has
+	// while the operator believed it had changed.
+	noEnv bool
 	// resolved caches the first answer, so that a command asks at most once.
 	// See resolve.
 	resolved []byte
@@ -27,6 +32,14 @@ type passphraseFlags struct {
 func (p *passphraseFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&p.file, "passphrase-file", "",
 		"read the keyring passphrase from this file (default: $"+passphraseEnv+", else prompt)")
+}
+
+// registerNew registers the flag for a passphrase a keyring is about to be
+// sealed under, which never comes from the environment.
+func (p *passphraseFlags) registerNew(fs *flag.FlagSet) {
+	p.noEnv = true
+	fs.StringVar(&p.file, "new-passphrase-file", "",
+		"read the new passphrase from this file (default: prompt, twice)")
 }
 
 // resolve returns the passphrase, asking the terminal only as a last resort.
@@ -74,12 +87,18 @@ func (p *passphraseFlags) read(prompt string, confirm bool) ([]byte, error) {
 		return pass, nil
 	}
 
-	if env := os.Getenv(passphraseEnv); env != "" {
-		return []byte(env), nil
+	if !p.noEnv {
+		if env := os.Getenv(passphraseEnv); env != "" {
+			return []byte(env), nil
+		}
 	}
 
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
+		if p.noEnv {
+			return nil, errors.New("no new passphrase available: pass --new-passphrase-file, " +
+				"or run on a terminal")
+		}
 		return nil, fmt.Errorf("no passphrase available: set $%s, pass --passphrase-file, or run on a terminal", passphraseEnv)
 	}
 

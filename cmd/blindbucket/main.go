@@ -1,6 +1,6 @@
 // Command blindbucket is the CLI for the blindbucket S3 encryption gateway.
 //
-// It runs the gateway (serve), manages keyrings (keygen, rotate), removes
+// It runs the gateway (serve), manages keyrings (keygen, keys, reseal, rotate), removes
 // orphaned multipart manifests (gc), moves objects stored in clear to their
 // encrypted names (migrate-names), measures what a provider does with
 // conditional writes (probe), verifies the audit log (audit), and
@@ -34,6 +34,7 @@ func commands() []command {
 		{"serve", "run the S3 gateway", runServe},
 		{"keygen", "create a keyring, or add a key to an existing one", runKeygen},
 		{"keys", "list the keys in a keyring, or retire one", runKeys},
+		{"reseal", "seal a keyring under another passphrase, Vault or KMS", runReseal},
 		{"gc", "remove orphaned multipart manifests", runGC},
 		{"rotate", "re-wrap data keys under a new KEK", runRotate},
 		{"migrate-names", "move objects stored in clear to their encrypted names", runMigrateNames},
