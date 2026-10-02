@@ -84,14 +84,18 @@ $(TLA_TOOLS):
 .PHONY: tla-tools
 tla-tools: $(TLA_TOOLS)
 
-# Regenerate the TLA+ translation of the PlusCal algorithm. Both live in
-# Multipart.tla and both are committed; CI fails if they drift apart.
-.PHONY: tla-translate
-tla-translate: $(TLA_TOOLS) ## Regenerate the TLA+ translation.
-	java -cp $(TLA_TOOLS) pcal.trans spec/tla/Multipart.tla
-	@rm -f spec/tla/Multipart.cfg spec/tla/Multipart.old
+# Regenerate the TLA+ translations of the PlusCal algorithms. Each module holds
+# its algorithm and its translation, both committed; CI fails if they drift apart.
+TLA_MODULES := Multipart Migrate
 
-# Run TLC over every configuration. Four of the five are expected to report a
+.PHONY: tla-translate
+tla-translate: $(TLA_TOOLS) ## Regenerate the TLA+ translations.
+	@for m in $(TLA_MODULES); do \
+		java -cp $(TLA_TOOLS) pcal.trans spec/tla/$$m.tla || exit 1; \
+		rm -f spec/tla/$$m.cfg spec/tla/$$m.old; \
+	done
+
+# Run TLC over every configuration. Eight of the ten are expected to report a
 # counterexample; check.sh treats a missing one as a failure.
 .PHONY: tla
 tla: $(TLA_TOOLS) ## Check every TLA+ model configuration.

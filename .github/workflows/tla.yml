@@ -1,9 +1,11 @@
 name: Formal model
 
-# The model in spec/tla covers the manifest coordination (ADR-010, ADR-009),
-# not the Go code, so it runs when the model or the coordination logic changes
-# rather than on every push. MCFixed explores ~38.5 million states and is the
-# reason for the path filter.
+# The models in spec/tla cover the manifest coordination (ADR-010, ADR-009) and
+# the name migration (ADR-022), not the Go code, so they run when a model or
+# the coordination logic changes rather than on every push. MCFixed explores
+# ~38.5 million states and is the reason for the path filter. rotate and
+# objcopy are in it because the model's Rot process is theirs, and migrate
+# because Migrate.tla is.
 on:
   push:
     branches: [main]
@@ -12,12 +14,18 @@ on:
       - "spec/tla/**"
       - "internal/manifest/**"
       - "internal/proxy/**"
+      - "internal/objcopy/**"
+      - "internal/rotate/**"
+      - "internal/migrate/**"
       - ".github/workflows/tla.yml"
   pull_request:
     paths:
       - "spec/tla/**"
       - "internal/manifest/**"
       - "internal/proxy/**"
+      - "internal/objcopy/**"
+      - "internal/rotate/**"
+      - "internal/migrate/**"
       - ".github/workflows/tla.yml"
   workflow_dispatch:
 
@@ -49,15 +57,15 @@ jobs:
 
       - run: make tla-tools
 
-      # The PlusCal algorithm and its TLA+ translation both live in
-      # Multipart.tla. If they drift apart, TLC checks something other than the
-      # algorithm that is in the file, and nobody would notice.
-      - name: The PlusCal translation is up to date
+      # Each module holds its PlusCal algorithm and the TLA+ translation of
+      # it. If they drift apart, TLC checks something other than the algorithm
+      # that is in the file, and nobody would notice.
+      - name: The PlusCal translations are up to date
         run: |
           make tla-translate
-          git diff --exit-code -- spec/tla/Multipart.tla
+          git diff --exit-code -- spec/tla/
 
-      # Four of the five configurations are expected to produce a counterexample;
-      # check.sh fails if one of them does not.
+      # Eight of the ten configurations are expected to produce a
+      # counterexample; check.sh fails if one of them does not.
       - name: Check every configuration
         run: make tla
