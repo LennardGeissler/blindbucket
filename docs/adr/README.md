@@ -27,11 +27,10 @@ rejected options is not a decision, it is a default.
 | [019](ADR-019-presigned-urls.md) | Presigned URLs: verified, never issued, and only for reads | Accepted | M6 |
 | [020](ADR-020-conditional-writes-measured.md) | Conditional writes are measured before a rotation, not assumed | Accepted | M7 |
 | [021](ADR-021-what-1.0-promises.md) | What 1.0 promises: data at rest forever, interfaces per major, the rest not at all | Accepted | M10 |
-| [022](ADR-022-migrating-to-encrypted-names.md) | Migrating a bucket to encrypted names: switch first, then copy and delete | Proposed | post-1.0 |
+| [022](ADR-022-migrating-to-encrypted-names.md) | Migrating a bucket to encrypted names: switch first, then copy and delete | Accepted | post-1.0 |
 
-Every entry but 022 is Accepted, and 022 is Proposed until `migrate-names`
-ships: its decisions already constrain the code that will implement it, and the
-model that checks them is in the repository first. 021 was Proposed until `v1.0.0`: it decides what that
+Every entry is Accepted. 022 was Proposed between its model and its code, which
+landed a day apart. 021 was Proposed until `v1.0.0`: it decides what that
 release promises, so it took effect with it. 018 was Proposed while it was a decision without code, for the
 same reason 015 was: its decisions already constrained the code while the code did not yet
 use them. 015 and 017 became Accepted together, when name encryption went from a primitive

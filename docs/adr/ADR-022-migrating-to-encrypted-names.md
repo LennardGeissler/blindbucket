@@ -1,6 +1,6 @@
 # ADR-022 — Migrating a bucket to encrypted names: switch first, then copy and delete
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-02
 **Milestone:** post-1.0
 **Implements:** `internal/migrate`, `internal/probe`, `internal/objcopy`, `internal/upstream`, `blindbucket migrate-names`
@@ -243,3 +243,29 @@ objects, stops at 5 GiB, and has no completion to carry the guard.
 - While a migration is under way, listings through the gateway log a warning for
   every key in clear they skip, and `rotate` skips those keys too. Migrate first,
   rotate afterwards.
+- On a bucket with versioning, deleting `P` adds a delete marker, and the earlier
+  versions keep the name in clear until a lifecycle rule or the operator removes
+  them. The command does not delete versions: that is a decision about the
+  bucket's retention, which is the operator's.
+- It moves objects from names in clear to encrypted ones under the keyring's one
+  name key. Moving them from one name key to another — the re-keying ADR-015
+  calls the same operation — is not covered: it would need a run that holds two
+  name keys, and nothing yet asks for one.
+
+## What building it found
+
+The design held: the order the model checked is the order the code has, and each
+counterexample became an integration test that passes against MinIO, with the
+unguarded ones passing against Garage too. Two things came out of writing it
+that the model could not have said, because both are about bytes rather than
+order:
+
+- **A migrated object keeps every header the gateway stored with it**, not only
+  `Content-Type` and `Cache-Control`. `Content-Disposition`,
+  `Content-Encoding` and `Content-Language` are read from the HEAD and carried
+  across, and a test holds the migration to it. Rotation, written earlier,
+  carries only the first two, which is a defect of its own and not this ADR's.
+- **Telling a client's write from an older object takes the provider's clock**,
+  whose `Last-Modified` has a resolution of a second. A real switch takes longer
+  than that, so the rule costs nothing in practice; the tests that exercise it
+  wait out the second.

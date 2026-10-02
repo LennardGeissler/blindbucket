@@ -97,8 +97,9 @@ crypto:
 # Object-name encryption (ADR-015). Off by default, and not a switch to flip on a
 # bucket that already holds objects: with it on, an object lives at the encrypted
 # form of its key, so turning it on hides everything written before and turning it
-# off hides everything written since. Moving an existing bucket across is a
-# rewrite of every object's key.
+# off hides everything written since. To move an existing bucket across, switch
+# every instance to it and then run `blindbucket migrate-names` (ADR-022); a
+# `--dry-run` of it before the switch lists any key too long to encrypt.
 #
 # The keyring must hold a name key -- keyrings created by `blindbucket keygen` do;
 # older ones need `keygen --add-name-key`. Add it before writing objects: the key

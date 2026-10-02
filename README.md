@@ -304,6 +304,21 @@ it is removed. `keys remove` needs `--force` because nothing in the keyring can
 see the bucket: run the rotation with `--dry-run` first and confirm it reports
 nothing left to move.
 
+Turning on `names.encrypt` for a bucket that already holds objects hides all of
+them, because an object lives at the encrypted form of its key. `migrate-names`
+moves them across — a rename at the provider, with no object data moving:
+
+```sh
+./bin/blindbucket migrate-names --config blindbucket.yaml --dry-run s3://blindbucket-dev   # before the switch
+# restart every instance with names.encrypt: true, then:
+./bin/blindbucket migrate-names --config blindbucket.yaml s3://blindbucket-dev
+```
+
+Until the run reaches an object it is invisible, and a delete of it does not
+reach it. A client writing it meanwhile keeps its write, and a run that is
+interrupted is finished by the next one. Both were checked with TLA+ before the
+command was written ([ADR-022](docs/adr/ADR-022-migrating-to-encrypted-names.md)).
+
 ### Without a server
 
 The crypto core is also usable on its own, which is the point of having shipped it
@@ -597,6 +612,7 @@ the gateway already costs per request.
 | M8 | Measured against real providers: AWS S3 and KMS done; R2 and B2 not yet | in progress |
 | M9 | Benchmarks over a real network, gateway and bucket in one region | not started |
 | M10 | 1.0: the stability promise (ADR-021), an upgrade test over every release, test vectors on every release | **done** |
+| — | `migrate-names`: an existing bucket moved to encrypted names, model-checked first (ADR-022) | **done**, unreleased |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
 clients" actually means for anything over 8 MiB. M3.5 existed to get its coordination rules
@@ -623,7 +639,10 @@ the same objects, a peer's write and a provider's rollback are the same observat
 every operation the gateway serves, with one limit: a listing is read whole and sorted
 before any of it is served, so a prefix beyond `names.max_listing_keys` is refused rather
 than answered in an order that can make a client delete data
-([ADR-017](docs/adr/ADR-017-listing-order-under-name-encryption.md)). **The audit log** is
+([ADR-017](docs/adr/ADR-017-listing-order-under-name-encryption.md)). Moving a bucket
+across with `migrate-names` is a window in which objects not yet migrated are invisible,
+and a delete of one does not reach it
+([ADR-022](docs/adr/ADR-022-migrating-to-encrypted-names.md)). **The audit log** is
 per instance and has no cross-instance order, and entries after its last checkpoint are
 chained but unsigned — both by design, both in
 [ADR-016](docs/adr/ADR-016-audit-log.md). And a **presigned URL carries the object's
