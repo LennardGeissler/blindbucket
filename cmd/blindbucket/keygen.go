@@ -264,7 +264,9 @@ func attachAuditKey(ring *keys.Keyring, path string) error {
 // names were encrypted is stored under a name derived from this key, and no
 // record of the old key remains anywhere: replacing it does not rename those
 // objects, it makes them unfindable. Moving to a new name key is a rewrite of
-// every object's key, which ADR-015 describes as a migration.
+// every object's key, which ADR-015 describes as a migration -- and not one
+// `migrate-names` can do: that moves objects from names in clear to encrypted
+// ones, under the one name key a keyring has (ADR-022).
 func attachNameKey(ring *keys.Keyring, path string) error {
 	if _, exists := ring.NameKey(); exists {
 		return fmt.Errorf("%s already has a name key; replacing it would leave every "+

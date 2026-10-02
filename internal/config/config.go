@@ -272,7 +272,8 @@ type AWSKMSKeys struct {
 // bucket that has objects in it: with it on, an object is stored under the
 // encrypted form of its key, so turning it on makes everything written before
 // invisible, and turning it off again makes everything written since invisible.
-// Moving an existing bucket across is a rewrite of every object's key.
+// `blindbucket migrate-names` moves an existing bucket across, once every
+// instance has it on (ADR-022); nothing moves one back.
 type Names struct {
 	// Encrypt turns object-name encryption on. The keyring must hold a name
 	// key; a gateway configured this way against a keyring without one refuses

@@ -18,6 +18,34 @@ version 1 would keep being readable.
 
 ### Added
 
+**`blindbucket migrate-names`** moves a bucket written before `names.encrypt`
+was switched on to the keys its objects have with it on — the limitation
+"there is no migration command" since `v0.4.0`. It is a rename at the provider,
+not a re-encryption: each object keeps its data key, its KEK and its ciphertext,
+and a megabyte of objects costs about ten kilobytes on the wire. Switch every
+gateway instance to `names.encrypt: true` first, then run it; a real run under a
+configuration that does not encrypt names is refused, and a `--dry-run` works
+either way. An interrupted run is finished by the next one, which reports the
+objects it found already copied as `resumed`.
+
+Its limits, stated in [ADR-022](docs/adr/ADR-022-migrating-to-encrypted-names.md)
+and each pinned by a test: an object not yet migrated is invisible to clients
+until the run reaches it, and a delete of such an object does not reach it — the
+migration brings it back. A write through an instance still serving names in
+clear during the run is lost. A client writing an object's encrypted key during
+the run keeps its write: the copy is published with `If-None-Match`, which the
+run measures first and refuses to start without, as rotation does — so on Garage
+v2.4.1, which ignores it, a migration needs `--allow-unconditional`. A key too
+long to encrypt, or an object at the encrypted key that is not newer than the one
+in clear, is reported and left, and makes the command exit 1. On a versioned
+bucket the names stay in earlier versions. `--json` prints a document of its own,
+under ADR-021's rules for the others.
+
+The design was model-checked before it was written:
+[`spec/tla/Migrate.tla`](spec/tla/Migrate.tla) holds over 3.1 million states and
+has a counterexample for each alternative it rejects, including the run that dies
+between publishing the copy and deleting the key in clear.
+
 **`probe` measures a third condition**, `If-None-Match` on
 `CompleteMultipartUpload`: the one guard a name migration relies on, so that a
 client writing an object's encrypted key before the migration's copy lands there

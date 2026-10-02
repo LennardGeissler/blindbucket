@@ -1,6 +1,8 @@
 # Threat Model
 
-**Status:** Current as of `v1.0.0`, which changed no guarantee in it: it makes
+**Status:** Current as of `v1.0.0`, and of `migrate-names` since, which adds no
+guarantee either: it moves objects whose names the provider has already seen,
+and §4 says what that leaves behind. `v1.0.0` changed no guarantee in it: it makes
 the existing ones a versioned promise ([ADR-021](adr/ADR-021-what-1.0-promises.md)),
 and its one fix lets the root-key credentials be referenced from the environment
 instead of written into the configuration file. `v0.6.0` added reporting and
@@ -155,6 +157,17 @@ and repeated access to one object is visible as repeated access to *something*.
 What the log does record in clear is the operator's own vocabulary — the
 credential's configured name, the operation, the key id, the status, the byte
 count — and, for a rejected request, the access key id that was attempted.
+
+**A bucket switched over keeps its old names until it is migrated.** Objects
+written before `names.encrypt` was switched on stay under their keys in clear,
+visible to the provider, until `blindbucket migrate-names` moves them
+([ADR-022](adr/ADR-022-migrating-to-encrypted-names.md)). The migration deletes
+each key in clear once its object is at the encrypted key, so the name stops
+being *stored* — but on a bucket with versioning a delete only adds a marker, and
+the earlier versions keep the name until a lifecycle rule or the operator
+removes them. What the provider recorded elsewhere, in access logs or backups,
+is beyond anything a gateway can reach. A key too long to encrypt is reported
+and stays in clear.
 
 **A presigned URL carries the object's name in clear, to whoever holds the URL.**
 The signature covers the key the client named, so the plaintext key is in the link
