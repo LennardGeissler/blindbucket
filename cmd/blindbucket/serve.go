@@ -348,23 +348,32 @@ func openNameEncrypter(
 	if !cfg.Names.Encrypt {
 		return nil, nil
 	}
-	key, ok := ring.NameKey()
-	if !ok {
-		return nil, fmt.Errorf("names.encrypt is on, but %s has no name key; "+
-			"add one with `blindbucket keygen --out %s --add-name-key` -- and add it "+
-			"before writing objects, because the key decides where every object is "+
-			"stored and cannot be changed once objects exist under it",
-			cfg.Keys.Keyring, cfg.Keys.Keyring)
-	}
-	secret := key.Secret()
-	defer clear(secret)
-	enc, err := names.New(secret)
+	enc, err := nameEncrypterFrom(cfg, ring, "names.encrypt is on")
 	if err != nil {
 		return nil, err
 	}
 	log.Info("object names are encrypted",
-		"note", "objects written with this off are not visible with it on, and the reverse")
+		"note", "objects written with this off are not visible with it on, and the "+
+			"reverse; `blindbucket migrate-names` moves the first kind across")
 	return enc, nil
+}
+
+// nameEncrypterFrom builds the encrypter from the keyring's name key, whatever
+// the configuration says, for migrate-names: a dry run before the switch needs
+// the key while names.encrypt is still off. why opens the error for a keyring
+// without one.
+func nameEncrypterFrom(cfg *config.Config, ring *keys.Keyring, why string) (*names.Encrypter, error) {
+	key, ok := ring.NameKey()
+	if !ok {
+		return nil, fmt.Errorf("%s, but %s has no name key; "+
+			"add one with `blindbucket keygen --out %s --add-name-key` -- and add it "+
+			"before writing objects, because the key decides where every object is "+
+			"stored and cannot be changed once objects exist under it",
+			why, cfg.Keys.Keyring, cfg.Keys.Keyring)
+	}
+	secret := key.Secret()
+	defer clear(secret)
+	return names.New(secret)
 }
 
 // openFreshnessIndex builds the rollback index, or nil when detection is off.
