@@ -28,6 +28,7 @@ rejected options is not a decision, it is a default.
 | [020](ADR-020-conditional-writes-measured.md) | Conditional writes are measured before a rotation, not assumed | Accepted | M7 |
 | [021](ADR-021-what-1.0-promises.md) | What 1.0 promises: data at rest forever, interfaces per major, the rest not at all | Accepted | M10 |
 | [022](ADR-022-migrating-to-encrypted-names.md) | Migrating a bucket to encrypted names: switch first, then copy and delete | Accepted | post-1.0 |
+| [023](ADR-023-resealing-a-keyring.md) | Resealing a keyring: verified before it replaces, and no second door | Accepted | post-1.0 |
 
 Every entry is Accepted. 022 was Proposed between its model and its code, which
 landed a day apart. 021 was Proposed until `v1.0.0`: it decides what that
@@ -69,6 +70,13 @@ was checked by a model before any of its code existed. The model changed it: the
 guard the first plan put on deleting the key in clear turned out to be neither
 needed where the precondition holds nor enough where it does not, and measuring
 the providers afterwards found both of them ignore it anyway.
+
+023 closes what 013 left open, and corrects what the documentation said in the
+meantime: the workaround it offered for changing a keyring's source -- a new
+keyring, and a rotation onto it -- could never have worked, because rotation
+needs the old keys in the keyring it runs against. Its one real risk is a key
+service that seals and will not unseal, so the decision is less about resealing
+than about not replacing a file before what replaces it has been opened.
 
 ADR numbers reflect the order the decisions were identified, not the order they are made.
 010 and 011 were added in design version 0.2; 011 was decided in M0 because it governs what

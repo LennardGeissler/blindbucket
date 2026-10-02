@@ -18,6 +18,27 @@ version 1 would keep being readable.
 
 ### Added
 
+**`blindbucket reseal`** moves a keyring between a passphrase, Vault Transit
+and AWS KMS, in any direction, and changes a passphrase. The keys inside are
+the same bytes before and after, so no object is touched. Until now there was no
+way to do this at all: the documentation suggested creating a new keyring and
+rotating objects onto it, which cannot work -- rotation needs the old keys in the
+keyring it runs against, and a new keyring would also have brought a new name key
+and a new audit key.
+
+Before it replaces the file, reseal opens what it wrote with the new source and
+compares it key by key with what it read, so a source that seals and will not
+unseal -- a KMS key policy or Vault policy allowing encrypt and not decrypt -- is
+caught with nothing written; `--dry-run` asks exactly that and stops. There is no
+backup, because a backup is a second way into the same keys, and every old copy
+of the file still opens with the old source: against a passphrase or root key
+that may have leaked, the remedy is still a new KEK, `rotate` and `keys remove`
+([ADR-023](docs/adr/ADR-023-resealing-a-keyring.md)). A new passphrase is never
+read from `$BLINDBUCKET_PASSPHRASE`, which holds the current one, and one equal
+to the current one is refused. Tested against Vault -- including a token allowed
+to encrypt and not to decrypt -- and the KMS emulator; the manual AWS workflow
+reseals its KMS keyring to a passphrase and back.
+
 **`blindbucket migrate-names`** moves a bucket written before `names.encrypt`
 was switched on to the keys its objects have with it on — the limitation
 "there is no migration command" since `v0.4.0`. It is a rename at the provider,

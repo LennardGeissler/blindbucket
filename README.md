@@ -613,14 +613,14 @@ the gateway already costs per request.
 | M9 | Benchmarks over a real network, gateway and bucket in one region | not started |
 | M10 | 1.0: the stability promise (ADR-021), an upgrade test over every release, test vectors on every release | **done** |
 | — | `migrate-names`: an existing bucket moved to encrypted names, model-checked first (ADR-022) | **done**, unreleased |
+| — | `reseal`: a keyring moved between a passphrase, Vault and KMS, verified before it replaces (ADR-023) | **done**, unreleased |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
 clients" actually means for anything over 8 MiB. M3.5 existed to get its coordination rules
 right before the code did — see below.
 
-**What is still missing.** There is no `blindbucket reseal`: moving a keyring from one
-root-key source to another means creating a new keyring and rotating objects onto it. The
-AWS credential chain is not used — KMS credentials are configured explicitly
+**What is still missing.** The AWS credential chain is not used — KMS credentials are
+configured explicitly
 ([ADR-013](docs/adr/ADR-013-root-key-sources.md)). Object tags are refused rather than
 stored, because the provider would hold them in plaintext
 ([ADR-012](docs/adr/ADR-012-copy-semantics.md)). `ListMultipartUploads` is refused
@@ -660,6 +660,15 @@ in the process afterwards either way. What the services buy is custody: the secr
 a passphrase on somebody's laptop, access is logged elsewhere, and it can be revoked.
 Deleting the Transit key stops the next start with `encryption key not found`, which is
 verified rather than asserted ([ADR-013](docs/adr/ADR-013-root-key-sources.md)).
+
+A keyring moves between the three with `blindbucket reseal`, in any direction, and a
+passphrase change is the same command. The keys inside do not change, so no object is
+touched. What can go wrong is a service that seals and will not unseal — a key policy
+granting encrypt and not decrypt — so the result is opened with the new source before it
+replaces the file, and `--dry-run` asks exactly that question and writes nothing. There is
+no backup, because a backup is a second way into the same keys; for the same reason every
+old copy of the file still opens the old way
+([ADR-023](docs/adr/ADR-023-resealing-a-keyring.md)).
 
 **Server-side copy.** `aws s3 cp s3://a s3://b` and `aws s3 mv` work at any size. A copy
 does not move the object: the data key is unwrapped under the source's identity and wrapped

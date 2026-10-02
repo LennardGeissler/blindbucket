@@ -4,6 +4,7 @@
 **Date:** 2026-09-12
 **Milestone:** M5 (the last of it)
 **Implements:** `internal/rootkey`, `internal/crypto/keys` (root-key reference), `cmd/blindbucket`
+**Amended by:** [ADR-023](ADR-023-resealing-a-keyring.md) — `blindbucket reseal` moves a keyring between sources, which the consequences below say does not exist
 
 ## Context
 

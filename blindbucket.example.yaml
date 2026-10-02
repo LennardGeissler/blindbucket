@@ -58,7 +58,10 @@ upstream:
 
 # Where the root key that unlocks the keyring comes from. Whichever source is
 # named, it is consulted once at startup: the KEKs are then in memory and no
-# request pays a round trip to a key service (ADR-013).
+# request pays a round trip to a key service (ADR-013). To move a keyring from
+# one source to another, `blindbucket reseal` it first, then change this section
+# on every instance (ADR-023); the keyring records its source, so an instance
+# configured for the old one refuses to start rather than guess.
 keys:
   provider: file                         # file | vault | awskms
   keyring: keyring.json

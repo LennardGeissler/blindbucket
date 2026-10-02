@@ -1,8 +1,9 @@
 # Threat Model
 
-**Status:** Current as of `v1.0.0`, and of `migrate-names` since, which adds no
-guarantee either: it moves objects whose names the provider has already seen,
-and §4 says what that leaves behind. `v1.0.0` changed no guarantee in it: it makes
+**Status:** Current as of `v1.0.0`, and of `migrate-names` and `reseal` since,
+which add no guarantee either: one moves objects whose names the provider has
+already seen, and §4 says what that leaves behind; the other changes what opens a
+keyring and not what is in it, and §5.5 says what that does not undo. `v1.0.0` changed no guarantee in it: it makes
 the existing ones a versioned promise ([ADR-021](adr/ADR-021-what-1.0-promises.md)),
 and its one fix lets the root-key credentials be referenced from the environment
 instead of written into the configuration file. `v0.6.0` added reporting and
@@ -292,6 +293,14 @@ its next restart, which no passphrase can do once the passphrase is out. Against
 attacker who has the running host, that is worth nothing. Against a leaked keyring file,
 a departing operator, or an instance that must be retired, it is the difference between
 rotating every KEK and revoking one grant ([ADR-013](adr/ADR-013-root-key-sources.md)).
+
+`blindbucket reseal` moves a keyring to a service, or between services, or to a new
+passphrase, and it changes the lock and not the keys: the KEKs inside are the same bytes
+before and after ([ADR-023](adr/ADR-023-resealing-a-keyring.md)). Whoever holds the old
+source *and* any copy of the old file — a backup, an earlier version of a Kubernetes
+Secret, a laptop — therefore still has every key. Resealing is the right response to a
+change of custody, and the first step, not the remedy, after a passphrase or root key may
+have leaked: the remedy is a new KEK, `rotate` onto it, and `keys remove` for the old one.
 
 ### 5.6 DEK compromise
 
