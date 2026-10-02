@@ -50,13 +50,33 @@ func newRootKeySource(cfg config.Keys) (rootkey.Source, error) {
 // would fail with no explanation. This is the single place all three commands
 // open a keyring, so the rule is stated once.
 func openKeyring(ctx context.Context, path string, cfg config.Keys, pass *passphraseFlags) (*keys.Keyring, error) {
+	ring, _, err := openKeyringFile(ctx, path, cfg, pass)
+	return ring, err
+}
+
+// openKeyringFile is openKeyring for a command that will write the keyring
+// back: it also returns the bytes it opened, which replaceKeyring compares the
+// file against before replacing it.
+func openKeyringFile(
+	ctx context.Context, path string, cfg config.Keys, pass *passphraseFlags,
+) (*keys.Keyring, []byte, error) {
 	warnIfExposed("keyring", path)
 	//nolint:gosec // the path comes from the operator's own configuration.
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	ring, err := unlockKeyring(ctx, path, data, cfg, pass)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ring, data, nil
+}
 
+// unlockKeyring opens keyring bytes by whatever sealed them.
+func unlockKeyring(
+	ctx context.Context, path string, data []byte, cfg config.Keys, pass *passphraseFlags,
+) (*keys.Keyring, error) {
 	ref, err := keys.ReadRootKeyRef(data)
 	if err != nil {
 		return nil, err

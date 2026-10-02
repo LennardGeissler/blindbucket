@@ -91,6 +91,19 @@ ciphertext. Both run in CI.
 
 ### Fixed
 
+**Two commands writing one keyring could lose a key.** `keygen --add`,
+`keygen --add-*-key` and `keys remove` each read the keyring, change it in
+memory and write it back, so two of them run at once each wrote what they had
+read, and the second silently dropped what the first added -- a lost KEK is every
+object wrapped under it. A keyring is now replaced only if the file still holds
+exactly what the command read; otherwise nothing is written and the command
+says to run again. The check runs just before the rename, which narrows the
+window rather than closing it; a lock file would close it, and a crash would
+leave that behind. Writes are also synced, the file and then its directory, so a
+power cut can no longer leave a keyring of the right name and no content, and
+`keygen` creating a keyring no longer replaces one that appeared after it
+checked.
+
 **`rotate --to-kid` accepted a key the keyring does not hold.** Only the id's
 syntax was checked, so a typo made a dry run report every object as rotatable
 onto a key that does not exist, and a real run fail each object in turn --

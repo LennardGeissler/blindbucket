@@ -245,7 +245,7 @@ func assertAbsent(t *testing.T, path string) {
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("%s exists after a failed run", filepath.Base(path))
 	}
-	if _, err := os.Stat(path + ".tmp"); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("%s.tmp was left behind after a failed run", filepath.Base(path))
+	if left, _ := filepath.Glob(path + ".tmp*"); len(left) > 0 {
+		t.Errorf("%v was left behind after a failed run", left)
 	}
 }

@@ -221,7 +221,7 @@ Flags:
 	if err != nil {
 		return err
 	}
-	ring, err := openKeyring(ctx, *keyring, keysCfg, &pass)
+	ring, opened, err := openKeyringFile(ctx, *keyring, keysCfg, &pass)
 	if err != nil {
 		return err
 	}
@@ -245,7 +245,7 @@ Flags:
 	if err != nil {
 		return err
 	}
-	if err := writeKeyring(*keyring, updated); err != nil {
+	if err := replaceKeyring(*keyring, opened, updated); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "removed key %q from %s (active key: %q)\n", kid, *keyring, ring.ActiveKID())

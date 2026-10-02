@@ -159,7 +159,7 @@ func createKeyring(
 	if err != nil {
 		return err
 	}
-	if err := writeKeyring(path, data); err != nil {
+	if err := createKeyringFile(path, data); err != nil {
 		return err
 	}
 
@@ -196,7 +196,7 @@ func addStandaloneKeys(
 	ctx context.Context, path string, withAudit, withName, withFresh bool,
 	cfg config.Keys, pass *passphraseFlags,
 ) error {
-	ring, err := openKeyring(ctx, path, cfg, pass)
+	ring, opened, err := openKeyringFile(ctx, path, cfg, pass)
 	if err != nil {
 		return err
 	}
@@ -220,7 +220,7 @@ func addStandaloneKeys(
 	if err != nil {
 		return err
 	}
-	if err := writeKeyring(path, updated); err != nil {
+	if err := replaceKeyring(path, opened, updated); err != nil {
 		return err
 	}
 	if withAudit {
@@ -320,7 +320,7 @@ func addKey(
 	ctx context.Context, path, kid string, activate, withAudit, withName, withFresh bool,
 	cfg config.Keys, pass *passphraseFlags,
 ) error {
-	ring, err := openKeyring(ctx, path, cfg, pass)
+	ring, opened, err := openKeyringFile(ctx, path, cfg, pass)
 	if err != nil {
 		return err
 	}
@@ -355,7 +355,7 @@ func addKey(
 	if err != nil {
 		return err
 	}
-	if err := writeKeyring(path, updated); err != nil {
+	if err := replaceKeyring(path, opened, updated); err != nil {
 		return err
 	}
 
@@ -368,21 +368,6 @@ func addKey(
 	}
 	if withAudit {
 		return printAuditPublicKey(ring)
-	}
-	return nil
-}
-
-// writeKeyring writes atomically and restrictively: a half-written keyring would
-// be unreadable, and a world-readable one defeats the passphrase.
-func writeKeyring(path string, data []byte) error {
-	tmp := path + ".tmp"
-	//nolint:gosec // the path is a command-line argument.
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
 	}
 	return nil
 }
