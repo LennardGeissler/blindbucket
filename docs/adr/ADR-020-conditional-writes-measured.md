@@ -4,6 +4,7 @@
 **Date:** 2026-09-25
 **Milestone:** M7
 **Implements:** `internal/probe`, `internal/rotate`, `internal/objcopy`
+**Amended by:** [ADR-022](ADR-022-migrating-to-encrypted-names.md) — the probe measures a third condition, `If-None-Match` on the completion, which a name migration relies on
 
 ## Context
 
