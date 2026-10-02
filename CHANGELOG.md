@@ -157,6 +157,18 @@ onto a key that does not exist, and a real run fail each object in turn --
 nothing was written, but nothing said why until the end. The command now
 refuses up front and names the key.
 
+**`rotate` dropped three of an object's headers.** Since 0.1.0 the copy it
+writes carried `Content-Type`, `Cache-Control` and the client's metadata, but
+not `Content-Disposition`, `Content-Encoding` or `Content-Language`: a rotated
+object downloaded under a different file name, or without the encoding a
+browser needed to read it. The bytes and their key were never affected. Writing
+`migrate-names`, which carries all five, found it
+([ADR-022](docs/adr/ADR-022-migrating-to-encrypted-names.md)); rotation now
+carries them too, and a test holds it to that on the guarded path and on both
+unconditional ones. An object rotated by an earlier build has lost them, and
+nothing else records them -- they have to be set again, for instance with a
+copy of the object onto itself that replaces its metadata.
+
 **The AWS CLI could not upload over HTTPS.** Over HTTPS the CLI sends
 `STREAMING-UNSIGNED-PAYLOAD-TRAILER`: aws-chunked, with its checksum in a
 trailer that follows the final `0` chunk directly. The decoder expected a CRLF

@@ -168,6 +168,79 @@ func TestIntegrationRotateUnconditional(t *testing.T) {
 	}
 }
 
+// contentHeaders are the headers a client stores with an object besides its
+// metadata, and each one a rotation must carry over.
+var contentHeaders = map[string]string{
+	"Content-Type":        "application/x-test",
+	"Cache-Control":       "max-age=60",
+	"Content-Disposition": `attachment; filename="report.bin"`,
+	"Content-Encoding":    "br",
+	"Content-Language":    "de",
+	"X-Amz-Meta-Owner":    "lennard",
+}
+
+// TestIntegrationRotateKeepsContentHeaders: what the client stored with an
+// object is still there after the rotation, on every copy path -- the guarded
+// one, and both unconditional ones, CopyObject for a small object and part by
+// part for a multipart one.
+func TestIntegrationRotateKeepsContentHeaders(t *testing.T) {
+	for _, guarded := range []bool{true, false} {
+		t.Run(fmt.Sprintf("guarded=%t", guarded), func(t *testing.T) {
+			h := newHarness(t)
+			prefix := testKey(t, "headers")
+			small, multi := prefix+"/small.bin", prefix+"/multi.bin"
+
+			resp := h.put(t, small, randomBytes(t, 5000), contentHeaders)
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("PUT returned %d", resp.StatusCode)
+			}
+			t.Cleanup(func() { _ = h.upstream.DeleteObject(context.Background(), testBucket, small) })
+
+			token := h.mpuStart(t, multi, contentHeaders)
+			var completed []completeReqPart
+			for i, part := range [][]byte{randomBytes(t, testPart), randomBytes(t, 321)} {
+				etag, resp := h.mpuPart(t, multi, token, i+1, part)
+				_ = resp.Body.Close()
+				if resp.StatusCode != http.StatusOK {
+					t.Fatalf("part %d returned %d", i+1, resp.StatusCode)
+				}
+				completed = append(completed, completeReqPart{PartNumber: i + 1, ETag: etag})
+			}
+			resp = h.mpuComplete(t, multi, token, completed)
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("completion returned %d", resp.StatusCode)
+			}
+
+			var cfg rotate.Config
+			if guarded {
+				cfg = h.rotateConfig(t, prefix+"/")
+			} else {
+				cfg = h.unguardedRotateConfig(t, prefix+"/")
+				cfg.AllowUnconditional = true
+			}
+			result, err := rotate.Run(t.Context(), cfg)
+			if err != nil {
+				t.Fatalf("rotate: %v", err)
+			}
+			if result.Rotated != 2 {
+				t.Fatalf("rotated %d objects, want 2 (%+v)", result.Rotated, *result)
+			}
+
+			for _, key := range []string{small, multi} {
+				head := h.do(t, http.MethodHead, key)
+				_ = head.Body.Close()
+				for name, want := range contentHeaders {
+					if got := head.Header.Get(name); got != want {
+						t.Errorf("%s: %s = %q after the rotation, want %q", key, name, got, want)
+					}
+				}
+			}
+		})
+	}
+}
+
 // A multipart object keeps its part boundaries, because the copy is made part by
 // part rather than flattened into one.
 func TestIntegrationRotateMultipart(t *testing.T) {
