@@ -39,9 +39,14 @@ upstream:
   endpoint: ""
   region: us-east-1
   pathStyle: false
-  # A Secret with access_key_id and secret_access_key. Clients never see these:
-  # that separation is what stops a client reaching the provider directly and
-  # writing plaintext.
+  # Where the gateway's credentials for the provider come from (ADR-024):
+  # static -- the Secret below -- or, on EKS, web_identity (IRSA) or container
+  # (Pod Identity); see serviceAccount. imds is the node's own role, which a pod
+  # rarely should have; env and chain are there for completeness.
+  credentialSource: static
+  # static only: a Secret with access_key_id and secret_access_key. Clients
+  # never see these: that separation is what stops a client reaching the
+  # provider directly and writing plaintext.
   existingSecret: ""
   # true when the credentials are temporary: the Secret then also holds
   # session_token.
@@ -69,12 +74,26 @@ keys:
     keyId: ""
     endpoint: ""
     encryptionContext: {}
-    # A Secret with access_key_id and secret_access_key. This build does not
-    # use the AWS credential chain.
+    # Where the KMS credentials come from, as for upstream.credentialSource.
+    credentialSource: static
+    # static only: a Secret with access_key_id and secret_access_key.
     credentialsSecret: ""
     # true when the credentials are temporary: the Secret then also holds
     # session_token.
     sessionToken: false
+
+# The ServiceAccount the pods run as. On EKS it is what a role attaches to:
+# with IRSA, annotate it with eks.amazonaws.com/role-arn and set
+# credentialSource to web_identity; with Pod Identity, create an association
+# for its name and set it to container. The gateway never calls the Kubernetes
+# API, so the API token stays unmounted either way -- the role's token is a
+# separate projected volume the EKS webhook adds, and fsGroup makes it readable.
+serviceAccount:
+  create: true
+  # Defaults to the release's full name when created, to "default" otherwise.
+  name: ""
+  annotations: {}
+  #  eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/blindbucket
 
 # The credentials the gateway accepts from its own clients. Each existingSecret
 # holds access_key_id and secret_access_key.

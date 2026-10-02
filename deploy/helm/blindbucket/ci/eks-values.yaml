@@ -1,0 +1,20 @@
+# The EKS shape, for `make chart` to render and validate: no AWS key in any
+# Secret, the upstream and KMS credentials resolved from IRSA through the
+# ServiceAccount's role (ADR-024).
+tls: { existingSecret: blindbucket-tls }
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/blindbucket
+upstream:
+  endpoint: https://s3.eu-central-1.amazonaws.com
+  region: eu-central-1
+  credentialSource: web_identity
+keys:
+  provider: awskms
+  keyringSecret: blindbucket-keyring
+  awskms:
+    region: eu-central-1
+    keyId: alias/blindbucket
+    credentialSource: web_identity
+clients:
+  - { name: backup-job, existingSecret: backup-job-s3, buckets: [backups] }

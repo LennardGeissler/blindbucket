@@ -147,6 +147,23 @@ chart: ## Lint, render and validate the Helm chart.
 	@! $(HELM) template bb blindbucket -f blindbucket/ci/full-values.yaml --set tls.existingSecret= >/dev/null 2>&1 \
 		|| { echo "the chart rendered without TLS"; exit 1; }
 	@echo "refuses to render without TLS: ok"
+	@# The EKS shape: credentials from the ServiceAccount's role, no AWS key in
+	@# any Secret, and the API token still not mounted (ADR-024).
+	$(HELM) lint blindbucket -f blindbucket/ci/eks-values.yaml
+	$(HELM) template bb blindbucket -f blindbucket/ci/eks-values.yaml > bin/chart-eks.yaml
+	docker run --rm -v "$(CURDIR)/bin:/w" $(KUBECONFORM_IMAGE) -strict -summary -schema-location default /w/chart-eks.yaml
+	@grep -q 'credential_source: web_identity' bin/chart-eks.yaml \
+		&& grep -q 'eks.amazonaws.com/role-arn' bin/chart-eks.yaml \
+		&& grep -q 'serviceAccountName: bb-blindbucket' bin/chart-eks.yaml \
+		&& grep -q 'automountServiceAccountToken: false' bin/chart-eks.yaml \
+		&& ! grep -q -e UPSTREAM_ACCESS_KEY_ID -e KMS_ACCESS_KEY_ID bin/chart-eks.yaml \
+		|| { echo "the EKS render is not what the values ask for"; exit 1; }
+	@echo "renders for IRSA with no AWS key in a Secret: ok"
+	@! $(HELM) template bb blindbucket -f blindbucket/ci/full-values.yaml --set upstream.existingSecret= >/dev/null 2>&1 \
+		|| { echo "the chart rendered static credentials without a Secret"; exit 1; }
+	@! $(HELM) template bb blindbucket -f blindbucket/ci/eks-values.yaml --set upstream.credentialSource=sso >/dev/null 2>&1 \
+		|| { echo "the chart rendered an unknown credential source"; exit 1; }
+	@echo "refuses static without a Secret, and an unknown source: ok"
 
 .PHONY: chart-e2e
 chart-e2e: ## Install the chart in kind and put an object through it.

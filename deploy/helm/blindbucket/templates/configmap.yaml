@@ -27,10 +27,14 @@ data:
       endpoint: {{ .Values.upstream.endpoint | quote }}
       region: {{ .Values.upstream.region | quote }}
       path_style: {{ .Values.upstream.pathStyle }}
+      {{- if eq .Values.upstream.credentialSource "static" }}
       access_key_id: ${UPSTREAM_ACCESS_KEY_ID}
       secret_access_key: ${UPSTREAM_SECRET_ACCESS_KEY}
       {{- if .Values.upstream.sessionToken }}
       session_token: ${UPSTREAM_SESSION_TOKEN}
+      {{- end }}
+      {{- else }}
+      credential_source: {{ .Values.upstream.credentialSource }}
       {{- end }}
 
     keys:
@@ -49,10 +53,14 @@ data:
       awskms:
         region: {{ .Values.keys.awskms.region | quote }}
         key_id: {{ .Values.keys.awskms.keyId | quote }}
+        {{- if eq .Values.keys.awskms.credentialSource "static" }}
         access_key_id: ${KMS_ACCESS_KEY_ID}
         secret_access_key: ${KMS_SECRET_ACCESS_KEY}
         {{- if .Values.keys.awskms.sessionToken }}
         session_token: ${KMS_SESSION_TOKEN}
+        {{- end }}
+        {{- else }}
+        credential_source: {{ .Values.keys.awskms.credentialSource }}
         {{- end }}
         endpoint: {{ .Values.keys.awskms.endpoint | quote }}
         {{- with .Values.keys.awskms.encryptionContext }}

@@ -1,6 +1,6 @@
 # ADR-024 — AWS credentials without the SDK: a resolver of our own, chosen explicitly
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-02
 **Milestone:** post-1.0
 **Implements:** `internal/awscreds`; then `internal/upstream`, `internal/rootkey` (KMS), `internal/config`, the Helm chart
@@ -189,3 +189,19 @@ described above; it would have been the one piece taken from the SDK as is.
 - The behaviour differs from the SDK's in the two decisions above and in what
   `profile` refuses. An operator who expects the SDK's chain finds an error
   where the SDK would have found credentials, and the error says why.
+
+## What building it found
+
+- **The Helm chart keeps the API token unmounted.** IRSA and Pod Identity are
+  both injected by `aws/amazon-eks-pod-identity-webhook`, as a projected volume
+  of their own; its handler has no check on `automountServiceAccountToken`, so
+  `false` — which the chart sets, since the gateway never calls the Kubernetes
+  API — does not stand in the way. Read from the webhook's source, not measured
+  on EKS.
+- **The estimate was low.** 600 to 800 lines were planned; the resolver is
+  about 900 without its comments. The difference is the profile files, whose INI
+  dialect has nested sections and two section-naming conventions.
+- **A test can take the whole web identity path without AWS.** A stub of STS that
+  answers with the test provider's own keys lets a probe run through the token
+  file, the STS exchange, the cache and the signer against real MinIO and Garage
+  — the path the AWS workflow then takes against real STS.

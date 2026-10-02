@@ -7,6 +7,12 @@ you configured. Its certificate has to be trusted by the client, and has to
 name that host.
 
 Health and metrics: port {{ .Values.service.adminPort }}, /healthz, /readyz and /metrics.
+{{- if ne .Values.upstream.credentialSource "static" }}
+
+Upstream credentials come from {{ .Values.upstream.credentialSource }} (ADR-024), resolved by
+the gateway itself and named in its startup log. A pod whose source does not
+answer -- a role its token may not assume -- does not start, and says why.
+{{- end }}
 {{- if not .Values.networkPolicy.enabled }}
 
 No NetworkPolicy is installed, so anything in the cluster can reach the S3 port.

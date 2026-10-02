@@ -29,10 +29,10 @@ rejected options is not a decision, it is a default.
 | [021](ADR-021-what-1.0-promises.md) | What 1.0 promises: data at rest forever, interfaces per major, the rest not at all | Accepted | M10 |
 | [022](ADR-022-migrating-to-encrypted-names.md) | Migrating a bucket to encrypted names: switch first, then copy and delete | Accepted | post-1.0 |
 | [023](ADR-023-resealing-a-keyring.md) | Resealing a keyring: verified before it replaces, and no second door | Accepted | post-1.0 |
-| [024](ADR-024-aws-credentials-without-the-sdk.md) | AWS credentials without the SDK: a resolver of our own, chosen explicitly | Proposed | post-1.0 |
+| [024](ADR-024-aws-credentials-without-the-sdk.md) | AWS credentials without the SDK: a resolver of our own, chosen explicitly | Accepted | post-1.0 |
 
-Every entry but 024 is Accepted; 024 is Proposed until the gateway and the Helm
-chart use what it decides. 022 was Proposed between its model and its code, which
+Every entry is Accepted. 024 was Proposed until the gateway and the Helm chart
+used what it decides. 022 was Proposed between its model and its code, which
 landed a day apart. 021 was Proposed until `v1.0.0`: it decides what that
 release promises, so it took effect with it. 018 was Proposed while it was a decision without code, for the
 same reason 015 was: its decisions already constrained the code while the code did not yet
@@ -79,6 +79,12 @@ keyring, and a rotation onto it -- could never have worked, because rotation
 needs the old keys in the keyring it runs against. Its one real risk is a key
 service that seals and will not unseal, so the decision is less about resealing
 than about not replacing a file before what replaces it has been opened.
+
+024 is the first decision whose argument is a count of modules. The SDK would
+have answered the whole question in one import and twelve modules; the decision
+is that a deliberately short dependency list is worth about nine hundred lines
+of protocol code, and it differs from the SDK on purpose where the SDK's
+convenience is a risk -- a chain that falls through to the node's role.
 
 ADR numbers reflect the order the decisions were identified, not the order they are made.
 010 and 011 were added in design version 0.2; 011 was decided in M0 because it governs what

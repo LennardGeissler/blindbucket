@@ -132,7 +132,9 @@ from `deploy/prometheus`. The audit log and rollback detection are left out,
 since each needs a file per instance that outlives the pod. `make chart` lints,
 renders and validates it; `make chart-e2e` installs it in kind and has the AWS
 CLI put a multipart object through it over TLS, then checks that MinIO holds
-ciphertext. Both run in CI.
+ciphertext. Both run in CI. On EKS it needs no AWS key in a Secret: a ServiceAccount
+carries the IRSA role or the Pod Identity association, and `credentialSource`
+names where the gateway takes its credentials from (ADR-024).
 
 ### Fixed
 

@@ -28,7 +28,10 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      # The gateway never calls the Kubernetes API.
+      serviceAccountName: {{ include "blindbucket.serviceAccountName" . }}
+      # The gateway never calls the Kubernetes API. A role's token from IRSA or
+      # Pod Identity is a projected volume of its own, which the EKS webhook
+      # adds whatever this says.
       automountServiceAccountToken: false
       # fsGroup makes the mounted Secrets group-owned by the gateway's group:
       # they are root's otherwise, and the gateway does not run as root.
@@ -45,6 +48,7 @@ spec:
             - { name: s3, containerPort: 9000, protocol: TCP }
             - { name: admin, containerPort: 9100, protocol: TCP }
           env:
+            {{- if eq .Values.upstream.credentialSource "static" }}
             - name: UPSTREAM_ACCESS_KEY_ID
               valueFrom: { secretKeyRef: { name: {{ .Values.upstream.existingSecret | quote }}, key: access_key_id } }
             - name: UPSTREAM_SECRET_ACCESS_KEY
@@ -53,10 +57,11 @@ spec:
             - name: UPSTREAM_SESSION_TOKEN
               valueFrom: { secretKeyRef: { name: {{ .Values.upstream.existingSecret | quote }}, key: session_token } }
             {{- end }}
+            {{- end }}
             {{- if eq .Values.keys.provider "vault" }}
             - name: VAULT_TOKEN
               valueFrom: { secretKeyRef: { name: {{ .Values.keys.vault.tokenSecret | quote }}, key: token } }
-            {{- else if eq .Values.keys.provider "awskms" }}
+            {{- else if and (eq .Values.keys.provider "awskms") (eq .Values.keys.awskms.credentialSource "static") }}
             - name: KMS_ACCESS_KEY_ID
               valueFrom: { secretKeyRef: { name: {{ .Values.keys.awskms.credentialsSecret | quote }}, key: access_key_id } }
             - name: KMS_SECRET_ACCESS_KEY
