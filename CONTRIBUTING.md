@@ -120,6 +120,7 @@ the environment ([`internal/testprovider`](internal/testprovider/testprovider.go
 | `BLINDBUCKET_TEST_S3_PATH_STYLE` | `true` |
 | `BLINDBUCKET_TEST_S3_COPY_SOURCE_IF_MATCH` | `enforced` — or `ignored`, `refused` |
 | `BLINDBUCKET_TEST_S3_COMPLETE_IF_MATCH` | `enforced` — or `ignored`, `refused` |
+| `BLINDBUCKET_TEST_S3_COMPLETE_IF_NONE_MATCH` | `enforced` — or `ignored`, `refused` |
 
 The tests write to that bucket and overwrite objects behind the gateway's back,
 which is the point of them. Give them a bucket of their own.
@@ -134,8 +135,8 @@ leave a run's objects in place and look at them. A run that crashes cannot sweep
 so a bucket on a real account should also carry a lifecycle rule on `bbtest/`
 that expires objects and aborts incomplete uploads after a day.
 
-The last two state what the provider does with the conditional writes rotation
-relies on. They are stated rather than measured on purpose: `internal/probe`
+The last three state what the provider does with the conditional writes rotation
+and `migrate-names` rely on. They are stated rather than measured on purpose: `internal/probe`
 fails when the provider's behaviour differs from them, so a provider that
 changes shows up as a failing test rather than as a different set of tests
 running. Garage, the second provider CI runs against, comes up in one command:

@@ -113,7 +113,7 @@ func (e *UnguardedError) Error() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "rotate: the provider behind %s does not enforce the conditional "+
 		"writes rotation relies on:", e.Bucket)
-	for _, check := range e.Conditions.Checks() {
+	for _, check := range e.Conditions.RotationChecks() {
 		if check.Outcome == probe.Enforced {
 			continue
 		}
@@ -171,7 +171,7 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		if err != nil {
 			return nil, fmt.Errorf("rotate: measuring conditional writes: %w", err)
 		}
-		if !conditions.Safe() {
+		if !conditions.SafeForRotation() {
 			return nil, &UnguardedError{Bucket: cfg.Bucket, Conditions: conditions}
 		}
 		cfg.Log.Debug("provider enforces both conditional writes")

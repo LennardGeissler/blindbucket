@@ -35,12 +35,13 @@ const (
 	PathStyleEnv    = "BLINDBUCKET_TEST_S3_PATH_STYLE"
 
 	// What the provider is expected to do with the two conditional writes
-	// rotation relies on: "enforced", "ignored" or "refused", as internal/probe
-	// names them. They are stated rather than measured, so that a provider
-	// changing its behaviour fails a test instead of quietly changing which
-	// tests run.
-	CopySourceIfMatchEnv = "BLINDBUCKET_TEST_S3_COPY_SOURCE_IF_MATCH"
-	CompleteIfMatchEnv   = "BLINDBUCKET_TEST_S3_COMPLETE_IF_MATCH"
+	// rotation relies on, and the one migrate-names relies on: "enforced",
+	// "ignored" or "refused", as internal/probe names them. They are stated
+	// rather than measured, so that a provider changing its behaviour fails a
+	// test instead of quietly changing which tests run.
+	CopySourceIfMatchEnv   = "BLINDBUCKET_TEST_S3_COPY_SOURCE_IF_MATCH"
+	CompleteIfMatchEnv     = "BLINDBUCKET_TEST_S3_COMPLETE_IF_MATCH"
+	CompleteIfNoneMatchEnv = "BLINDBUCKET_TEST_S3_COMPLETE_IF_NONE_MATCH"
 
 	// KeepEnv, set to anything, leaves a run's objects in the bucket instead of
 	// sweeping them, for looking at what a failing test wrote.
@@ -78,16 +79,24 @@ type Provider struct {
 	Bucket       string
 	PathStyle    bool
 
-	// CopySourceIfMatch and CompleteIfMatch are the expected outcomes, both
-	// "enforced" unless stated otherwise -- which is what MinIO does.
-	CopySourceIfMatch string
-	CompleteIfMatch   string
+	// CopySourceIfMatch, CompleteIfMatch and CompleteIfNoneMatch are the
+	// expected outcomes, all "enforced" unless stated otherwise -- which is what
+	// MinIO does.
+	CopySourceIfMatch   string
+	CompleteIfMatch     string
+	CompleteIfNoneMatch string
 }
 
 // Guarded reports whether the provider is expected to enforce both conditional
 // writes, which is what a rotation without --allow-unconditional needs.
 func (p Provider) Guarded() bool {
 	return p.CopySourceIfMatch == "enforced" && p.CompleteIfMatch == "enforced"
+}
+
+// MigrationGuarded reports whether the provider is expected to enforce the
+// condition a name migration without --allow-unconditional needs.
+func (p Provider) MigrationGuarded() bool {
+	return p.CompleteIfNoneMatch == "enforced"
 }
 
 // Bucket is the bucket the tests use, and is read without a provider being
@@ -113,7 +122,7 @@ func Require(t testing.TB) Provider {
 // test -- a TestMain -- that has no test to skip. Its Endpoint is empty when no
 // provider is configured.
 func FromEnv() (Provider, error) {
-	for _, name := range []string{CopySourceIfMatchEnv, CompleteIfMatchEnv} {
+	for _, name := range []string{CopySourceIfMatchEnv, CompleteIfMatchEnv, CompleteIfNoneMatchEnv} {
 		switch v := os.Getenv(name); v {
 		case "", "enforced", "ignored", "refused":
 		default:
@@ -138,8 +147,9 @@ func FromEnv() (Provider, error) {
 		Bucket:       Bucket(),
 		PathStyle:    pathStyle,
 
-		CopySourceIfMatch: envOr(CopySourceIfMatchEnv, "enforced"),
-		CompleteIfMatch:   envOr(CompleteIfMatchEnv, "enforced"),
+		CopySourceIfMatch:   envOr(CopySourceIfMatchEnv, "enforced"),
+		CompleteIfMatch:     envOr(CompleteIfMatchEnv, "enforced"),
+		CompleteIfNoneMatch: envOr(CompleteIfNoneMatchEnv, "enforced"),
 	}, nil
 }
 

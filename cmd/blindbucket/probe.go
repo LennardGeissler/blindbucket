@@ -32,10 +32,14 @@ ignores one looks exactly like a provider that allowed the write: Garage v2.4.1
 completes a multipart upload whatever If-Match says. So this asks with a
 condition that must fail and reports what happened to it -- enforced, ignored,
 or refused. It is the same measurement a rotation makes before it starts
-(ADR-020), without the rotation.
+(ADR-020), without the rotation. A third condition, If-None-Match on the
+completion, is the one migrate-names relies on (ADR-022), and is reported
+separately.
 
 It writes one small object under .blindbucket/probe/ and removes it again. The
-keyring is not needed. Exits 0 when both conditions are enforced, 1 otherwise.
+keyring is not needed. Exits 0 when both conditions a rotation relies on are
+enforced, 1 otherwise; the migration's condition does not change the exit
+status, so read it from the output.
 
 Flags:
 `)
@@ -90,7 +94,7 @@ Flags:
 	} else {
 		printProbe(os.Stdout, bucket, conditions)
 	}
-	if !conditions.Safe() {
+	if !conditions.SafeForRotation() {
 		return errUnguarded
 	}
 	return nil
@@ -98,21 +102,39 @@ Flags:
 
 func printProbe(w io.Writer, bucket string, c probe.Conditions) {
 	_, _ = fmt.Fprintf(w, "conditional writes on %s:\n", bucket)
-	for _, check := range c.Checks() {
+	for _, check := range append(c.RotationChecks(), c.MigrationChecks()...) {
 		_, _ = fmt.Fprintf(w, "  %-46s %s\n", check.Name, check.Outcome)
 		if check.Detail != "" {
 			_, _ = fmt.Fprintf(w, "  %-46s %s\n", "", check.Detail)
 		}
 	}
-	if c.Safe() {
-		_, _ = fmt.Fprintln(w, "rotation: guarded")
-	} else {
-		_, _ = fmt.Fprintln(w, "rotation: refused without --allow-unconditional")
+	for _, verdict := range []struct {
+		what    string
+		guarded bool
+	}{
+		{"rotation", c.SafeForRotation()},
+		{"migrate-names", c.SafeForMigration()},
+	} {
+		if verdict.guarded {
+			_, _ = fmt.Fprintf(w, "%s: guarded\n", verdict.what)
+		} else {
+			_, _ = fmt.Fprintf(w, "%s: refused without --allow-unconditional\n", verdict.what)
+		}
 	}
 }
 
+// probeJSON is the `probe --json` document. checks and guarded are about
+// rotation and mean what they meant in 1.0 (ADR-021); the condition a name
+// migration relies on came later and has a field of its own, so that a consumer
+// that reads checks to decide about a rotation does not change its answer.
 type probeJSON struct {
-	Bucket  string           `json:"bucket"`
+	Bucket    string           `json:"bucket"`
+	Checks    []probeCheckJSON `json:"checks"`
+	Guarded   bool             `json:"guarded"`
+	Migration probeVerdictJSON `json:"migration"`
+}
+
+type probeVerdictJSON struct {
 	Checks  []probeCheckJSON `json:"checks"`
 	Guarded bool             `json:"guarded"`
 }
@@ -124,15 +146,25 @@ type probeCheckJSON struct {
 }
 
 func marshalProbeJSON(bucket string, c probe.Conditions) ([]byte, error) {
-	out := probeJSON{Bucket: bucket, Guarded: c.Safe(), Checks: []probeCheckJSON{}}
-	for _, check := range c.Checks() {
-		out.Checks = append(out.Checks, probeCheckJSON{
-			Name: check.Name, Outcome: check.Outcome.String(), Detail: check.Detail,
-		})
+	out := probeJSON{
+		Bucket: bucket, Guarded: c.SafeForRotation(), Checks: checksJSON(c.RotationChecks()),
+		Migration: probeVerdictJSON{
+			Guarded: c.SafeForMigration(), Checks: checksJSON(c.MigrationChecks()),
+		},
 	}
 	data, err := json.Marshal(out)
 	if err != nil {
 		return nil, err
 	}
 	return append(data, '\n'), nil
+}
+
+func checksJSON(checks []probe.Check) []probeCheckJSON {
+	out := []probeCheckJSON{}
+	for _, check := range checks {
+		out = append(out, probeCheckJSON{
+			Name: check.Name, Outcome: check.Outcome.String(), Detail: check.Detail,
+		})
+	}
+	return out
 }

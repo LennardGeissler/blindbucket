@@ -322,6 +322,45 @@ func TestEmptyBodySendsContentLength(t *testing.T) {
 	}
 }
 
+// TestCompletionCarriesItsConditions holds the completion to sending the two
+// conditions that guard rotation and migration, under their own header names.
+// Neither has a test that would fail by itself if it were dropped: a provider
+// that never sees a condition behaves exactly like one that ignores it, which is
+// what the probe measures and why the header has to be pinned here.
+func TestCompletionCarriesItsConditions(t *testing.T) {
+	t.Parallel()
+
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		_, _ = fmt.Fprint(w, `<CompleteMultipartUploadResult><ETag>"done-1"</ETag></CompleteMultipartUploadResult>`)
+	}))
+	defer srv.Close()
+
+	c := testClient(t, srv.URL)
+	for _, tc := range []struct {
+		in            CompleteMultipartUploadInput
+		match, noneOf string
+	}{
+		{CompleteMultipartUploadInput{IfMatch: `"abc"`}, `"abc"`, ""},
+		{CompleteMultipartUploadInput{IfNoneMatch: "*"}, "", "*"},
+		{CompleteMultipartUploadInput{}, "", ""},
+	} {
+		in := tc.in
+		in.Bucket, in.Key, in.UploadID = "bucket", "key", "upload"
+		in.Parts = []CompletedPart{{PartNumber: 1, ETag: `"p1"`}}
+		if _, err := c.CompleteMultipartUpload(context.Background(), in); err != nil {
+			t.Fatalf("CompleteMultipartUpload: %v", err)
+		}
+		if g := got.Get("If-Match"); g != tc.match {
+			t.Errorf("If-Match = %q, want %q", g, tc.match)
+		}
+		if g := got.Get("If-None-Match"); g != tc.noneOf {
+			t.Errorf("If-None-Match = %q, want %q", g, tc.noneOf)
+		}
+	}
+}
+
 func TestParseContentRangeTotal(t *testing.T) {
 	t.Parallel()
 

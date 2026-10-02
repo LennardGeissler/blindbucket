@@ -70,6 +70,8 @@ export BLINDBUCKET_TEST_S3_REGION=$REGION
 export BLINDBUCKET_TEST_S3_ACCESS_KEY=$KEY_ID
 export BLINDBUCKET_TEST_S3_SECRET_KEY=$SECRET
 export BLINDBUCKET_TEST_S3_BUCKET=$BUCKET
-# Measured on v2.4.1: If-Match on CompleteMultipartUpload completes regardless.
+# Measured on v2.4.1: If-Match and If-None-Match on CompleteMultipartUpload
+# both complete regardless.
 export BLINDBUCKET_TEST_S3_COMPLETE_IF_MATCH=ignored
+export BLINDBUCKET_TEST_S3_COMPLETE_IF_NONE_MATCH=ignored
 ENV

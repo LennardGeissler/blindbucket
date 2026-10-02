@@ -1,13 +1,14 @@
 // Package probe measures what a provider does with the conditional writes
 // blindbucket relies on, rather than assuming it.
 //
-// Rotation guards two windows with a precondition each (ADR-009). A provider
-// that refuses a precondition is safe -- the request fails and the object is
-// left alone. A provider that ignores one is not, and Garage v2.4.1 ignores
-// If-Match on CompleteMultipartUpload: the upload completes over whatever is
-// there. Nothing in a response distinguishes that from a write that was allowed,
-// so the only way to know is to ask with a condition that must fail and see
-// whether it does. See docs/adr/ADR-020-conditional-writes-measured.md.
+// Rotation guards two windows with a precondition each (ADR-009), and a name
+// migration guards one (ADR-022). A provider that refuses a precondition is
+// safe -- the request fails and the object is left alone. A provider that
+// ignores one is not, and Garage v2.4.1 ignores both If-Match and If-None-Match
+// on CompleteMultipartUpload: the upload completes over whatever is there.
+// Nothing in a response distinguishes that from a write that was allowed, so the
+// only way to know is to ask with a condition that must fail and see whether it
+// does. See docs/adr/ADR-020-conditional-writes-measured.md.
 package probe
 
 import (
@@ -67,7 +68,7 @@ type Check struct {
 	Detail string
 }
 
-// Conditions reports the two guards rotation depends on.
+// Conditions reports the guards rotation and name migration depend on.
 type Conditions struct {
 	// CopySourceIfMatch is x-amz-copy-source-if-match on UploadPartCopy: the
 	// guard between the rotation's HEAD and its copy.
@@ -75,16 +76,33 @@ type Conditions struct {
 	// CompleteIfMatch is If-Match on CompleteMultipartUpload: the guard between
 	// the copy and the object being published.
 	CompleteIfMatch Check
+	// CompleteIfNoneMatch is If-None-Match: * on CompleteMultipartUpload: the
+	// guard between a migration's HEAD of an object's encrypted key and its copy
+	// landing there, in which a client may write that key first (ADR-022).
+	CompleteIfNoneMatch Check
 }
 
-// Checks returns both checks in the order a rotation meets them.
-func (c Conditions) Checks() []Check {
+// RotationChecks returns the two checks a rotation relies on, in the order it
+// meets them.
+func (c Conditions) RotationChecks() []Check {
 	return []Check{c.CopySourceIfMatch, c.CompleteIfMatch}
 }
 
-// Safe reports whether a rotation can rely on both guards.
-func (c Conditions) Safe() bool {
-	for _, check := range c.Checks() {
+// MigrationChecks returns the check a name migration relies on. It is one: the
+// model in spec/tla/Migrate.tla shows the source condition is not load-bearing
+// once every gateway instance encrypts names, which a migration requires.
+func (c Conditions) MigrationChecks() []Check {
+	return []Check{c.CompleteIfNoneMatch}
+}
+
+// SafeForRotation reports whether a rotation can rely on both its guards.
+func (c Conditions) SafeForRotation() bool { return allEnforced(c.RotationChecks()) }
+
+// SafeForMigration reports whether a name migration can rely on its guard.
+func (c Conditions) SafeForMigration() bool { return allEnforced(c.MigrationChecks()) }
+
+func allEnforced(checks []Check) bool {
+	for _, check := range checks {
 		if check.Outcome != Enforced {
 			return false
 		}
@@ -92,7 +110,7 @@ func (c Conditions) Safe() bool {
 	return true
 }
 
-// ConditionalWrites measures both guards against bucket.
+// ConditionalWrites measures all three guards against bucket.
 //
 // It writes one small object under Prefix and removes it again, whatever the
 // outcome. An error means the measurement itself could not be made -- the
@@ -166,7 +184,50 @@ func ConditionalWrites(ctx context.Context, client *upstream.Client, bucket stri
 	if out.CompleteIfMatch, err = classify("If-Match on CompleteMultipartUpload", err); err != nil {
 		return Conditions{}, err
 	}
+
+	// Guard 3, on an upload of its own: the first one is spent if guard 2 was
+	// ignored. The probe object is still at the key -- replaced, at worst, by
+	// that ignored completion -- so If-None-Match: * has something to refuse.
+	if out.CompleteIfNoneMatch, err = completeIfNoneMatch(ctx, client, bucket, key, body); err != nil {
+		return Conditions{}, err
+	}
 	return out, nil
+}
+
+// completeIfNoneMatch measures If-None-Match: * on a completion over an object
+// that exists.
+func completeIfNoneMatch(
+	ctx context.Context, client *upstream.Client, bucket, key, body string,
+) (Check, error) {
+	uploadID, err := client.CreateMultipartUpload(ctx, upstream.CreateMultipartUploadInput{
+		Bucket: bucket, Key: key, ContentType: "text/plain",
+	})
+	if err != nil {
+		return Check{}, fmt.Errorf("probe: opening an upload: %w", err)
+	}
+	completed := false
+	defer func() {
+		if !completed {
+			_ = client.AbortMultipartUpload(context.WithoutCancel(ctx), bucket, key, uploadID)
+		}
+	}()
+
+	etag, err := client.UploadPart(ctx, upstream.UploadPartInput{
+		Bucket: bucket, Key: key, UploadID: uploadID, PartNumber: 1,
+		Body: strings.NewReader(body), ContentLength: int64(len(body)),
+	})
+	if err != nil {
+		return Check{}, fmt.Errorf("probe: uploading a part: %w", err)
+	}
+	_, err = client.CompleteMultipartUpload(ctx, upstream.CompleteMultipartUploadInput{
+		Bucket: bucket, Key: key, UploadID: uploadID,
+		Parts:       []upstream.CompletedPart{{PartNumber: 1, ETag: etag}},
+		IfNoneMatch: "*",
+	})
+	if err == nil {
+		completed = true
+	}
+	return classify("If-None-Match on CompleteMultipartUpload", err)
 }
 
 // classify turns the answer to a request whose condition had to fail into an

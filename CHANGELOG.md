@@ -18,6 +18,16 @@ version 1 would keep being readable.
 
 ### Added
 
+**`probe` measures a third condition**, `If-None-Match` on
+`CompleteMultipartUpload`: the one guard a name migration relies on, so that a
+client writing an object's encrypted key before the migration's copy lands there
+keeps its write ([ADR-022](docs/adr/ADR-022-migrating-to-encrypted-names.md)).
+`probe --json` gains a `migration` field with its own `checks` and `guarded`;
+`checks`, `guarded` and the exit status keep answering for rotation alone, as
+ADR-021 holds them. Measured on 2026-10-02: MinIO enforces it, Garage v2.4.1
+ignores it. Every probe, and so every rotation, makes three or four more
+requests.
+
 **`make help`.** Lists documented Makefile targets by section without changing
 what a bare `make` runs.
 

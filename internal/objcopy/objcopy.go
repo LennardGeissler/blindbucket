@@ -1,15 +1,16 @@
 // Package objcopy republishes a stored object under a freshly wrapped data key,
 // without its ciphertext ever travelling through this process.
 //
-// Two callers need exactly this. `blindbucket rotate` re-wraps an object's data
+// Three callers need exactly this. `blindbucket rotate` re-wraps an object's data
 // key under a new KEK and writes it back to the key it came from. CopyObject
-// writes it to a different key. Both keep the data key itself, both have to
-// re-wrap it because the wrap is bound to the object's identity (FORMAT §6.1),
-// both have to preserve a multipart object's part boundaries so the size
-// arithmetic still reads, and both have to obey the manifest lifecycle rules
-// R1-R3 that spec/tla/Multipart.tla checks.
+// writes it to a different key. `blindbucket migrate-names` writes it to the
+// same key at a different address -- the encrypted form of its name. All keep
+// the data key itself, all have to re-wrap it because the wrap is bound to the
+// object's identity (FORMAT §6.1), all have to preserve a multipart object's
+// part boundaries so the size arithmetic still reads, and all have to obey the
+// manifest lifecycle rules R1-R3 that spec/tla/Multipart.tla checks.
 //
-// That last point is why this is one package and not two implementations. The
+// That last point is why this is one package and not three implementations. The
 // rules are ordering constraints on three writes, the model proves the ordering,
 // and ADR-010 records which counterexample each rule came from. Written twice,
 // they would eventually be two different orderings, and only one of them would
@@ -139,6 +140,14 @@ type Request struct {
 	// client asking to copy over an object means it.
 	DestIfMatch string
 
+	// DestIfNoneMatch, set to "*", makes the publishing write fail if any
+	// object is at the destination. migrate-names sets it: the gateway keeps
+	// serving while a migration runs, and a client write that reaches the
+	// encrypted key first is newer than the object being moved there, so it
+	// must not be replaced (ADR-022, MCMigrateNoCreateGuard). The failure is
+	// ErrPreconditionFailed, as for the other conditions.
+	DestIfNoneMatch string
+
 	// ReplacedManifest is the manifest id of the destination version this copy
 	// replaces, to be deleted once the new version is published (rule R3).
 	//
@@ -248,7 +257,7 @@ func rewrap(ctx context.Context, deps Deps, req Request) (objectmeta.Meta, []byt
 // publish writes the destination object.
 //
 // Both shapes go through a multipart upload, single-part objects included,
-// because CompleteMultipartUpload is where the conditional write lives, and a
+// because CompleteMultipartUpload is where the conditional writes live, and a
 // single part keeps the size arithmetic identical (M = 1 gives the same result
 // as a single-part object, FORMAT §7.2). The exception is a small single-part
 // object with no condition to carry, which copyWhole handles.
@@ -265,7 +274,8 @@ func publish(ctx context.Context, deps Deps, req Request,
 		metadata[name] = value
 	}
 
-	if !src.Meta.Multipart && req.DestIfMatch == "" && src.Info.TotalSize < SmallObject {
+	if !src.Meta.Multipart && req.DestIfMatch == "" && req.DestIfNoneMatch == "" &&
+		src.Info.TotalSize < SmallObject {
 		for name, value := range next.Headers() {
 			metadata[name] = value
 		}
@@ -345,7 +355,7 @@ func publish(ctx context.Context, deps Deps, req Request,
 
 	out, err := deps.Upstream.CompleteMultipartUpload(ctx, upstream.CompleteMultipartUploadInput{
 		Bucket: dst.Bucket, Key: dst.StoredKey, UploadID: uploadID,
-		Parts: completed, IfMatch: req.DestIfMatch,
+		Parts: completed, IfMatch: req.DestIfMatch, IfNoneMatch: req.DestIfNoneMatch,
 	})
 	if err != nil {
 		if upstream.PreconditionFailed(err) {

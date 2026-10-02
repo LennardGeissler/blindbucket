@@ -164,6 +164,11 @@ type CompleteMultipartUploadInput struct {
 	// of being silently replaced; see ADR-009 and the I2
 	// counterexample in spec/tla/README.md.
 	IfMatch string
+	// IfNoneMatch, set to "*", makes the completion fail if any object is at
+	// the key. migrate-names uses it so that a client write that reaches the
+	// encrypted key before the copy does is not replaced by the older object;
+	// see ADR-022 and MCMigrateNoCreateGuard in spec/tla/README.md.
+	IfNoneMatch string
 }
 
 // CompleteMultipartUploadOutput reports what the provider assembled.
@@ -201,6 +206,7 @@ func (c *Client) CompleteMultipartUpload(
 	req.ContentLength = int64(len(body))
 	req.Header.Set("Content-Type", "application/xml")
 	setIfNotEmpty(req.Header, "If-Match", in.IfMatch)
+	setIfNotEmpty(req.Header, "If-None-Match", in.IfNoneMatch)
 
 	//nolint:bodyclose // closed by drainAndClose below.
 	resp, err := c.do(ctx, req, "CompleteMultipartUpload", false)

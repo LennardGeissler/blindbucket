@@ -20,7 +20,7 @@ not a re-run of the whole matrix, and this document does not claim they are.
 **Providers.** The client matrix is measured against MinIO. The Go integration
 suite also runs against **Garage v2.4.1** since 2026-09-25
 (`test/providers/garage.sh`), and passes there; what Garage does differently is
-under [Conditional writes](#conditional-writes-for-rotation) below.
+under [Conditional writes](#conditional-writes-for-rotation-and-migration) below.
 
 **AWS S3** was measured on 2026-09-26 in `eu-central-1`: the Go integration
 suite — upstream, proxy and probe, 238 tests — passes against it, with
@@ -210,14 +210,26 @@ These apply to every client.
 | **Copying a `versionId`** | Returns `NotImplemented`. This build does not implement versioned reads, and copying the current version instead of the one asked for would be the wrong kind of helpful. | — |
 | **Part sizes** | Every part but the last must be a multiple of the chunk size (FORMAT §7.3). The defaults of every client above satisfy this; a client configured with, say, 5.5 MiB parts is refused at completion with a message naming the fix. | — |
 
-### Conditional writes, for rotation
+### Conditional writes, for rotation and migration
 
-`blindbucket rotate` needs the provider to honour two preconditions. Measured:
+`blindbucket rotate` needs the provider to honour two preconditions, and
+`blindbucket migrate-names` a third. Measured:
 
 | Precondition | MinIO | AWS S3 | Garage v2.4.1 | Used for |
 |---|---|---|---|---|
-| `x-amz-copy-source-if-match` on `UploadPartCopy` | **enforced** | **enforced** | **enforced** | the source changing between the HEAD and the copy |
-| `If-Match` on `CompleteMultipartUpload` | **enforced** | **enforced** | **ignored** — completes over whatever is there | the target changing between the copy and the completion |
+| `x-amz-copy-source-if-match` on `UploadPartCopy` | **enforced** | **enforced** | **enforced** | rotation: the source changing between the HEAD and the copy |
+| `If-Match` on `CompleteMultipartUpload` | **enforced** | **enforced** | **ignored** — completes over whatever is there | rotation: the target changing between the copy and the completion |
+| `If-None-Match: *` on `CompleteMultipartUpload` | **enforced** | documented by AWS, not yet measured here | **ignored** — completes over whatever is there | migration: a client writing the encrypted key before the copy lands there |
+| `If-Match` on `DeleteObject` | **ignored** — deletes regardless | not measured | **ignored** — deletes regardless | nothing — see below |
+
+The third and fourth rows were measured on 2026-10-02 with the AWS CLI against
+MinIO `RELEASE.2026-09-22T19-25-18Z` and Garage v2.4.1, with no gateway involved.
+The fourth is recorded because the first design for `migrate-names` would have
+relied on it; the model in [`spec/tla/Migrate.tla`](../spec/tla/Migrate.tla)
+showed it did not need to before the measurement showed it could not have
+([ADR-022](adr/ADR-022-migrating-to-encrypted-names.md)). AWS's row for the third
+is the next AWS run's to fill: the probe test expects it enforced there and fails
+if it is not.
 
 On MinIO both answer `412 PreconditionFailed`, and in practice the copy refuses
 first — the rotation never gets as far as the completion. Either way the object
@@ -234,6 +246,12 @@ the measurement, prints a warning, and requires that nothing writes to the
 prefix meanwhile. R2 and Backblaze B2 are still unmeasured; the probe answers for
 them at the first run, and `blindbucket probe s3://<bucket>` asks without
 rotating.
+
+The same probe measures the third row, and a migration refuses to start unless it
+is enforced. Its verdict is a separate field in `probe --json` and does not change
+`probe`'s exit status, which still answers for rotation alone (ADR-021). On Garage
+a migration needs `--allow-unconditional`, with nothing writing to the prefix
+while it runs.
 
 Garage also refuses `UploadPartCopy` from a source under 5 MiB, even as the only
 part of an upload, where AWS accepts it. A small single-part object with no

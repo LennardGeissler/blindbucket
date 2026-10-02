@@ -32,12 +32,19 @@ func TestProbeThroughTheCommand(t *testing.T) {
 		Checks  []struct {
 			Outcome string `json:"outcome"`
 		} `json:"checks"`
+		Migration struct {
+			Guarded bool `json:"guarded"`
+		} `json:"migration"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
 		t.Fatalf("--json did not print JSON: %v\n%s", err, stdout)
 	}
 	if doc.Bucket != p.Bucket || doc.Guarded != p.Guarded() || len(doc.Checks) != 2 {
 		t.Errorf("got %+v for a provider with guarded=%t", doc, p.Guarded())
+	}
+	if doc.Migration.Guarded != p.MigrationGuarded() {
+		t.Errorf("migration guarded = %t for a provider stated as %t",
+			doc.Migration.Guarded, p.MigrationGuarded())
 	}
 
 	// The human form says the same thing in words.

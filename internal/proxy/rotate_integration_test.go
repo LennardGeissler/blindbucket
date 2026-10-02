@@ -125,7 +125,7 @@ func TestIntegrationRotateRefusedWithoutGuards(t *testing.T) {
 	if !errors.As(err, &refusal) {
 		t.Fatalf("rotate.Run returned %v, want an UnguardedError", err)
 	}
-	if refusal.Conditions.Safe() {
+	if refusal.Conditions.SafeForRotation() {
 		t.Error("the refusal carries conditions that say it is safe")
 	}
 	if !strings.Contains(err.Error(), "--allow-unconditional") {

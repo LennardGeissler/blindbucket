@@ -9,9 +9,9 @@ import (
 )
 
 // The probe against a real provider, compared with what the provider is stated
-// to do. The statement is the point: MinIO enforces both conditions, Garage
-// v2.4.1 ignores the second, and a provider that changes either way should fail
-// here rather than be noticed by a rotation.
+// to do. The statement is the point: MinIO enforces all three conditions, Garage
+// v2.4.1 ignores both on the completion, and a provider that changes either way
+// should fail here rather than be noticed by a rotation or a migration.
 //
 //	docker compose up -d
 //	BLINDBUCKET_TEST_S3_ENDPOINT=http://localhost:9002 go test ./internal/probe
@@ -36,14 +36,18 @@ func TestIntegrationConditionalWrites(t *testing.T) {
 	}{
 		{got.CopySourceIfMatch, p.CopySourceIfMatch, testprovider.CopySourceIfMatchEnv},
 		{got.CompleteIfMatch, p.CompleteIfMatch, testprovider.CompleteIfMatchEnv},
+		{got.CompleteIfNoneMatch, p.CompleteIfNoneMatch, testprovider.CompleteIfNoneMatchEnv},
 	} {
 		if c.check.Outcome.String() != c.want {
 			t.Errorf("%s: %s (%s), but %s says %s",
 				c.check.Name, c.check.Outcome, c.check.Detail, c.env, c.want)
 		}
 	}
-	if got.Safe() != p.Guarded() {
-		t.Errorf("Safe() = %v with %+v", got.Safe(), got)
+	if got.SafeForRotation() != p.Guarded() {
+		t.Errorf("SafeForRotation() = %v with %+v", got.SafeForRotation(), got)
+	}
+	if got.SafeForMigration() != p.MigrationGuarded() {
+		t.Errorf("SafeForMigration() = %v with %+v", got.SafeForMigration(), got)
 	}
 
 	// Nothing left behind: no object, and no open upload.
