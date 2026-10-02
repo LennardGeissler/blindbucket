@@ -18,6 +18,30 @@ version 1 would keep being readable.
 
 ### Added
 
+**The AWS credential chain, without the SDK.** The upstream and KMS sections
+take `credential_source` instead of keys: `env`, `profile`, `web_identity`
+(IRSA, any OIDC federation), `container` (ECS task roles, EKS Pod Identity),
+`imds` (the EC2 instance role) or `chain`. Credentials that expire are refreshed
+in their last five minutes, and while a refresh fails the ones still valid keep
+being used, so a key service having a bad minute does not fail requests. The
+SDK's own resolver would have added twelve modules; this one adds none
+([ADR-024](docs/adr/ADR-024-aws-credentials-without-the-sdk.md)).
+
+Where it differs from the SDK it does so on purpose. `chain` decides by what is
+configured and never falls through when the source it chose fails -- on EKS that
+fall-through is how a pod with a broken IRSA setup ends up with its node's
+role. IMDS is asked only with a version 2 session token. A profile may hold
+keys, a role with a `source_profile`, or a role with a
+`web_identity_token_file`; SSO and `credential_process` are refused with the
+reason. Keys and a source together are an error, and so is neither: a
+forgotten key does not quietly become whatever the environment offers. `serve`
+asks the source once at startup and names it in the log, so a role that cannot
+be assumed stops the start rather than the first request.
+
+Web identity is measured against real STS by the manual AWS workflow, with the
+job's GitHub OIDC token in IRSA's place; IMDS on EC2 and Pod Identity on EKS are
+tested against stubs of their protocols, not measured.
+
 **`blindbucket reseal`** moves a keyring between a passphrase, Vault Transit
 and AWS KMS, in any direction, and changes a passphrase. The keys inside are
 the same bytes before and after, so no object is touched. Until now there was no

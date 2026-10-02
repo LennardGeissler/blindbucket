@@ -55,6 +55,12 @@ upstream:
   path_style: true
   access_key_id: ${UPSTREAM_ACCESS_KEY_ID}
   secret_access_key: ${UPSTREAM_SECRET_ACCESS_KEY}
+  # Or no keys here, and a source to resolve them from (ADR-024): env, profile,
+  # web_identity (IRSA), container (ECS, EKS Pod Identity), imds (the EC2
+  # instance role, IMDSv2 only) or chain, which picks the first one configured
+  # and fails rather than falling through to the next. Keys and a source
+  # together are refused, and so is neither.
+  # credential_source: web_identity
 
 # Where the root key that unlocks the keyring comes from. Whichever source is
 # named, it is consulted once at startup: the KEKs are then in memory and no
@@ -78,14 +84,15 @@ keys:
   #   key_name: blindbucket
   #   namespace: ""                      # Vault Enterprise only
 
-  # provider: awskms -- the same shape against KMS. Credentials are explicit:
-  # this build does not use the AWS credential chain (ADR-013).
+  # provider: awskms -- the same shape against KMS. Its credentials are keys
+  # or a credential_source, as for the upstream (ADR-024).
   # awskms:
   #   region: eu-central-1
   #   key_id: alias/blindbucket
   #   access_key_id: ${AWS_ACCESS_KEY_ID}
   #   secret_access_key: ${AWS_SECRET_ACCESS_KEY}
   #   session_token: ${AWS_SESSION_TOKEN}   # for temporary credentials
+  #   credential_source: web_identity    # instead of the three keys above
   #   endpoint: ""                       # override for an AWS-compatible endpoint
   #   # Added to the KMS encryption context, on top of the fixed
   #   # blindbucket=root-key entry every keyring carries. Not a secret: it is

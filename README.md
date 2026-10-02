@@ -619,9 +619,7 @@ M4 is the point the project becomes worth showing: multipart is what "works with
 clients" actually means for anything over 8 MiB. M3.5 existed to get its coordination rules
 right before the code did — see below.
 
-**What is still missing.** The AWS credential chain is not used — KMS credentials are
-configured explicitly
-([ADR-013](docs/adr/ADR-013-root-key-sources.md)). Object tags are refused rather than
+**What is still missing.** Object tags are refused rather than
 stored, because the provider would hold them in plaintext
 ([ADR-012](docs/adr/ADR-012-copy-semantics.md)). `ListMultipartUploads` is refused
 permanently and says why. A presigned URL can only *read*: `GET` and `HEAD` are served and
@@ -660,6 +658,14 @@ in the process afterwards either way. What the services buy is custody: the secr
 a passphrase on somebody's laptop, access is logged elsewhere, and it can be revoked.
 Deleting the Transit key stops the next start with `encryption key not found`, which is
 verified rather than asserted ([ADR-013](docs/adr/ADR-013-root-key-sources.md)).
+
+The gateway's own AWS credentials — for the upstream and for KMS — can come from where AWS
+software usually finds them, without the SDK: the environment, a shared profile, web
+identity (IRSA), a container endpoint (ECS, EKS Pod Identity) or the EC2 instance role over
+IMDSv2, refreshed before they expire. Each section names its source with
+`credential_source`; `chain` picks the first one configured and never falls through to the
+next when it fails, so a broken IRSA setup is an error and not the node's role
+([ADR-024](docs/adr/ADR-024-aws-credentials-without-the-sdk.md)).
 
 A keyring moves between the three with `blindbucket reseal`, in any direction, and a
 passphrase change is the same command. The keys inside do not change, so no object is

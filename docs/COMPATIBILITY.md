@@ -287,7 +287,7 @@ BLINDBUCKET_TEST_KMS_ENDPOINT=http://127.0.0.1:4599 \
 
 | Limit | Detail |
 |---|---|
-| **The AWS credential chain** | Not used. KMS credentials are configured explicitly, so instance roles, web identity and SSO do not apply on their own. Temporary credentials from any of them work when configured — `session_token` is honoured, and the AWS measurement ran on exactly that. A consequence of hand-writing the client rather than taking the SDK (ADR-013). |
+| **The AWS credential chain** | Resolved without the SDK, for the upstream and for KMS: the environment, a shared profile, web identity, a container endpoint and IMDSv2, named per section with `credential_source` ([ADR-024](adr/ADR-024-aws-credentials-without-the-sdk.md)). Web identity is measured against real STS by the manual AWS workflow, with the job's GitHub OIDC token in IRSA's place; IMDS on EC2 and EKS Pod Identity are tested against stubs of their protocols and not measured. Not supported: SSO and `credential_process` in a profile — for a command run by hand, `aws configure export-credentials --format env` and `credential_source: env`. |
 | **Changing a keyring's source** | `blindbucket reseal`, in any direction between a passphrase, Vault and KMS. Tested against Vault in dev mode — including a token whose policy allows encrypt and not decrypt, which is refused before anything is written — and the KMS emulator, which has no key policies; against KMS itself only by the manual AWS workflow ([ADR-023](adr/ADR-023-resealing-a-keyring.md)). |
 | **Vault authentication** | A token. AppRole, Kubernetes auth and the rest are not implemented; a token from any of them can be configured. |
 

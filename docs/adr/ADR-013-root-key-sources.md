@@ -4,7 +4,7 @@
 **Date:** 2026-09-12
 **Milestone:** M5 (the last of it)
 **Implements:** `internal/rootkey`, `internal/crypto/keys` (root-key reference), `cmd/blindbucket`
-**Amended by:** [ADR-023](ADR-023-resealing-a-keyring.md) — `blindbucket reseal` moves a keyring between sources, which the consequences below say does not exist
+**Amended by:** [ADR-023](ADR-023-resealing-a-keyring.md) — `blindbucket reseal` moves a keyring between sources, which the consequences below say does not exist; [ADR-024](ADR-024-aws-credentials-without-the-sdk.md) — the KMS credentials, like the upstream's, may come from the credential chain, which the alternatives below say is unavailable
 
 ## Context
 
