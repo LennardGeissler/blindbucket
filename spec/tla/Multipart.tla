@@ -20,21 +20,45 @@
 (*       key, but every GET against it fails.                              *)
 (*                                                                         *)
 (*   I2  Rotation never replaces a newer version of an object with an      *)
-(*       older one (no lost update).                                       *)
+(*       older one, and never makes the provider discard a client's write  *)
+(*       in favour of its copy (no lost update).                           *)
 (*                                                                         *)
 (* Four CONSTANTS select which set of rules is modelled, so that the same  *)
 (* spec can be run both as the design under test and as the flawed version *)
 (* 0.1 design that has to produce a counterexample.  See README.md next to *)
 (* this file for the configurations and what each is expected to report.   *)
+(*                                                                         *)
+(* A fifth, Ordering, selects what the provider does with an upload that   *)
+(* completes after a newer write (ADR-025).  The model was first written   *)
+(* with the last write to land always winning; AWS S3 ranks an upload by   *)
+(* when it was created instead, and acknowledges a completion it then      *)
+(* discards.                                                               *)
 (***************************************************************************)
-EXTENDS FiniteSets, TLC
+EXTENDS Naturals, Sequences, FiniteSets, TLC
 
 CONSTANTS
     Uploads,      \* The concurrent multipart uploads, e.g. {u1, u2, u3}.
 
     CleanupMode,  \* Step 5 of the completion order in 10.6.
-                  \*   "r3"  - delete only the manifest id observed at step 2
-                  \*   "v01" - delete "all other manifests of this key"
+                  \*   "verify" - delete the manifest id observed at step 2,
+                  \*              once a HEAD after the completion shows that
+                  \*              version is no longer the visible one (ADR-025)
+                  \*   "r3"     - delete only the manifest id observed at step 2
+                  \*   "v01"    - delete "all other manifests of this key"
+
+    Ordering,     \* Which of two writes to the key the provider keeps.
+                  \*   "completion" - the one that lands last (MinIO)
+                  \*   "initiation" - the one initiated last: a completion of
+                  \*                  an upload created before the visible
+                  \*                  version's write is acknowledged and
+                  \*                  discarded (AWS S3)
+                  \*   "either"     - such a write may be kept or discarded,
+                  \*                  so the rules must hold whichever the
+                  \*                  provider does
+                  \* Garage v2.4.1 ranks like AWS but refuses the outranked
+                  \* completion with NoSuchUpload, which is the branch of
+                  \* upComplete for an aborted upload.  All three measured on
+                  \* 2026-10-03 (ADR-025).
 
     GcMode,       \* The order of the gc pass in R4.
                   \*   "r4"      - list, check open uploads, head, delete
@@ -42,7 +66,10 @@ CONSTANTS
                   \*   "swapped" - check open uploads, list, head, delete
 
     RotateMode    \* The final write of `blindbucket rotate` (11.2).
-                  \*   "conditional"   - If-Match on the etag read at the start
+                  \*   "conditional"   - If-Match on the etag read at the start,
+                  \*                     after checking that no other upload of
+                  \*                     the key is open (ADR-025)
+                  \*   "ifmatch"       - If-Match alone, as ADR-009 wrote it
                   \*   "unconditional" - the --allow-unconditional escape hatch
                   \*   "off"           - no rotation runs at all.  The I1
                   \*                     counterexamples use this, so that the
@@ -64,9 +91,10 @@ Mids    == Uploads \cup {RotId, InitId}
 Writers == Uploads \cup {RotId, PutId, DelId, "init"}
 Kinds   == {"absent", "single", "multi"}
 
-ASSUME CleanupMode \in {"r3", "v01"}
+ASSUME CleanupMode \in {"verify", "r3", "v01"}
+ASSUME Ordering    \in {"completion", "initiation", "either"}
 ASSUME GcMode      \in {"r4", "v01", "swapped"}
-ASSUME RotateMode  \in {"conditional", "unconditional", "off"}
+ASSUME RotateMode  \in {"conditional", "ifmatch", "unconditional", "off"}
 
 \* Symmetry: the uploads are interchangeable, so TLC may quotient the state
 \* space by permutations of them.  Sound here because neither the algorithm
@@ -82,6 +110,17 @@ variables
     \* If-Match tests in 11.2.
     visible = [kind |-> "multi", mid |-> InitId, by |-> "init"],
 
+    \* The order the provider ranks writes in, for Ordering = "initiation"
+    \* (ADR-025).  An upload is ranked when it is created; a PUT and a DELETE
+    \* when they land (measured: a PUT whose body arrives after a multipart
+    \* upload was created and completed during it is still the one kept).
+    \* `inflight` is the uploads created and not yet landed, oldest first, and
+    \* `newer` how many of them -- always the last ones -- were created after
+    \* the visible version's write.  Relative order is all that is compared,
+    \* and a clock would make states that differ in nothing else count twice.
+    inflight = <<>>,
+    newer = 0,
+
     \* The manifest sidecar objects that exist under .blindbucket/m/<hash>/.
     manifests = {InitId},
 
@@ -90,7 +129,9 @@ variables
     openUploads = {},
 
     \* History variable, not part of the system: set when a rotation overwrites
-    \* a version other than the one it read.  I2 is its negation.
+    \* a version other than the one it read, or when the provider discards a
+    \* client's completion because the rotation's copy outranks it.  I2 is its
+    \* negation.
     lostUpdate = FALSE;
 
 define {
@@ -100,6 +141,8 @@ define {
         /\ visible.kind \in Kinds
         /\ visible.mid  \in Mids \cup {NoMid}
         /\ visible.by   \in Writers
+        /\ inflight    \in Seq(Uploads \cup {RotId})
+        /\ newer       \in 0..Len(inflight)
         /\ manifests   \subseteq Mids
         /\ openUploads \subseteq Uploads \cup {RotId}
         /\ lostUpdate  \in BOOLEAN
@@ -107,8 +150,31 @@ define {
     \* I1 (10.8): every visible multipart object has its manifest.
     I1 == (visible.kind = "multi") => (visible.mid \in manifests)
 
-    \* I2 (11.2): rotation causes no lost update.
+    \* I2 (11.2): rotation causes no lost update -- it neither overwrites a
+    \* write it did not read nor makes the provider discard one in its favour.
     I2 == ~lostUpdate
+
+    Pos(w)     == CHOOSE i \in 1..Len(inflight) : inflight[i] = w
+    Without(w) == SelectSeq(inflight, LAMBDA x : x # w)
+
+    \* Whether upload w was created after the visible version's write.
+    IsNewer(w) == \E i \in (Len(inflight) - newer + 1)..Len(inflight) : inflight[i] = w
+
+    \* Whether w's completion, landing now, certainly replaces the visible
+    \* version.  Under "either" one that does not is kept or discarded at the
+    \* provider's choice; under "initiation" it is discarded.
+    Lands(w) == Ordering = "completion" \/ IsNewer(w)
+
+    \* How many uploads stay newer than the visible version once w's write is
+    \* it: those created after w.
+    NewerAfter(w) == Len(inflight) - Pos(w)
+}
+
+\* Upload w leaves `inflight` without landing: it crashed, was aborted, or was
+\* refused.  Only the order of the others is left.
+macro leave(w) {
+    newer := IF IsNewer(w) THEN newer - 1 ELSE newer;
+    inflight := Without(w);
 }
 
 (*************************************************************************)
@@ -127,23 +193,28 @@ process (Up \in Uploads)
 {
   upCreate:
     \* CreateMultipartUpload.  The manifest id is minted here (R1) and lives
-    \* in the upload token, so it is fixed before any part is sent.
-    either { openUploads := openUploads \cup {self}; }
-    or     { goto Done; };
+    \* in the upload token, so it is fixed before any part is sent.  This is
+    \* also where the provider ranks the write.
+    either {
+        openUploads := openUploads \cup {self};
+        inflight := Append(inflight, self);
+        newer := newer + 1;
+    }
+    or { goto Done; };
 
   upHead:
     \* Step 2: HEAD the key and remember the manifest id of whatever is
     \* visible right now.  This observation is what R3 later licenses a
     \* delete of -- and nothing else.
     either { observed := VisibleMid; }
-    or     { goto Done; };
+    or     { leave(self); goto Done; };
 
   upManifest:
     \* Step 3: write the manifest.  R2: before the object becomes visible,
     \* never after.  It does not disturb the currently visible object,
     \* because that object names a different manifest id.
     either { manifests := manifests \cup {self}; }
-    or     { observed := NoMid; goto Done; };
+    or     { observed := NoMid; leave(self); goto Done; };
 
   upComplete:
     \* Step 4: CompleteMultipartUpload.
@@ -154,13 +225,43 @@ process (Up \in Uploads)
             \* not become visible, and the manifest written at step 3 is now
             \* an orphan for gc to collect.
             observed := NoMid;
+            leave(self);
             goto Done;
         } else {
+            \* Complete answers success.  Whether this upload's object is now
+            \* the visible one is up to Ordering.
             openUploads := openUploads \ {self};
-            visible := [kind |-> "multi", mid |-> self, by |-> self];
+            if (Lands(self)) {
+                visible := [kind |-> "multi", mid |-> self, by |-> self];
+                newer := NewerAfter(self);
+            } else {
+                \* Outranked.  If what outranks it is the rotation's copy, a
+                \* client's write has been lost to the rotation.
+                if (Ordering = "either") {
+                    either {
+                        visible := [kind |-> "multi", mid |-> self, by |-> self];
+                        newer := NewerAfter(self);
+                    }
+                    or { if (visible.by = RotId) { lostUpdate := TRUE; }; };
+                } else {
+                    if (visible.by = RotId) { lostUpdate := TRUE; };
+                };
+            };
+            inflight := Without(self);
         };
     }
-    or { observed := NoMid; goto Done; };
+    or { observed := NoMid; leave(self); goto Done; };
+
+  upVerify:
+    \* "verify": HEAD the key again.  If the version observed at step 2 is
+    \* still the visible one, this completion did not replace it -- the
+    \* provider discarded it -- and its manifest is not this request's to
+    \* delete.  Any other answer means that version has been replaced, and
+    \* a replaced version never becomes visible again.
+    if (CleanupMode = "verify") {
+        either { if (VisibleMid = observed) { observed := NoMid; }; }
+        or     { observed := NoMid; goto Done; };
+    };
 
   upCleanup:
     \* Step 5, reached only when step 4 succeeded: delete the manifest of the
@@ -175,6 +276,8 @@ process (Up \in Uploads)
             \* R3: at most the one id observed at upHead, before this request's
             \* own replacement landed.  By R1 that id belongs to exactly one
             \* object version, and that version cannot become visible again.
+            \* Under "r3" the replacement is taken on the provider's word; under
+            \* "verify", upVerify has seen it.
             if (observed # NoMid) { manifests := manifests \ {observed}; };
         };
     }
@@ -190,8 +293,13 @@ process (Up \in Uploads)
 process (Put = PutId)
 {
   putWrite:
-    either { visible := [kind |-> "single", mid |-> NoMid, by |-> PutId]; }
-    or     { goto Done; };
+    \* Ranked when it lands, so it is always the newest write and every
+    \* upload still in flight is older than it.
+    either {
+        visible := [kind |-> "single", mid |-> NoMid, by |-> PutId];
+        newer := 0;
+    }
+    or { goto Done; };
 }
 
 (*************************************************************************)
@@ -206,8 +314,11 @@ process (Del = DelId)
     or     { goto Done; };
 
   delRemove:
-    either { visible := [kind |-> "absent", mid |-> NoMid, by |-> DelId]; }
-    or     { delObserved := NoMid; goto Done; };
+    either {
+        visible := [kind |-> "absent", mid |-> NoMid, by |-> DelId];
+        newer := 0;
+    }
+    or { delObserved := NoMid; goto Done; };
 
   delManifest:
     either {
@@ -239,12 +350,34 @@ process (Rot = RotId)
     or { goto Done; };
 
   rotCreate:
-    either { openUploads := openUploads \cup {RotId}; }
-    or     { rotObserved := NoMid; rotSrcBy := "init"; goto Done; };
+    either {
+        openUploads := openUploads \cup {RotId};
+        inflight := Append(inflight, RotId);
+        newer := newer + 1;
+    }
+    or { rotObserved := NoMid; rotSrcBy := "init"; goto Done; };
 
   rotManifest:
     either { manifests := manifests \cup {RotId}; }
-    or     { rotObserved := NoMid; rotSrcBy := "init"; goto Done; };
+    or     { rotObserved := NoMid; rotSrcBy := "init"; leave(RotId); goto Done; };
+
+  rotUploads:
+    \* ListMultipartUploads for the key (ADR-025).  An upload still open was
+    \* created before this copy, or after it; created before, its completion
+    \* after the copy's would be discarded in the copy's favour on a provider
+    \* that ranks by creation -- a client's write acknowledged and lost.
+    \* If-Match cannot see it, because it is not visible yet.  So the copy is
+    \* abandoned and the object reported skipped, as after a 412.  Created
+    \* after, it outranks the copy and the check costs only a retry.
+    either {
+        if (RotateMode = "conditional" /\ (openUploads \ {RotId}) # {}) {
+            openUploads := openUploads \ {RotId};
+            rotObserved := NoMid; rotSrcBy := "init";
+            leave(RotId);
+            goto Done;
+        };
+    }
+    or { rotObserved := NoMid; rotSrcBy := "init"; leave(RotId); goto Done; };
 
   rotComplete:
     \* CompleteMultipartUpload carrying If-Match with the etag read at
@@ -253,26 +386,41 @@ process (Rot = RotId)
         if (RotId \notin openUploads) {
             \* aborted by the lifecycle rule
             rotObserved := NoMid; rotSrcBy := "init";
+            leave(RotId);
             goto Done;
         } else {
-            if (RotateMode = "conditional" /\ visible.by # rotSrcBy) {
+            if (RotateMode \in {"conditional", "ifmatch"} /\ visible.by # rotSrcBy) {
                 \* 412 Precondition Failed: the object changed under us.
                 \* rotate abandons the upload and reports the object skipped.
                 openUploads := openUploads \ {RotId};
                 rotObserved := NoMid; rotSrcBy := "init";
+                leave(RotId);
                 goto Done;
             } else {
-                if (visible.by # rotSrcBy) {
-                    \* Only reachable with --allow-unconditional: the write
-                    \* that landed in between has just been thrown away.
-                    lostUpdate := TRUE;
-                };
                 openUploads := openUploads \ {RotId};
-                visible := [kind |-> "multi", mid |-> RotId, by |-> RotId];
+                \* A lost update is recorded only if the copy is actually kept.
+                if (Lands(RotId)) {
+                    if (visible.by # rotSrcBy) {
+                        \* Only reachable with --allow-unconditional: the write
+                        \* that landed in between has just been thrown away.
+                        lostUpdate := TRUE;
+                    };
+                    visible := [kind |-> "multi", mid |-> RotId, by |-> RotId];
+                    newer := NewerAfter(RotId);
+                } else {
+                    if (Ordering = "either") {
+                        either {
+                            if (visible.by # rotSrcBy) { lostUpdate := TRUE; };
+                            visible := [kind |-> "multi", mid |-> RotId, by |-> RotId];
+                            newer := NewerAfter(RotId);
+                        } or { skip; };
+                    };
+                };
+                inflight := Without(RotId);
             };
         };
     }
-    or { rotObserved := NoMid; rotSrcBy := "init"; goto Done; };
+    or { rotObserved := NoMid; rotSrcBy := "init"; leave(RotId); goto Done; };
 
   rotCleanup:
     either {
@@ -354,7 +502,7 @@ process (Gc = "gc")
 }
 *)
 \* BEGIN TRANSLATION
-VARIABLES visible, manifests, openUploads, lostUpdate, pc
+VARIABLES visible, inflight, newer, manifests, openUploads, lostUpdate, pc
 
 (* define statement *)
 VisibleMid == IF visible.kind = "multi" THEN visible.mid ELSE NoMid
@@ -363,6 +511,8 @@ TypeOK ==
     /\ visible.kind \in Kinds
     /\ visible.mid  \in Mids \cup {NoMid}
     /\ visible.by   \in Writers
+    /\ inflight    \in Seq(Uploads \cup {RotId})
+    /\ newer       \in 0..Len(inflight)
     /\ manifests   \subseteq Mids
     /\ openUploads \subseteq Uploads \cup {RotId}
     /\ lostUpdate  \in BOOLEAN
@@ -371,17 +521,35 @@ TypeOK ==
 I1 == (visible.kind = "multi") => (visible.mid \in manifests)
 
 
+
 I2 == ~lostUpdate
+
+Pos(w)     == CHOOSE i \in 1..Len(inflight) : inflight[i] = w
+Without(w) == SelectSeq(inflight, LAMBDA x : x # w)
+
+
+IsNewer(w) == \E i \in (Len(inflight) - newer + 1)..Len(inflight) : inflight[i] = w
+
+
+
+
+Lands(w) == Ordering = "completion" \/ IsNewer(w)
+
+
+
+NewerAfter(w) == Len(inflight) - Pos(w)
 
 VARIABLES observed, delObserved, rotObserved, rotSrcBy, seen, current
 
-vars == << visible, manifests, openUploads, lostUpdate, pc, observed, 
-           delObserved, rotObserved, rotSrcBy, seen, current >>
+vars == << visible, inflight, newer, manifests, openUploads, lostUpdate, pc, 
+           observed, delObserved, rotObserved, rotSrcBy, seen, current >>
 
 ProcSet == (Uploads) \cup {PutId} \cup {DelId} \cup {RotId} \cup {"lifecycle"} \cup {"gc"}
 
 Init == (* Global variables *)
         /\ visible = [kind |-> "multi", mid |-> InitId, by |-> "init"]
+        /\ inflight = <<>>
+        /\ newer = 0
         /\ manifests = {InitId}
         /\ openUploads = {}
         /\ lostUpdate = FALSE
@@ -404,9 +572,11 @@ Init == (* Global variables *)
 
 upCreate(self) == /\ pc[self] = "upCreate"
                   /\ \/ /\ openUploads' = (openUploads \cup {self})
+                        /\ inflight' = Append(inflight, self)
+                        /\ newer' = newer + 1
                         /\ pc' = [pc EXCEPT ![self] = "upHead"]
                      \/ /\ pc' = [pc EXCEPT ![self] = "Done"]
-                        /\ UNCHANGED openUploads
+                        /\ UNCHANGED <<inflight, newer, openUploads>>
                   /\ UNCHANGED << visible, manifests, lostUpdate, observed, 
                                   delObserved, rotObserved, rotSrcBy, seen, 
                                   current >>
@@ -414,7 +584,10 @@ upCreate(self) == /\ pc[self] = "upCreate"
 upHead(self) == /\ pc[self] = "upHead"
                 /\ \/ /\ observed' = [observed EXCEPT ![self] = VisibleMid]
                       /\ pc' = [pc EXCEPT ![self] = "upManifest"]
-                   \/ /\ pc' = [pc EXCEPT ![self] = "Done"]
+                      /\ UNCHANGED <<inflight, newer>>
+                   \/ /\ newer' = IF IsNewer(self) THEN newer - 1 ELSE newer
+                      /\ inflight' = Without(self)
+                      /\ pc' = [pc EXCEPT ![self] = "Done"]
                       /\ UNCHANGED observed
                 /\ UNCHANGED << visible, manifests, openUploads, lostUpdate, 
                                 delObserved, rotObserved, rotSrcBy, seen, 
@@ -423,8 +596,10 @@ upHead(self) == /\ pc[self] = "upHead"
 upManifest(self) == /\ pc[self] = "upManifest"
                     /\ \/ /\ manifests' = (manifests \cup {self})
                           /\ pc' = [pc EXCEPT ![self] = "upComplete"]
-                          /\ UNCHANGED observed
+                          /\ UNCHANGED <<inflight, newer, observed>>
                        \/ /\ observed' = [observed EXCEPT ![self] = NoMid]
+                          /\ newer' = IF IsNewer(self) THEN newer - 1 ELSE newer
+                          /\ inflight' = Without(self)
                           /\ pc' = [pc EXCEPT ![self] = "Done"]
                           /\ UNCHANGED manifests
                     /\ UNCHANGED << visible, openUploads, lostUpdate, 
@@ -434,17 +609,56 @@ upManifest(self) == /\ pc[self] = "upManifest"
 upComplete(self) == /\ pc[self] = "upComplete"
                     /\ \/ /\ IF self \notin openUploads
                                 THEN /\ observed' = [observed EXCEPT ![self] = NoMid]
+                                     /\ newer' = IF IsNewer(self) THEN newer - 1 ELSE newer
+                                     /\ inflight' = Without(self)
                                      /\ pc' = [pc EXCEPT ![self] = "Done"]
-                                     /\ UNCHANGED << visible, openUploads >>
+                                     /\ UNCHANGED << visible, openUploads, 
+                                                     lostUpdate >>
                                 ELSE /\ openUploads' = openUploads \ {self}
-                                     /\ visible' = [kind |-> "multi", mid |-> self, by |-> self]
-                                     /\ pc' = [pc EXCEPT ![self] = "upCleanup"]
+                                     /\ IF Lands(self)
+                                           THEN /\ visible' = [kind |-> "multi", mid |-> self, by |-> self]
+                                                /\ newer' = NewerAfter(self)
+                                                /\ UNCHANGED lostUpdate
+                                           ELSE /\ IF Ordering = "either"
+                                                      THEN /\ \/ /\ visible' = [kind |-> "multi", mid |-> self, by |-> self]
+                                                                 /\ newer' = NewerAfter(self)
+                                                                 /\ UNCHANGED lostUpdate
+                                                              \/ /\ IF visible.by = RotId
+                                                                       THEN /\ lostUpdate' = TRUE
+                                                                       ELSE /\ TRUE
+                                                                            /\ UNCHANGED lostUpdate
+                                                                 /\ UNCHANGED <<visible, newer>>
+                                                      ELSE /\ IF visible.by = RotId
+                                                                 THEN /\ lostUpdate' = TRUE
+                                                                 ELSE /\ TRUE
+                                                                      /\ UNCHANGED lostUpdate
+                                                           /\ UNCHANGED << visible, 
+                                                                           newer >>
+                                     /\ inflight' = Without(self)
+                                     /\ pc' = [pc EXCEPT ![self] = "upVerify"]
                                      /\ UNCHANGED observed
                        \/ /\ observed' = [observed EXCEPT ![self] = NoMid]
+                          /\ newer' = IF IsNewer(self) THEN newer - 1 ELSE newer
+                          /\ inflight' = Without(self)
                           /\ pc' = [pc EXCEPT ![self] = "Done"]
-                          /\ UNCHANGED <<visible, openUploads>>
-                    /\ UNCHANGED << manifests, lostUpdate, delObserved, 
-                                    rotObserved, rotSrcBy, seen, current >>
+                          /\ UNCHANGED <<visible, openUploads, lostUpdate>>
+                    /\ UNCHANGED << manifests, delObserved, rotObserved, 
+                                    rotSrcBy, seen, current >>
+
+upVerify(self) == /\ pc[self] = "upVerify"
+                  /\ IF CleanupMode = "verify"
+                        THEN /\ \/ /\ IF VisibleMid = observed[self]
+                                         THEN /\ observed' = [observed EXCEPT ![self] = NoMid]
+                                         ELSE /\ TRUE
+                                              /\ UNCHANGED observed
+                                   /\ pc' = [pc EXCEPT ![self] = "upCleanup"]
+                                \/ /\ observed' = [observed EXCEPT ![self] = NoMid]
+                                   /\ pc' = [pc EXCEPT ![self] = "Done"]
+                        ELSE /\ pc' = [pc EXCEPT ![self] = "upCleanup"]
+                             /\ UNCHANGED observed
+                  /\ UNCHANGED << visible, inflight, newer, manifests, 
+                                  openUploads, lostUpdate, delObserved, 
+                                  rotObserved, rotSrcBy, seen, current >>
 
 upCleanup(self) == /\ pc[self] = "upCleanup"
                    /\ \/ /\ IF CleanupMode = "v01"
@@ -457,20 +671,22 @@ upCleanup(self) == /\ pc[self] = "upCleanup"
                          /\ UNCHANGED manifests
                    /\ observed' = [observed EXCEPT ![self] = NoMid]
                    /\ pc' = [pc EXCEPT ![self] = "Done"]
-                   /\ UNCHANGED << visible, openUploads, lostUpdate, 
-                                   delObserved, rotObserved, rotSrcBy, seen, 
-                                   current >>
+                   /\ UNCHANGED << visible, inflight, newer, openUploads, 
+                                   lostUpdate, delObserved, rotObserved, 
+                                   rotSrcBy, seen, current >>
 
 Up(self) == upCreate(self) \/ upHead(self) \/ upManifest(self)
-               \/ upComplete(self) \/ upCleanup(self)
+               \/ upComplete(self) \/ upVerify(self) \/ upCleanup(self)
 
 putWrite == /\ pc[PutId] = "putWrite"
             /\ \/ /\ visible' = [kind |-> "single", mid |-> NoMid, by |-> PutId]
+                  /\ newer' = 0
                   /\ pc' = [pc EXCEPT ![PutId] = "Done"]
                \/ /\ pc' = [pc EXCEPT ![PutId] = "Done"]
-                  /\ UNCHANGED visible
-            /\ UNCHANGED << manifests, openUploads, lostUpdate, observed, 
-                            delObserved, rotObserved, rotSrcBy, seen, current >>
+                  /\ UNCHANGED <<visible, newer>>
+            /\ UNCHANGED << inflight, manifests, openUploads, lostUpdate, 
+                            observed, delObserved, rotObserved, rotSrcBy, seen, 
+                            current >>
 
 Put == putWrite
 
@@ -479,18 +695,20 @@ delHead == /\ pc[DelId] = "delHead"
                  /\ pc' = [pc EXCEPT ![DelId] = "delRemove"]
               \/ /\ pc' = [pc EXCEPT ![DelId] = "Done"]
                  /\ UNCHANGED delObserved
-           /\ UNCHANGED << visible, manifests, openUploads, lostUpdate, 
-                           observed, rotObserved, rotSrcBy, seen, current >>
+           /\ UNCHANGED << visible, inflight, newer, manifests, openUploads, 
+                           lostUpdate, observed, rotObserved, rotSrcBy, seen, 
+                           current >>
 
 delRemove == /\ pc[DelId] = "delRemove"
              /\ \/ /\ visible' = [kind |-> "absent", mid |-> NoMid, by |-> DelId]
+                   /\ newer' = 0
                    /\ pc' = [pc EXCEPT ![DelId] = "delManifest"]
                    /\ UNCHANGED delObserved
                 \/ /\ delObserved' = NoMid
                    /\ pc' = [pc EXCEPT ![DelId] = "Done"]
-                   /\ UNCHANGED visible
-             /\ UNCHANGED << manifests, openUploads, lostUpdate, observed, 
-                             rotObserved, rotSrcBy, seen, current >>
+                   /\ UNCHANGED <<visible, newer>>
+             /\ UNCHANGED << inflight, manifests, openUploads, lostUpdate, 
+                             observed, rotObserved, rotSrcBy, seen, current >>
 
 delManifest == /\ pc[DelId] = "delManifest"
                /\ \/ /\ IF delObserved # NoMid
@@ -501,8 +719,9 @@ delManifest == /\ pc[DelId] = "delManifest"
                      /\ UNCHANGED manifests
                /\ delObserved' = NoMid
                /\ pc' = [pc EXCEPT ![DelId] = "Done"]
-               /\ UNCHANGED << visible, openUploads, lostUpdate, observed, 
-                               rotObserved, rotSrcBy, seen, current >>
+               /\ UNCHANGED << visible, inflight, newer, openUploads, 
+                               lostUpdate, observed, rotObserved, rotSrcBy, 
+                               seen, current >>
 
 Del == delHead \/ delRemove \/ delManifest
 
@@ -515,55 +734,101 @@ rotHead == /\ pc[RotId] = "rotHead"
                             /\ pc' = [pc EXCEPT ![RotId] = "rotCreate"]
               \/ /\ pc' = [pc EXCEPT ![RotId] = "Done"]
                  /\ UNCHANGED <<rotObserved, rotSrcBy>>
-           /\ UNCHANGED << visible, manifests, openUploads, lostUpdate, 
-                           observed, delObserved, seen, current >>
+           /\ UNCHANGED << visible, inflight, newer, manifests, openUploads, 
+                           lostUpdate, observed, delObserved, seen, current >>
 
 rotCreate == /\ pc[RotId] = "rotCreate"
              /\ \/ /\ openUploads' = (openUploads \cup {RotId})
+                   /\ inflight' = Append(inflight, RotId)
+                   /\ newer' = newer + 1
                    /\ pc' = [pc EXCEPT ![RotId] = "rotManifest"]
                    /\ UNCHANGED <<rotObserved, rotSrcBy>>
                 \/ /\ rotObserved' = NoMid
                    /\ rotSrcBy' = "init"
                    /\ pc' = [pc EXCEPT ![RotId] = "Done"]
-                   /\ UNCHANGED openUploads
+                   /\ UNCHANGED <<inflight, newer, openUploads>>
              /\ UNCHANGED << visible, manifests, lostUpdate, observed, 
                              delObserved, seen, current >>
 
 rotManifest == /\ pc[RotId] = "rotManifest"
                /\ \/ /\ manifests' = (manifests \cup {RotId})
-                     /\ pc' = [pc EXCEPT ![RotId] = "rotComplete"]
-                     /\ UNCHANGED <<rotObserved, rotSrcBy>>
+                     /\ pc' = [pc EXCEPT ![RotId] = "rotUploads"]
+                     /\ UNCHANGED <<inflight, newer, rotObserved, rotSrcBy>>
                   \/ /\ rotObserved' = NoMid
                      /\ rotSrcBy' = "init"
+                     /\ newer' = IF IsNewer(RotId) THEN newer - 1 ELSE newer
+                     /\ inflight' = Without(RotId)
                      /\ pc' = [pc EXCEPT ![RotId] = "Done"]
                      /\ UNCHANGED manifests
                /\ UNCHANGED << visible, openUploads, lostUpdate, observed, 
                                delObserved, seen, current >>
 
+rotUploads == /\ pc[RotId] = "rotUploads"
+              /\ \/ /\ IF RotateMode = "conditional" /\ (openUploads \ {RotId}) # {}
+                          THEN /\ openUploads' = openUploads \ {RotId}
+                               /\ rotObserved' = NoMid
+                               /\ rotSrcBy' = "init"
+                               /\ newer' = IF IsNewer(RotId) THEN newer - 1 ELSE newer
+                               /\ inflight' = Without(RotId)
+                               /\ pc' = [pc EXCEPT ![RotId] = "Done"]
+                          ELSE /\ pc' = [pc EXCEPT ![RotId] = "rotComplete"]
+                               /\ UNCHANGED << inflight, newer, openUploads, 
+                                               rotObserved, rotSrcBy >>
+                 \/ /\ rotObserved' = NoMid
+                    /\ rotSrcBy' = "init"
+                    /\ newer' = IF IsNewer(RotId) THEN newer - 1 ELSE newer
+                    /\ inflight' = Without(RotId)
+                    /\ pc' = [pc EXCEPT ![RotId] = "Done"]
+                    /\ UNCHANGED openUploads
+              /\ UNCHANGED << visible, manifests, lostUpdate, observed, 
+                              delObserved, seen, current >>
+
 rotComplete == /\ pc[RotId] = "rotComplete"
                /\ \/ /\ IF RotId \notin openUploads
                            THEN /\ rotObserved' = NoMid
                                 /\ rotSrcBy' = "init"
+                                /\ newer' = IF IsNewer(RotId) THEN newer - 1 ELSE newer
+                                /\ inflight' = Without(RotId)
                                 /\ pc' = [pc EXCEPT ![RotId] = "Done"]
                                 /\ UNCHANGED << visible, openUploads, 
                                                 lostUpdate >>
-                           ELSE /\ IF RotateMode = "conditional" /\ visible.by # rotSrcBy
+                           ELSE /\ IF RotateMode \in {"conditional", "ifmatch"} /\ visible.by # rotSrcBy
                                       THEN /\ openUploads' = openUploads \ {RotId}
                                            /\ rotObserved' = NoMid
                                            /\ rotSrcBy' = "init"
+                                           /\ newer' = IF IsNewer(RotId) THEN newer - 1 ELSE newer
+                                           /\ inflight' = Without(RotId)
                                            /\ pc' = [pc EXCEPT ![RotId] = "Done"]
                                            /\ UNCHANGED << visible, lostUpdate >>
-                                      ELSE /\ IF visible.by # rotSrcBy
-                                                 THEN /\ lostUpdate' = TRUE
-                                                 ELSE /\ TRUE
-                                                      /\ UNCHANGED lostUpdate
-                                           /\ openUploads' = openUploads \ {RotId}
-                                           /\ visible' = [kind |-> "multi", mid |-> RotId, by |-> RotId]
+                                      ELSE /\ openUploads' = openUploads \ {RotId}
+                                           /\ IF Lands(RotId)
+                                                 THEN /\ IF visible.by # rotSrcBy
+                                                            THEN /\ lostUpdate' = TRUE
+                                                            ELSE /\ TRUE
+                                                                 /\ UNCHANGED lostUpdate
+                                                      /\ visible' = [kind |-> "multi", mid |-> RotId, by |-> RotId]
+                                                      /\ newer' = NewerAfter(RotId)
+                                                 ELSE /\ IF Ordering = "either"
+                                                            THEN /\ \/ /\ IF visible.by # rotSrcBy
+                                                                             THEN /\ lostUpdate' = TRUE
+                                                                             ELSE /\ TRUE
+                                                                                  /\ UNCHANGED lostUpdate
+                                                                       /\ visible' = [kind |-> "multi", mid |-> RotId, by |-> RotId]
+                                                                       /\ newer' = NewerAfter(RotId)
+                                                                    \/ /\ TRUE
+                                                                       /\ UNCHANGED <<visible, newer, lostUpdate>>
+                                                            ELSE /\ TRUE
+                                                                 /\ UNCHANGED << visible, 
+                                                                                 newer, 
+                                                                                 lostUpdate >>
+                                           /\ inflight' = Without(RotId)
                                            /\ pc' = [pc EXCEPT ![RotId] = "rotCleanup"]
                                            /\ UNCHANGED << rotObserved, 
                                                            rotSrcBy >>
                   \/ /\ rotObserved' = NoMid
                      /\ rotSrcBy' = "init"
+                     /\ newer' = IF IsNewer(RotId) THEN newer - 1 ELSE newer
+                     /\ inflight' = Without(RotId)
                      /\ pc' = [pc EXCEPT ![RotId] = "Done"]
                      /\ UNCHANGED <<visible, openUploads, lostUpdate>>
                /\ UNCHANGED << manifests, observed, delObserved, seen, current >>
@@ -578,17 +843,19 @@ rotCleanup == /\ pc[RotId] = "rotCleanup"
               /\ rotObserved' = NoMid
               /\ rotSrcBy' = "init"
               /\ pc' = [pc EXCEPT ![RotId] = "Done"]
-              /\ UNCHANGED << visible, openUploads, lostUpdate, observed, 
-                              delObserved, seen, current >>
+              /\ UNCHANGED << visible, inflight, newer, openUploads, 
+                              lostUpdate, observed, delObserved, seen, current >>
 
-Rot == rotHead \/ rotCreate \/ rotManifest \/ rotComplete \/ rotCleanup
+Rot == rotHead \/ rotCreate \/ rotManifest \/ rotUploads \/ rotComplete
+          \/ rotCleanup
 
 lifeAbort == /\ pc["lifecycle"] = "lifeAbort"
              /\ \E u \in openUploads:
                   openUploads' = openUploads \ {u}
              /\ pc' = [pc EXCEPT !["lifecycle"] = "lifeAbort"]
-             /\ UNCHANGED << visible, manifests, lostUpdate, observed, 
-                             delObserved, rotObserved, rotSrcBy, seen, current >>
+             /\ UNCHANGED << visible, inflight, newer, manifests, lostUpdate, 
+                             observed, delObserved, rotObserved, rotSrcBy, 
+                             seen, current >>
 
 Life == lifeAbort
 
@@ -602,9 +869,9 @@ gcStepOne == /\ pc["gc"] = "gcStepOne"
                               /\ pc' = [pc EXCEPT !["gc"] = "gcStepTwo"]
                 \/ /\ pc' = [pc EXCEPT !["gc"] = "Done"]
                    /\ seen' = seen
-             /\ UNCHANGED << visible, manifests, openUploads, lostUpdate, 
-                             observed, delObserved, rotObserved, rotSrcBy, 
-                             current >>
+             /\ UNCHANGED << visible, inflight, newer, manifests, openUploads, 
+                             lostUpdate, observed, delObserved, rotObserved, 
+                             rotSrcBy, current >>
 
 gcStepTwo == /\ pc["gc"] = "gcStepTwo"
              /\ \/ /\ IF GcMode = "swapped"
@@ -620,9 +887,9 @@ gcStepTwo == /\ pc["gc"] = "gcStepTwo"
                                          /\ seen' = seen
                 \/ /\ seen' = {}
                    /\ pc' = [pc EXCEPT !["gc"] = "Done"]
-             /\ UNCHANGED << visible, manifests, openUploads, lostUpdate, 
-                             observed, delObserved, rotObserved, rotSrcBy, 
-                             current >>
+             /\ UNCHANGED << visible, inflight, newer, manifests, openUploads, 
+                             lostUpdate, observed, delObserved, rotObserved, 
+                             rotSrcBy, current >>
 
 gcHead == /\ pc["gc"] = "gcHead"
           /\ \/ /\ current' = VisibleMid
@@ -631,8 +898,9 @@ gcHead == /\ pc["gc"] = "gcHead"
              \/ /\ seen' = {}
                 /\ pc' = [pc EXCEPT !["gc"] = "Done"]
                 /\ UNCHANGED current
-          /\ UNCHANGED << visible, manifests, openUploads, lostUpdate, 
-                          observed, delObserved, rotObserved, rotSrcBy >>
+          /\ UNCHANGED << visible, inflight, newer, manifests, openUploads, 
+                          lostUpdate, observed, delObserved, rotObserved, 
+                          rotSrcBy >>
 
 gcDelete == /\ pc["gc"] = "gcDelete"
             /\ \/ /\ manifests' = manifests \ (seen \ {current})
@@ -641,8 +909,8 @@ gcDelete == /\ pc["gc"] = "gcDelete"
             /\ seen' = {}
             /\ current' = NoMid
             /\ pc' = [pc EXCEPT !["gc"] = "Done"]
-            /\ UNCHANGED << visible, openUploads, lostUpdate, observed, 
-                            delObserved, rotObserved, rotSrcBy >>
+            /\ UNCHANGED << visible, inflight, newer, openUploads, lostUpdate, 
+                            observed, delObserved, rotObserved, rotSrcBy >>
 
 Gc == gcStepOne \/ gcStepTwo \/ gcHead \/ gcDelete
 

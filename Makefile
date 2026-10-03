@@ -95,7 +95,7 @@ tla-translate: $(TLA_TOOLS) ## Regenerate the TLA+ translations.
 		rm -f spec/tla/$$m.cfg spec/tla/$$m.old; \
 	done
 
-# Run TLC over every configuration. Eight of the ten are expected to report a
+# Run TLC over every configuration. Eleven of the thirteen are expected to report a
 # counterexample; check.sh treats a missing one as a failure.
 .PHONY: tla
 tla: $(TLA_TOOLS) ## Check every TLA+ model configuration.

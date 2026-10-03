@@ -27,6 +27,7 @@ checked here before M4 turned them into Go.
 | Two to three concurrent uploads, a single-part PUT, a `DeleteObject`, a rotation, one `gc` pass | The minimum-age condition in R4 step 4 (see below) |
 | A crash of any process after any step, losing that process's local state | Network retries: a retried call is a repeat of the same step |
 | The bucket lifecycle rule aborting an open upload at any time | |
+| Which write the provider keeps when an upload completes after a newer one (`Ordering`) | When a write began, beyond the order: the model keeps the order of the uploads in flight, not a clock |
 
 **Why the minimum age is left out.** R4 step 4 only deletes manifests older than the
 lifecycle window plus 24 hours. That threshold is a guard against the *upstream assumptions*
@@ -37,15 +38,27 @@ threshold remains a second line of defence rather than the first.
 
 **The upstream assumptions themselves** are assumptions of the model, not results of
 it: read-after-write consistency for HEAD, LIST and `ListMultipartUploads`, and a completed
-or aborted upload id never making an object visible again. For AWS S3 these are guaranteed;
-for MinIO and R2 they belong in the compatibility matrix, not in TLC.
+or aborted upload id never making an object visible again. For MinIO and R2 they belong in
+the compatibility matrix, not in TLC.
+
+One assumption was dropped because it was wrong. The model used to take a successful
+completion as making its object the visible one, and this README said AWS S3 guarantees
+that. It does not. AWS keeps whichever write *began* last, and answers a completion it then
+discards with a success. MinIO keeps the write that lands last, and Garage refuses the
+completion it outranks (measured,
+[ADR-025](../../docs/adr/ADR-025-writes-rank-by-when-they-began.md)). Which one a
+provider does is now the constant `Ordering`. The design's configurations use `"either"`,
+in which such a completion may be kept or discarded, so the rules have to hold whatever the
+provider does. The counterexamples of ADR-010 keep `"completion"`, the assumption they were
+found under.
 
 ## Invariants
 
 - **I1** — every visible multipart object has a manifest with its manifest id. An object
   that fails I1 is not lost (the ciphertext and the data key are still there) but every GET
   against it fails.
-- **I2** — rotation never replaces a newer version of an object with an older one.
+- **I2** — rotation never replaces a newer version of an object with an older one, and
+  never makes the provider discard a client's write in favour of its copy.
 
 The liveness property listed as optional — that orphaned manifests eventually disappear
 under fairness — is **not** modelled. It would need a `gc` that loops rather than making one
@@ -56,27 +69,29 @@ keeps one around is still perfectly readable.
 
 ## Configurations
 
-Four of the five configurations of `Multipart.tla` are expected to **fail**, and four of the
-five of `Migrate.tla` (listed [with that model](#migrating-names--migratetla)). A model that cannot reproduce the
+Six of the seven configurations of `Multipart.tla` are expected to **fail**, and five of
+the six of `Migrate.tla` (listed [with that model](#migrating-names--migratetla)). A model that cannot reproduce the
 two races the design already knows about is too coarse to be evidence about the races it
 does not know about, so "no counterexample" is a failing result for those four.
 
 | Configuration | Rules | Expected |
 |---|---|---|
-| `MCFixed` | R1–R4, conditional rotation, 3 uploads | no counterexample |
+| `MCFixed` | R1–R4 with R3 deleting only after a HEAD has seen the replacement, rotation conditional and giving way to open uploads, `Ordering = "either"`, 3 uploads | no counterexample |
 | `MCLegacyCleanup` | completion deletes *every other* manifest of the key (v0.1) | **I1 violated** |
 | `MCLegacyGc` | `gc` never checks for open uploads (v0.1) | **I1 violated** |
 | `MCGcOrder` | R4 with steps 1 and 2 swapped | **I1 violated** |
 | `MCUnconditionalRotate` | `rotate --allow-unconditional` | **I2 violated** |
+| `MCAwsOrder` | R3 as ADR-010 wrote it, on a provider that ranks writes as AWS does | **I1 violated** |
+| `MCAwsRotate` | rotation with `If-Match` alone, on the same provider | **I2 violated** |
 
-The three I1 configurations run with `RotateMode = "off"`, so their counterexamples contain
+The I1 configurations run with `RotateMode = "off"`, so their counterexamples contain
 only operations that M4 itself implements and can replay as integration tests.
 
 ## Running it
 
 ```sh
 make tla-tools     # downloads tla2tools.jar into .tools/ (not committed)
-make tla           # runs all ten configurations of both models
+make tla           # runs all thirteen configurations of both models
 make tla-translate # re-run the PlusCal translator after editing an algorithm
 ```
 
@@ -253,11 +268,12 @@ every instance before the migration starts. Clients therefore read, write and de
 
 | Configuration | Variation | Expected |
 |---|---|---|
-| `MCMigrate` | the design: copy with `If-None-Match: *`, an object at `E(P)` makes `P` obsolete, delete `P` unconditionally | no counterexample |
+| `MCMigrate` | the design: the copy gives way to an open upload of `E(P)` and is published with `If-None-Match: *`, an object at `E(P)` makes `P` obsolete, delete `P` unconditionally; `Ordering = "either"` | no counterexample |
 | `MCMigrateNoCreateGuard` | the copy published without `If-None-Match` | **NoLostWrite violated** |
 | `MCMigrateLeaveOnResume` | a run that finds an object at `E(P)` leaves `P` alone | **Converged violated** |
 | `MCMigrateStaleWriter` | an instance still serving names in clear writes `P`; the delete of `P` carries `If-Match` | **NoLostWrite violated** |
 | `MCMigrateClientDelete` | a client deletes the object while it is still at `P` | **NoLostDelete violated** |
+| `MCMigrateAwsOrder` | the copy with `If-None-Match` alone, on a provider that ranks writes as AWS does | **NoLostWrite violated** |
 
 Two of the design's decisions come out of these runs rather than going into them.
 
@@ -350,6 +366,61 @@ limit the same way.
 
 ---
 
+---
+
+## Writes that rank by when they began — ADR-025
+
+The AWS workflow found these three, not the models: the models had the assumption they
+break written down as a premise. With `Ordering = "initiation"` each comes out in a dozen
+states, and each has an integration test that fails with its fix taken out.
+
+### 9. A discarded completion deletes the visible manifest — `MCAwsOrder`
+
+| # | Who | Step | Result |
+|---|---|---|---|
+| 1 | u1, u2 | `CreateMultipartUpload`, u1 first | both open; u2 ranks above u1 |
+| 2 | u2 | HEAD (sees `m0`), manifest `u2`, complete | **visible: u2** |
+| 3 | u1 | HEAD — sees `u2` | u1 will "replace" `u2` |
+| 4 | u1 | manifest `u1`, complete | answered as a success, **discarded**: u2 began later |
+| 5 | u1 | step 5 under R3: delete the observed manifest `u2` | **I1 violated** — u2 visible, its manifest gone |
+
+Twelve states, and nothing but two uploads of one key. It is the failure the AWS workflow
+reported as `IntegrityCheckFailed` after two parallel uploads. Under `"verify"`, step 4 is
+followed by a HEAD that still shows `u2`, and the manifest stays.
+
+**Integration test:** `TestFaultDiscardedCompletionKeepsTheVisibleManifest`. The faulty
+provider answers the completion 200 without forwarding it, as AWS's discard looks from
+outside.
+
+### 10. A rotation outranks a client's upload — `MCAwsRotate`
+
+| # | Who | Step | Result |
+|---|---|---|---|
+| 1 | client | `PutObject` | visible: the PUT |
+| 2 | rotation | HEAD — reads the PUT's ETag | |
+| 3 | u1 | `CreateMultipartUpload` | open, ranked first |
+| 4 | rotation | create its upload, manifest, complete with `If-Match` — the PUT is still current | **visible: the rotated copy** |
+| 5 | u1 | HEAD, manifest, complete | answered as a success, **discarded**: the copy began later — **I2 violated** |
+
+Eleven states. `If-Match` holds at step 4 because u1 is not visible yet; nothing the rotation
+can put on its own write sees an upload still in flight. Listing the key's open uploads after
+its own was created does: u1 is open at step 4, and the rotation gives way.
+
+**Integration test:** `TestIntegrationRotateYieldsToAnUploadInProgress`.
+
+### 11. A migration outranks a client's upload to `E(P)` — `MCMigrateAwsOrder`
+
+| # | Who | Step | Result |
+|---|---|---|---|
+| 1 | client | `CreateMultipartUpload` at `E(P)`, HEAD, manifest | open, ranked first |
+| 2 | r1 | HEAD `P`, HEAD `E(P)` — nothing there | |
+| 3 | r1 | create the copy, copy, manifest, complete with `If-None-Match: *` | **`E(P)`: the copy of `P`** |
+| 4 | client | complete | answered as a success, **discarded** — **NoLostWrite violated** |
+
+Twelve states. The same shape as 10 at the other key, and the same fix.
+
+**Integration test:** `TestIntegrationMigrateYieldsToAnUploadInProgress`.
+
 ## Where the rules ended up in the code
 
 The hook names in `internal/proxy/hooks.go`, `internal/gc` and `internal/migrate` are the
@@ -363,3 +434,5 @@ models' action names, so a trace and a test can be read side by side.
 | `Put` | `internal/proxy/object.go`, `putObject` — writes no manifest, by design |
 | `Rot` | `internal/rotate/rotate.go`, `writeBack` |
 | `Mig` (`Migrate.tla`) | `internal/migrate/migrate.go`, `migrateOne` |
+| `upVerify` | `internal/proxy/manifeststore.go`, `replacedSince` |
+| `rotUploads`, `migUploads` | `internal/objcopy/objcopy.go`, `YieldToUploads` |

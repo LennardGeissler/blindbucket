@@ -43,7 +43,7 @@
 (*                 migration that never deletes anything satisfies the     *)
 (*                 three above.                                            *)
 (***************************************************************************)
-EXTENDS FiniteSets, TLC
+EXTENDS Naturals, Sequences, FiniteSets, TLC
 
 CONSTANTS
     Runs,          \* The migration runs, e.g. {r1, r2}.
@@ -62,9 +62,20 @@ CONSTANTS
 
     ClientWrites,  \* A PUT and a multipart upload through the gateway.
     ClientDeletes, \* A DELETE through the gateway.
-    StaleWriter    \* A gateway instance still serving names in clear,
+    StaleWriter,   \* A gateway instance still serving names in clear,
                    \* which writes to P.  ADR-022 makes its absence a
                    \* precondition; this is the configuration that says why.
+
+    Ordering,      \* Which of two writes to E(P) the provider keeps, as in
+                   \* Multipart.tla: "completion", "initiation" (AWS S3) or
+                   \* "either" (ADR-025).
+
+    YieldToUploads \* Whether the migration's copy, before it completes,
+                   \* lists the open uploads of E(P) and gives way to any
+                   \* (ADR-025).  An upload a client created before the
+                   \* copy, completing after it, is otherwise discarded in
+                   \* the copy's favour on a provider that ranks uploads by
+                   \* creation.
 
 Plain == "plain"   \* the stored key P, in clear
 Enc   == "enc"     \* the stored key E(P)
@@ -92,7 +103,8 @@ Absent == [kind |-> "absent", mid |-> NoMid, dek |-> NoDek]
 ASSUME CreateGuard \in {"ifnonematch", "none"}
 ASSUME ExistingEnc \in {"obsolete", "conflict"}
 ASSUME DeleteGuard \in {"ifmatch", "none"}
-ASSUME {ClientWrites, ClientDeletes, StaleWriter} \subseteq BOOLEAN
+ASSUME {ClientWrites, ClientDeletes, StaleWriter, YieldToUploads} \subseteq BOOLEAN
+ASSUME Ordering \in {"completion", "initiation", "either"}
 
 \* The runs are interchangeable: nothing in the algorithm or the invariants
 \* tells one from the other.
@@ -116,6 +128,13 @@ variables
     \* migration's copies and the client's upload.  Nothing uploads to P.
     openUploads = {},
 
+    \* The order the provider ranks writes to E(P) in, without a clock, as in
+    \* Multipart.tla: the uploads created and not yet landed, oldest first,
+    \* and how many of them -- the last ones -- were created after the visible
+    \* version's write.  A PUT and a DELETE are ranked when they land.
+    inflight = <<>>,
+    newer = 0,
+
     \* History, not system state: the data key of the newest write to the
     \* object, or Deleted.  A copy is not a write -- it moves a version, it
     \* does not make one.
@@ -136,6 +155,8 @@ define {
               /\ obj[k].dek  \in Deks \cup {NoDek}
               /\ manifests[k] \subseteq Mids
         /\ openUploads \subseteq Runs \cup {UpId}
+        /\ inflight \in Seq(Runs \cup {UpId})
+        /\ newer \in 0..Len(inflight)
         /\ latest \in Deks \cup {Deleted}
         /\ cleanEnd \in [Runs -> BOOLEAN]
 
@@ -151,6 +172,22 @@ define {
         ( /\ \A r \in Runs : pc[r] = "Done"
           /\ \E r \in Runs : cleanEnd[r] )
         => obj[Plain].kind = "absent"
+
+    Pos(w)        == CHOOSE i \in 1..Len(inflight) : inflight[i] = w
+    Without(w)    == SelectSeq(inflight, LAMBDA x : x # w)
+    IsNewer(w)    == \E i \in (Len(inflight) - newer + 1)..Len(inflight) : inflight[i] = w
+    Lands(w)      == Ordering = "completion" \/ IsNewer(w)
+    NewerAfter(w) == Len(inflight) - Pos(w)
+
+    \* A version at E(P) that came from P: the migration's copy carries the
+    \* data key of what it copied, and no client write has one of those.
+    CopiedFromP == obj[Enc].dek \in {InitDek, StaleDek}
+}
+
+\* An upload leaves `inflight` without landing.
+macro leave(w) {
+    newer := IF IsNewer(w) THEN newer - 1 ELSE newer;
+    inflight := Without(w);
 }
 
 \* What a run read about P is local state; a crash loses it.
@@ -207,8 +244,12 @@ process (Mig \in Runs)
     or { forget(); goto Done; };
 
   migCreate:
-    either { openUploads := openUploads \cup {self}; }
-    or     { forget(); goto Done; };
+    either {
+        openUploads := openUploads \cup {self};
+        inflight := Append(inflight, self);
+        newer := newer + 1;
+    }
+    or { forget(); goto Done; };
 
   migCopy:
     \* UploadPartCopy, with x-amz-copy-source-if-match on the ETag read at
@@ -219,17 +260,34 @@ process (Mig \in Runs)
         if (obj[Plain].kind = "absent" \/ obj[Plain].dek # srcDek) {
             openUploads := openUploads \ {self};
             forget();
+            leave(self);
             goto migHeadPlain;
         };
     }
-    or { forget(); goto Done; };
+    or { forget(); leave(self); goto Done; };
 
   migManifest:
     \* R2: the manifest under E(P) exists before the object that names it.
     either {
         if (srcKind = "multi") { manifests[Enc] := manifests[Enc] \cup {self}; };
     }
-    or { forget(); goto Done; };
+    or { forget(); leave(self); goto Done; };
+
+  migUploads:
+    \* ListMultipartUploads for E(P) (ADR-025).  An upload still open there
+    \* may be a client's, created before this copy: completing after it, it
+    \* would be discarded in the copy's favour.  The copy gives way, and the
+    \* object is reported for the next run, which finds the client's write
+    \* at E(P) and P obsolete.
+    either {
+        if (YieldToUploads /\ (openUploads \ {self}) # {}) {
+            openUploads := openUploads \ {self};
+            forget();
+            leave(self);
+            goto Done;
+        };
+    }
+    or { forget(); leave(self); goto Done; };
 
   migComplete:
     either {
@@ -237,6 +295,7 @@ process (Mig \in Runs)
             \* The lifecycle rule aborted the upload: the object is reported
             \* as failed, and the manifest just written is an orphan for gc.
             forget();
+            leave(self);
             goto Done;
         } else {
             if (CreateGuard = "ifnonematch" /\ obj[Enc].kind # "absent") {
@@ -244,16 +303,33 @@ process (Mig \in Runs)
                 \* or the other run.  Read it again rather than give up:
                 \* either way it makes P obsolete.
                 openUploads := openUploads \ {self};
+                leave(self);
                 goto migHeadEnc;
             } else {
+                \* Complete answers success; whether the copy is what E(P)
+                \* now holds is up to Ordering.  A copy outranked by a newer
+                \* client write leaves P obsolete all the same.
                 openUploads := openUploads \ {self};
-                obj[Enc] := [kind |-> srcKind,
-                             mid  |-> IF srcKind = "multi" THEN self ELSE NoMid,
-                             dek  |-> srcDek];
+                if (Lands(self)) {
+                    obj[Enc] := [kind |-> srcKind,
+                                 mid  |-> IF srcKind = "multi" THEN self ELSE NoMid,
+                                 dek  |-> srcDek];
+                    newer := NewerAfter(self);
+                } else {
+                    if (Ordering = "either") {
+                        either {
+                            obj[Enc] := [kind |-> srcKind,
+                                         mid  |-> IF srcKind = "multi" THEN self ELSE NoMid,
+                                         dek  |-> srcDek];
+                            newer := NewerAfter(self);
+                        } or { skip; };
+                    };
+                };
+                inflight := Without(self);
             };
         };
     }
-    or { forget(); goto Done; };
+    or { forget(); leave(self); goto Done; };
 
   migDelete:
     \* Delete P.  This is the step the abort the model was written for falls
@@ -291,6 +367,7 @@ process (Put = "put")
     either {
         await ClientWrites;
         obj[Enc] := [kind |-> "single", mid |-> NoMid, dek |-> PutDek];
+        newer := 0;
         latest := PutDek;
     }
     or { skip; };
@@ -306,29 +383,60 @@ process (Up = UpId)
     variables upObserved = NoMid;
 {
   upCreate:
-    either { await ClientWrites; openUploads := openUploads \cup {UpId}; }
-    or     { goto Done; };
+    either {
+        await ClientWrites;
+        openUploads := openUploads \cup {UpId};
+        inflight := Append(inflight, UpId);
+        newer := newer + 1;
+    }
+    or { goto Done; };
 
   upHead:
     either { upObserved := MidOf(Enc); }
-    or     { goto Done; };
+    or     { leave(UpId); goto Done; };
 
   upManifest:
     either { manifests[Enc] := manifests[Enc] \cup {UpId}; }
-    or     { upObserved := NoMid; goto Done; };
+    or     { upObserved := NoMid; leave(UpId); goto Done; };
 
   upComplete:
     either {
         if (UpId \notin openUploads) {
             upObserved := NoMid;
+            leave(UpId);
             goto Done;
         } else {
+            \* The client is told its write succeeded.  If the provider
+            \* discards it for a migration's copy -- a version from P, older
+            \* than this write -- the write is lost; discarded for a newer
+            \* client write, it is S3's own last-writer rule.
             openUploads := openUploads \ {UpId};
-            obj[Enc] := [kind |-> "multi", mid |-> UpId, dek |-> UpId];
-            latest := UpId;
+            if (Lands(UpId)) {
+                obj[Enc] := [kind |-> "multi", mid |-> UpId, dek |-> UpId];
+                newer := NewerAfter(UpId);
+                latest := UpId;
+            } else {
+                if (Ordering = "either") {
+                    either {
+                        obj[Enc] := [kind |-> "multi", mid |-> UpId, dek |-> UpId];
+                        newer := NewerAfter(UpId);
+                        latest := UpId;
+                    }
+                    or { if (CopiedFromP) { latest := UpId; }; };
+                } else {
+                    if (CopiedFromP) { latest := UpId; };
+                };
+            };
+            inflight := Without(UpId);
         };
     }
-    or { upObserved := NoMid; goto Done; };
+    or { upObserved := NoMid; leave(UpId); goto Done; };
+
+  upVerify:
+    \* As the gateway completes since ADR-025: the manifest observed at
+    \* upHead is deleted only once a HEAD shows its version replaced.
+    either { if (MidOf(Enc) = upObserved) { upObserved := NoMid; }; }
+    or     { upObserved := NoMid; goto Done; };
 
   upCleanup:
     either {
@@ -351,7 +459,7 @@ process (Del = "del")
     or     { goto Done; };
 
   delRemove:
-    either { obj[Enc] := Absent; latest := Deleted; }
+    either { obj[Enc] := Absent; newer := 0; latest := Deleted; }
     or     { delObserved := NoMid; goto Done; };
 
   delManifest:
@@ -418,7 +526,7 @@ process (Gc \in {"gcPlain", "gcEnc"})
 }
 *)
 \* BEGIN TRANSLATION
-VARIABLES obj, manifests, openUploads, latest, cleanEnd, pc
+VARIABLES obj, manifests, openUploads, inflight, newer, latest, cleanEnd, pc
 
 (* define statement *)
 MidOf(k)     == IF obj[k].kind = "multi" THEN obj[k].mid ELSE NoMid
@@ -432,6 +540,8 @@ TypeOK ==
           /\ obj[k].dek  \in Deks \cup {NoDek}
           /\ manifests[k] \subseteq Mids
     /\ openUploads \subseteq Runs \cup {UpId}
+    /\ inflight \in Seq(Runs \cup {UpId})
+    /\ newer \in 0..Len(inflight)
     /\ latest \in Deks \cup {Deleted}
     /\ cleanEnd \in [Runs -> BOOLEAN]
 
@@ -448,10 +558,20 @@ Converged ==
       /\ \E r \in Runs : cleanEnd[r] )
     => obj[Plain].kind = "absent"
 
+Pos(w)        == CHOOSE i \in 1..Len(inflight) : inflight[i] = w
+Without(w)    == SelectSeq(inflight, LAMBDA x : x # w)
+IsNewer(w)    == \E i \in (Len(inflight) - newer + 1)..Len(inflight) : inflight[i] = w
+Lands(w)      == Ordering = "completion" \/ IsNewer(w)
+NewerAfter(w) == Len(inflight) - Pos(w)
+
+
+
+CopiedFromP == obj[Enc].dek \in {InitDek, StaleDek}
+
 VARIABLES srcDek, srcMid, srcKind, upObserved, delObserved, seen, current
 
-vars == << obj, manifests, openUploads, latest, cleanEnd, pc, srcDek, srcMid, 
-           srcKind, upObserved, delObserved, seen, current >>
+vars == << obj, manifests, openUploads, inflight, newer, latest, cleanEnd, pc, 
+           srcDek, srcMid, srcKind, upObserved, delObserved, seen, current >>
 
 ProcSet == (Runs) \cup {"put"} \cup {UpId} \cup {"del"} \cup {"stale"} \cup {"lifecycle"} \cup ({"gcPlain", "gcEnc"})
 
@@ -461,6 +581,8 @@ Init == (* Global variables *)
                                  ELSE Absent]
         /\ manifests = [k \in Keys |-> IF k = Plain THEN {InitMid} ELSE {}]
         /\ openUploads = {}
+        /\ inflight = <<>>
+        /\ newer = 0
         /\ latest = InitDek
         /\ cleanEnd = [r \in Runs |-> FALSE]
         (* Process Mig *)
@@ -494,8 +616,9 @@ migHeadPlain(self) == /\ pc[self] = "migHeadPlain"
                                        /\ UNCHANGED cleanEnd
                          \/ /\ pc' = [pc EXCEPT ![self] = "Done"]
                             /\ UNCHANGED <<cleanEnd, srcDek, srcMid, srcKind>>
-                      /\ UNCHANGED << obj, manifests, openUploads, latest, 
-                                      upObserved, delObserved, seen, current >>
+                      /\ UNCHANGED << obj, manifests, openUploads, inflight, 
+                                      newer, latest, upObserved, delObserved, 
+                                      seen, current >>
 
 migHeadEnc(self) == /\ pc[self] = "migHeadEnc"
                     /\ \/ /\ IF obj[Enc].kind = "absent"
@@ -518,18 +641,21 @@ migHeadEnc(self) == /\ pc[self] = "migHeadEnc"
                           /\ srcKind' = [srcKind EXCEPT ![self] = "absent"]
                           /\ pc' = [pc EXCEPT ![self] = "Done"]
                           /\ UNCHANGED cleanEnd
-                    /\ UNCHANGED << obj, manifests, openUploads, latest, 
-                                    upObserved, delObserved, seen, current >>
+                    /\ UNCHANGED << obj, manifests, openUploads, inflight, 
+                                    newer, latest, upObserved, delObserved, 
+                                    seen, current >>
 
 migCreate(self) == /\ pc[self] = "migCreate"
                    /\ \/ /\ openUploads' = (openUploads \cup {self})
+                         /\ inflight' = Append(inflight, self)
+                         /\ newer' = newer + 1
                          /\ pc' = [pc EXCEPT ![self] = "migCopy"]
                          /\ UNCHANGED <<srcDek, srcMid, srcKind>>
                       \/ /\ srcDek' = [srcDek EXCEPT ![self] = NoDek]
                          /\ srcMid' = [srcMid EXCEPT ![self] = NoMid]
                          /\ srcKind' = [srcKind EXCEPT ![self] = "absent"]
                          /\ pc' = [pc EXCEPT ![self] = "Done"]
-                         /\ UNCHANGED openUploads
+                         /\ UNCHANGED <<openUploads, inflight, newer>>
                    /\ UNCHANGED << obj, manifests, latest, cleanEnd, 
                                    upObserved, delObserved, seen, current >>
 
@@ -539,13 +665,17 @@ migCopy(self) == /\ pc[self] = "migCopy"
                                   /\ srcDek' = [srcDek EXCEPT ![self] = NoDek]
                                   /\ srcMid' = [srcMid EXCEPT ![self] = NoMid]
                                   /\ srcKind' = [srcKind EXCEPT ![self] = "absent"]
+                                  /\ newer' = IF IsNewer(self) THEN newer - 1 ELSE newer
+                                  /\ inflight' = Without(self)
                                   /\ pc' = [pc EXCEPT ![self] = "migHeadPlain"]
                              ELSE /\ pc' = [pc EXCEPT ![self] = "migManifest"]
-                                  /\ UNCHANGED << openUploads, srcDek, srcMid, 
-                                                  srcKind >>
+                                  /\ UNCHANGED << openUploads, inflight, newer, 
+                                                  srcDek, srcMid, srcKind >>
                     \/ /\ srcDek' = [srcDek EXCEPT ![self] = NoDek]
                        /\ srcMid' = [srcMid EXCEPT ![self] = NoMid]
                        /\ srcKind' = [srcKind EXCEPT ![self] = "absent"]
+                       /\ newer' = IF IsNewer(self) THEN newer - 1 ELSE newer
+                       /\ inflight' = Without(self)
                        /\ pc' = [pc EXCEPT ![self] = "Done"]
                        /\ UNCHANGED openUploads
                  /\ UNCHANGED << obj, manifests, latest, cleanEnd, upObserved, 
@@ -556,36 +686,80 @@ migManifest(self) == /\ pc[self] = "migManifest"
                                  THEN /\ manifests' = [manifests EXCEPT ![Enc] = manifests[Enc] \cup {self}]
                                  ELSE /\ TRUE
                                       /\ UNCHANGED manifests
-                           /\ pc' = [pc EXCEPT ![self] = "migComplete"]
-                           /\ UNCHANGED <<srcDek, srcMid, srcKind>>
+                           /\ pc' = [pc EXCEPT ![self] = "migUploads"]
+                           /\ UNCHANGED <<inflight, newer, srcDek, srcMid, srcKind>>
                         \/ /\ srcDek' = [srcDek EXCEPT ![self] = NoDek]
                            /\ srcMid' = [srcMid EXCEPT ![self] = NoMid]
                            /\ srcKind' = [srcKind EXCEPT ![self] = "absent"]
+                           /\ newer' = IF IsNewer(self) THEN newer - 1 ELSE newer
+                           /\ inflight' = Without(self)
                            /\ pc' = [pc EXCEPT ![self] = "Done"]
                            /\ UNCHANGED manifests
                      /\ UNCHANGED << obj, openUploads, latest, cleanEnd, 
                                      upObserved, delObserved, seen, current >>
+
+migUploads(self) == /\ pc[self] = "migUploads"
+                    /\ \/ /\ IF YieldToUploads /\ (openUploads \ {self}) # {}
+                                THEN /\ openUploads' = openUploads \ {self}
+                                     /\ srcDek' = [srcDek EXCEPT ![self] = NoDek]
+                                     /\ srcMid' = [srcMid EXCEPT ![self] = NoMid]
+                                     /\ srcKind' = [srcKind EXCEPT ![self] = "absent"]
+                                     /\ newer' = IF IsNewer(self) THEN newer - 1 ELSE newer
+                                     /\ inflight' = Without(self)
+                                     /\ pc' = [pc EXCEPT ![self] = "Done"]
+                                ELSE /\ pc' = [pc EXCEPT ![self] = "migComplete"]
+                                     /\ UNCHANGED << openUploads, inflight, 
+                                                     newer, srcDek, srcMid, 
+                                                     srcKind >>
+                       \/ /\ srcDek' = [srcDek EXCEPT ![self] = NoDek]
+                          /\ srcMid' = [srcMid EXCEPT ![self] = NoMid]
+                          /\ srcKind' = [srcKind EXCEPT ![self] = "absent"]
+                          /\ newer' = IF IsNewer(self) THEN newer - 1 ELSE newer
+                          /\ inflight' = Without(self)
+                          /\ pc' = [pc EXCEPT ![self] = "Done"]
+                          /\ UNCHANGED openUploads
+                    /\ UNCHANGED << obj, manifests, latest, cleanEnd, 
+                                    upObserved, delObserved, seen, current >>
 
 migComplete(self) == /\ pc[self] = "migComplete"
                      /\ \/ /\ IF self \notin openUploads
                                  THEN /\ srcDek' = [srcDek EXCEPT ![self] = NoDek]
                                       /\ srcMid' = [srcMid EXCEPT ![self] = NoMid]
                                       /\ srcKind' = [srcKind EXCEPT ![self] = "absent"]
+                                      /\ newer' = IF IsNewer(self) THEN newer - 1 ELSE newer
+                                      /\ inflight' = Without(self)
                                       /\ pc' = [pc EXCEPT ![self] = "Done"]
                                       /\ UNCHANGED << obj, openUploads >>
                                  ELSE /\ IF CreateGuard = "ifnonematch" /\ obj[Enc].kind # "absent"
                                             THEN /\ openUploads' = openUploads \ {self}
+                                                 /\ newer' = IF IsNewer(self) THEN newer - 1 ELSE newer
+                                                 /\ inflight' = Without(self)
                                                  /\ pc' = [pc EXCEPT ![self] = "migHeadEnc"]
                                                  /\ obj' = obj
                                             ELSE /\ openUploads' = openUploads \ {self}
-                                                 /\ obj' = [obj EXCEPT ![Enc] = [kind |-> srcKind[self],
-                                                                                 mid  |-> IF srcKind[self] = "multi" THEN self ELSE NoMid,
-                                                                                 dek  |-> srcDek[self]]]
+                                                 /\ IF Lands(self)
+                                                       THEN /\ obj' = [obj EXCEPT ![Enc] = [kind |-> srcKind[self],
+                                                                                            mid  |-> IF srcKind[self] = "multi" THEN self ELSE NoMid,
+                                                                                            dek  |-> srcDek[self]]]
+                                                            /\ newer' = NewerAfter(self)
+                                                       ELSE /\ IF Ordering = "either"
+                                                                  THEN /\ \/ /\ obj' = [obj EXCEPT ![Enc] = [kind |-> srcKind[self],
+                                                                                                             mid  |-> IF srcKind[self] = "multi" THEN self ELSE NoMid,
+                                                                                                             dek  |-> srcDek[self]]]
+                                                                             /\ newer' = NewerAfter(self)
+                                                                          \/ /\ TRUE
+                                                                             /\ UNCHANGED <<obj, newer>>
+                                                                  ELSE /\ TRUE
+                                                                       /\ UNCHANGED << obj, 
+                                                                                       newer >>
+                                                 /\ inflight' = Without(self)
                                                  /\ pc' = [pc EXCEPT ![self] = "migDelete"]
                                       /\ UNCHANGED << srcDek, srcMid, srcKind >>
                         \/ /\ srcDek' = [srcDek EXCEPT ![self] = NoDek]
                            /\ srcMid' = [srcMid EXCEPT ![self] = NoMid]
                            /\ srcKind' = [srcKind EXCEPT ![self] = "absent"]
+                           /\ newer' = IF IsNewer(self) THEN newer - 1 ELSE newer
+                           /\ inflight' = Without(self)
                            /\ pc' = [pc EXCEPT ![self] = "Done"]
                            /\ UNCHANGED <<obj, openUploads>>
                      /\ UNCHANGED << manifests, latest, cleanEnd, upObserved, 
@@ -607,8 +781,9 @@ migDelete(self) == /\ pc[self] = "migDelete"
                          /\ srcKind' = [srcKind EXCEPT ![self] = "absent"]
                          /\ pc' = [pc EXCEPT ![self] = "Done"]
                          /\ obj' = obj
-                   /\ UNCHANGED << manifests, openUploads, latest, cleanEnd, 
-                                   upObserved, delObserved, seen, current >>
+                   /\ UNCHANGED << manifests, openUploads, inflight, newer, 
+                                   latest, cleanEnd, upObserved, delObserved, 
+                                   seen, current >>
 
 migManifestDel(self) == /\ pc[self] = "migManifestDel"
                         /\ \/ /\ IF srcMid[self] # NoMid
@@ -622,38 +797,47 @@ migManifestDel(self) == /\ pc[self] = "migManifestDel"
                         /\ srcMid' = [srcMid EXCEPT ![self] = NoMid]
                         /\ srcKind' = [srcKind EXCEPT ![self] = "absent"]
                         /\ pc' = [pc EXCEPT ![self] = "Done"]
-                        /\ UNCHANGED << obj, openUploads, latest, upObserved, 
-                                        delObserved, seen, current >>
+                        /\ UNCHANGED << obj, openUploads, inflight, newer, 
+                                        latest, upObserved, delObserved, seen, 
+                                        current >>
 
 Mig(self) == migHeadPlain(self) \/ migHeadEnc(self) \/ migCreate(self)
-                \/ migCopy(self) \/ migManifest(self) \/ migComplete(self)
-                \/ migDelete(self) \/ migManifestDel(self)
+                \/ migCopy(self) \/ migManifest(self) \/ migUploads(self)
+                \/ migComplete(self) \/ migDelete(self)
+                \/ migManifestDel(self)
 
 putWrite == /\ pc["put"] = "putWrite"
             /\ \/ /\ ClientWrites
                   /\ obj' = [obj EXCEPT ![Enc] = [kind |-> "single", mid |-> NoMid, dek |-> PutDek]]
+                  /\ newer' = 0
                   /\ latest' = PutDek
                \/ /\ TRUE
-                  /\ UNCHANGED <<obj, latest>>
+                  /\ UNCHANGED <<obj, newer, latest>>
             /\ pc' = [pc EXCEPT !["put"] = "Done"]
-            /\ UNCHANGED << manifests, openUploads, cleanEnd, srcDek, srcMid, 
-                            srcKind, upObserved, delObserved, seen, current >>
+            /\ UNCHANGED << manifests, openUploads, inflight, cleanEnd, srcDek, 
+                            srcMid, srcKind, upObserved, delObserved, seen, 
+                            current >>
 
 Put == putWrite
 
 upCreate == /\ pc[UpId] = "upCreate"
             /\ \/ /\ ClientWrites
                   /\ openUploads' = (openUploads \cup {UpId})
+                  /\ inflight' = Append(inflight, UpId)
+                  /\ newer' = newer + 1
                   /\ pc' = [pc EXCEPT ![UpId] = "upHead"]
                \/ /\ pc' = [pc EXCEPT ![UpId] = "Done"]
-                  /\ UNCHANGED openUploads
+                  /\ UNCHANGED <<openUploads, inflight, newer>>
             /\ UNCHANGED << obj, manifests, latest, cleanEnd, srcDek, srcMid, 
                             srcKind, upObserved, delObserved, seen, current >>
 
 upHead == /\ pc[UpId] = "upHead"
           /\ \/ /\ upObserved' = MidOf(Enc)
                 /\ pc' = [pc EXCEPT ![UpId] = "upManifest"]
-             \/ /\ pc' = [pc EXCEPT ![UpId] = "Done"]
+                /\ UNCHANGED <<inflight, newer>>
+             \/ /\ newer' = IF IsNewer(UpId) THEN newer - 1 ELSE newer
+                /\ inflight' = Without(UpId)
+                /\ pc' = [pc EXCEPT ![UpId] = "Done"]
                 /\ UNCHANGED upObserved
           /\ UNCHANGED << obj, manifests, openUploads, latest, cleanEnd, 
                           srcDek, srcMid, srcKind, delObserved, seen, current >>
@@ -661,8 +845,10 @@ upHead == /\ pc[UpId] = "upHead"
 upManifest == /\ pc[UpId] = "upManifest"
               /\ \/ /\ manifests' = [manifests EXCEPT ![Enc] = manifests[Enc] \cup {UpId}]
                     /\ pc' = [pc EXCEPT ![UpId] = "upComplete"]
-                    /\ UNCHANGED upObserved
+                    /\ UNCHANGED <<inflight, newer, upObserved>>
                  \/ /\ upObserved' = NoMid
+                    /\ newer' = IF IsNewer(UpId) THEN newer - 1 ELSE newer
+                    /\ inflight' = Without(UpId)
                     /\ pc' = [pc EXCEPT ![UpId] = "Done"]
                     /\ UNCHANGED manifests
               /\ UNCHANGED << obj, openUploads, latest, cleanEnd, srcDek, 
@@ -671,18 +857,52 @@ upManifest == /\ pc[UpId] = "upManifest"
 upComplete == /\ pc[UpId] = "upComplete"
               /\ \/ /\ IF UpId \notin openUploads
                           THEN /\ upObserved' = NoMid
+                               /\ newer' = IF IsNewer(UpId) THEN newer - 1 ELSE newer
+                               /\ inflight' = Without(UpId)
                                /\ pc' = [pc EXCEPT ![UpId] = "Done"]
                                /\ UNCHANGED << obj, openUploads, latest >>
                           ELSE /\ openUploads' = openUploads \ {UpId}
-                               /\ obj' = [obj EXCEPT ![Enc] = [kind |-> "multi", mid |-> UpId, dek |-> UpId]]
-                               /\ latest' = UpId
-                               /\ pc' = [pc EXCEPT ![UpId] = "upCleanup"]
+                               /\ IF Lands(UpId)
+                                     THEN /\ obj' = [obj EXCEPT ![Enc] = [kind |-> "multi", mid |-> UpId, dek |-> UpId]]
+                                          /\ newer' = NewerAfter(UpId)
+                                          /\ latest' = UpId
+                                     ELSE /\ IF Ordering = "either"
+                                                THEN /\ \/ /\ obj' = [obj EXCEPT ![Enc] = [kind |-> "multi", mid |-> UpId, dek |-> UpId]]
+                                                           /\ newer' = NewerAfter(UpId)
+                                                           /\ latest' = UpId
+                                                        \/ /\ IF CopiedFromP
+                                                                 THEN /\ latest' = UpId
+                                                                 ELSE /\ TRUE
+                                                                      /\ UNCHANGED latest
+                                                           /\ UNCHANGED <<obj, newer>>
+                                                ELSE /\ IF CopiedFromP
+                                                           THEN /\ latest' = UpId
+                                                           ELSE /\ TRUE
+                                                                /\ UNCHANGED latest
+                                                     /\ UNCHANGED << obj, 
+                                                                     newer >>
+                               /\ inflight' = Without(UpId)
+                               /\ pc' = [pc EXCEPT ![UpId] = "upVerify"]
                                /\ UNCHANGED upObserved
                  \/ /\ upObserved' = NoMid
+                    /\ newer' = IF IsNewer(UpId) THEN newer - 1 ELSE newer
+                    /\ inflight' = Without(UpId)
                     /\ pc' = [pc EXCEPT ![UpId] = "Done"]
                     /\ UNCHANGED <<obj, openUploads, latest>>
               /\ UNCHANGED << manifests, cleanEnd, srcDek, srcMid, srcKind, 
                               delObserved, seen, current >>
+
+upVerify == /\ pc[UpId] = "upVerify"
+            /\ \/ /\ IF MidOf(Enc) = upObserved
+                        THEN /\ upObserved' = NoMid
+                        ELSE /\ TRUE
+                             /\ UNCHANGED upObserved
+                  /\ pc' = [pc EXCEPT ![UpId] = "upCleanup"]
+               \/ /\ upObserved' = NoMid
+                  /\ pc' = [pc EXCEPT ![UpId] = "Done"]
+            /\ UNCHANGED << obj, manifests, openUploads, inflight, newer, 
+                            latest, cleanEnd, srcDek, srcMid, srcKind, 
+                            delObserved, seen, current >>
 
 upCleanup == /\ pc[UpId] = "upCleanup"
              /\ \/ /\ IF upObserved # NoMid
@@ -693,10 +913,12 @@ upCleanup == /\ pc[UpId] = "upCleanup"
                    /\ UNCHANGED manifests
              /\ upObserved' = NoMid
              /\ pc' = [pc EXCEPT ![UpId] = "Done"]
-             /\ UNCHANGED << obj, openUploads, latest, cleanEnd, srcDek, 
-                             srcMid, srcKind, delObserved, seen, current >>
+             /\ UNCHANGED << obj, openUploads, inflight, newer, latest, 
+                             cleanEnd, srcDek, srcMid, srcKind, delObserved, 
+                             seen, current >>
 
-Up == upCreate \/ upHead \/ upManifest \/ upComplete \/ upCleanup
+Up == upCreate \/ upHead \/ upManifest \/ upComplete \/ upVerify
+         \/ upCleanup
 
 delHead == /\ pc["del"] = "delHead"
            /\ \/ /\ ClientDeletes
@@ -704,19 +926,22 @@ delHead == /\ pc["del"] = "delHead"
                  /\ pc' = [pc EXCEPT !["del"] = "delRemove"]
               \/ /\ pc' = [pc EXCEPT !["del"] = "Done"]
                  /\ UNCHANGED delObserved
-           /\ UNCHANGED << obj, manifests, openUploads, latest, cleanEnd, 
-                           srcDek, srcMid, srcKind, upObserved, seen, current >>
+           /\ UNCHANGED << obj, manifests, openUploads, inflight, newer, 
+                           latest, cleanEnd, srcDek, srcMid, srcKind, 
+                           upObserved, seen, current >>
 
 delRemove == /\ pc["del"] = "delRemove"
              /\ \/ /\ obj' = [obj EXCEPT ![Enc] = Absent]
+                   /\ newer' = 0
                    /\ latest' = Deleted
                    /\ pc' = [pc EXCEPT !["del"] = "delManifest"]
                    /\ UNCHANGED delObserved
                 \/ /\ delObserved' = NoMid
                    /\ pc' = [pc EXCEPT !["del"] = "Done"]
-                   /\ UNCHANGED <<obj, latest>>
-             /\ UNCHANGED << manifests, openUploads, cleanEnd, srcDek, srcMid, 
-                             srcKind, upObserved, seen, current >>
+                   /\ UNCHANGED <<obj, newer, latest>>
+             /\ UNCHANGED << manifests, openUploads, inflight, cleanEnd, 
+                             srcDek, srcMid, srcKind, upObserved, seen, 
+                             current >>
 
 delManifest == /\ pc["del"] = "delManifest"
                /\ \/ /\ IF delObserved # NoMid
@@ -727,8 +952,9 @@ delManifest == /\ pc["del"] = "delManifest"
                      /\ UNCHANGED manifests
                /\ delObserved' = NoMid
                /\ pc' = [pc EXCEPT !["del"] = "Done"]
-               /\ UNCHANGED << obj, openUploads, latest, cleanEnd, srcDek, 
-                               srcMid, srcKind, upObserved, seen, current >>
+               /\ UNCHANGED << obj, openUploads, inflight, newer, latest, 
+                               cleanEnd, srcDek, srcMid, srcKind, upObserved, 
+                               seen, current >>
 
 Del == delHead \/ delRemove \/ delManifest
 
@@ -739,8 +965,9 @@ staleWrite == /\ pc["stale"] = "staleWrite"
                  \/ /\ TRUE
                     /\ UNCHANGED <<obj, latest>>
               /\ pc' = [pc EXCEPT !["stale"] = "Done"]
-              /\ UNCHANGED << manifests, openUploads, cleanEnd, srcDek, srcMid, 
-                              srcKind, upObserved, delObserved, seen, current >>
+              /\ UNCHANGED << manifests, openUploads, inflight, newer, 
+                              cleanEnd, srcDek, srcMid, srcKind, upObserved, 
+                              delObserved, seen, current >>
 
 Stale == staleWrite
 
@@ -748,8 +975,9 @@ lifeAbort == /\ pc["lifecycle"] = "lifeAbort"
              /\ \E u \in openUploads:
                   openUploads' = openUploads \ {u}
              /\ pc' = [pc EXCEPT !["lifecycle"] = "lifeAbort"]
-             /\ UNCHANGED << obj, manifests, latest, cleanEnd, srcDek, srcMid, 
-                             srcKind, upObserved, delObserved, seen, current >>
+             /\ UNCHANGED << obj, manifests, inflight, newer, latest, cleanEnd, 
+                             srcDek, srcMid, srcKind, upObserved, delObserved, 
+                             seen, current >>
 
 Life == lifeAbort
 
@@ -758,9 +986,9 @@ gcList(self) == /\ pc[self] = "gcList"
                       /\ pc' = [pc EXCEPT ![self] = "gcUploads"]
                    \/ /\ pc' = [pc EXCEPT ![self] = "Done"]
                       /\ seen' = seen
-                /\ UNCHANGED << obj, manifests, openUploads, latest, cleanEnd, 
-                                srcDek, srcMid, srcKind, upObserved, 
-                                delObserved, current >>
+                /\ UNCHANGED << obj, manifests, openUploads, inflight, newer, 
+                                latest, cleanEnd, srcDek, srcMid, srcKind, 
+                                upObserved, delObserved, current >>
 
 gcUploads(self) == /\ pc[self] = "gcUploads"
                    /\ \/ /\ IF UploadsAt(GcKey(self)) # {}
@@ -770,9 +998,9 @@ gcUploads(self) == /\ pc[self] = "gcUploads"
                                     /\ seen' = seen
                       \/ /\ seen' = [seen EXCEPT ![self] = {}]
                          /\ pc' = [pc EXCEPT ![self] = "Done"]
-                   /\ UNCHANGED << obj, manifests, openUploads, latest, 
-                                   cleanEnd, srcDek, srcMid, srcKind, 
-                                   upObserved, delObserved, current >>
+                   /\ UNCHANGED << obj, manifests, openUploads, inflight, 
+                                   newer, latest, cleanEnd, srcDek, srcMid, 
+                                   srcKind, upObserved, delObserved, current >>
 
 gcHead(self) == /\ pc[self] = "gcHead"
                 /\ \/ /\ current' = [current EXCEPT ![self] = MidOf(GcKey(self))]
@@ -781,9 +1009,9 @@ gcHead(self) == /\ pc[self] = "gcHead"
                    \/ /\ seen' = [seen EXCEPT ![self] = {}]
                       /\ pc' = [pc EXCEPT ![self] = "Done"]
                       /\ UNCHANGED current
-                /\ UNCHANGED << obj, manifests, openUploads, latest, cleanEnd, 
-                                srcDek, srcMid, srcKind, upObserved, 
-                                delObserved >>
+                /\ UNCHANGED << obj, manifests, openUploads, inflight, newer, 
+                                latest, cleanEnd, srcDek, srcMid, srcKind, 
+                                upObserved, delObserved >>
 
 gcDelete(self) == /\ pc[self] = "gcDelete"
                   /\ \/ /\ manifests' = [manifests EXCEPT ![GcKey(self)] = manifests[GcKey(self)] \ (seen[self] \ {current[self]})]
@@ -792,8 +1020,9 @@ gcDelete(self) == /\ pc[self] = "gcDelete"
                   /\ seen' = [seen EXCEPT ![self] = {}]
                   /\ current' = [current EXCEPT ![self] = NoMid]
                   /\ pc' = [pc EXCEPT ![self] = "Done"]
-                  /\ UNCHANGED << obj, openUploads, latest, cleanEnd, srcDek, 
-                                  srcMid, srcKind, upObserved, delObserved >>
+                  /\ UNCHANGED << obj, openUploads, inflight, newer, latest, 
+                                  cleanEnd, srcDek, srcMid, srcKind, 
+                                  upObserved, delObserved >>
 
 Gc(self) == gcList(self) \/ gcUploads(self) \/ gcHead(self)
                \/ gcDelete(self)
