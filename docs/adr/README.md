@@ -30,8 +30,11 @@ rejected options is not a decision, it is a default.
 | [022](ADR-022-migrating-to-encrypted-names.md) | Migrating a bucket to encrypted names: switch first, then copy and delete | Accepted | post-1.0 |
 | [023](ADR-023-resealing-a-keyring.md) | Resealing a keyring: verified before it replaces, and no second door | Accepted | post-1.0 |
 | [024](ADR-024-aws-credentials-without-the-sdk.md) | AWS credentials without the SDK: a resolver of our own, chosen explicitly | Accepted | post-1.0 |
+| [025](ADR-025-writes-rank-by-when-they-began.md) | On AWS a completion is not a publication: writes rank by when they began | Accepted | post-1.0 |
 
-Every entry is Accepted. 024 was Proposed until the gateway and the Helm chart
+Every entry is Accepted. 025 was Accepted with its code: it corrects an assumption
+010 had stated as fact, which the AWS workflow disproved, and amends 009 and 022 for
+the same reason. 024 was Proposed until the gateway and the Helm chart
 used what it decides. 022 was Proposed between its model and its code, which
 landed a day apart. 021 was Proposed until `v1.0.0`: it decides what that
 release promises, so it took effect with it. 018 was Proposed while it was a decision without code, for the

@@ -697,8 +697,8 @@ requests interleaved a particular way, on two instances that never learn of each
 
 The fix was four rules, derived by reasoning. So was the bug. Before M4 turned those rules
 into Go, [`spec/tla/Multipart.tla`](spec/tla/Multipart.tla) turned them into a model that TLC
-checks exhaustively: three concurrent uploads, a single-part PUT, a delete, a rotation and a
-`gc` pass on one key, with a crash possible after every step. 38.5 million distinct states,
+checked exhaustively: three concurrent uploads, a single-part PUT, a delete, a rotation and
+a `gc` pass on one key, with a crash possible after every step. 38.5 million distinct states,
 no counterexample.
 
 Four more configurations put flawed rules back and *require* a counterexample — a model that
@@ -726,13 +726,26 @@ passes review precisely because neither changes anything. TLC produces an unread
 twelve states: check for open uploads first, find none, then list, and the listing picks up a
 manifest written after the check. Listing first is what gives the check its meaning.
 
-That configuration is now a regression test. Each of the four counterexamples is also an
+That configuration is now a regression test. Each counterexample is also an
 integration test that replays it against a real provider — [spec/tla/README.md](spec/tla/README.md) links each one,
 and [ADR-010](docs/adr/ADR-010-manifest-lifecycle-under-concurrency.md) records what the model
 does and does not cover.
 
+**The model was right about the rules and wrong about AWS.** Among its stated assumptions
+was that a completed upload becomes the object the key holds. The AWS workflow, run before
+`v1.1.0`, failed this section's own test: two parallel uploads left an object that read
+as `IntegrityCheckFailed`. AWS keeps whichever write *began* last and answers the
+completion it discards with a success, so a request that saw B, completed after it and
+lost to it went on to delete B's manifest under rule R3. MinIO, where every earlier run
+happened, keeps the write that lands last. The model now takes the provider's choice as a
+parameter. It reproduces the failure in twelve states and two more of the same kind, in
+rotation and migration. It holds the fixed rules under a provider free to keep or
+discard such a write. The fixed rules are a HEAD before R3's delete and a copy that gives
+way to a client's upload in flight
+([ADR-025](docs/adr/ADR-025-writes-rank-by-when-they-began.md)).
+
 ```sh
-make tla        # all five configurations; four must fail, one must not
+make tla        # thirteen configurations of both models; eleven must fail, two must not
 ```
 
 ## Development

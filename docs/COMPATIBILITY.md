@@ -219,7 +219,7 @@ These apply to every client.
 |---|---|---|---|---|
 | `x-amz-copy-source-if-match` on `UploadPartCopy` | **enforced** | **enforced** | **enforced** | rotation: the source changing between the HEAD and the copy |
 | `If-Match` on `CompleteMultipartUpload` | **enforced** | **enforced** | **ignored** — completes over whatever is there | rotation: the target changing between the copy and the completion |
-| `If-None-Match: *` on `CompleteMultipartUpload` | **enforced** | documented by AWS, not yet measured here | **ignored** — completes over whatever is there | migration: a client writing the encrypted key before the copy lands there |
+| `If-None-Match: *` on `CompleteMultipartUpload` | **enforced** | **enforced** — at times as an error inside a `200`, once the completion has started | **ignored** — completes over whatever is there | migration: a client writing the encrypted key before the copy lands there |
 | `If-Match` on `DeleteObject` | **ignored** — deletes regardless | not measured | **ignored** — deletes regardless | nothing — see below |
 
 The third and fourth rows were measured on 2026-10-02 with the AWS CLI against
@@ -228,8 +228,9 @@ The fourth is recorded because the first design for `migrate-names` would have
 relied on it; the model in [`spec/tla/Migrate.tla`](../spec/tla/Migrate.tla)
 showed it did not need to before the measurement showed it could not have
 ([ADR-022](adr/ADR-022-migrating-to-encrypted-names.md)). AWS's row for the third
-is the next AWS run's to fill: the probe test expects it enforced there and fails
-if it is not.
+was measured by the AWS workflow on 2026-10-03, twice: enforced both times, and
+in the second run delivered inside a `200`, which the gateway read as a provider
+error until it gave such an error its condition's status back.
 
 On MinIO both answer `412 PreconditionFailed`, and in practice the copy refuses
 first — the rotation never gets as far as the completion. Either way the object
@@ -258,6 +259,35 @@ part of an upload, where AWS accepts it. A small single-part object with no
 condition to carry — every server-side copy, and every rotation under
 `--allow-unconditional` — is therefore copied with one `CopyObject` instead,
 which keeps the source precondition and works on both.
+
+### Which write a provider keeps
+
+Two writes to one key overlap whenever a multipart upload is open while anything
+else writes the key. Providers do not agree on which one the key holds afterwards,
+and AWS answers a completion it does not keep with a success
+([ADR-025](adr/ADR-025-writes-rank-by-when-they-began.md)). Measured on 2026-10-03,
+with one-byte objects and no gateway involved:
+
+| | AWS S3 | MinIO `RELEASE.2026-09-22T19-25-18Z` | Garage v2.4.1 |
+|---|---|---|---|
+| Upload A created, then upload B; B completes, then A | A answered 200, **B** kept | **A** kept | A refused, `NoSuchUpload`; **B** kept |
+| Upload A created, then a PUT; then A completes | A answered 200, **the PUT** kept | **A** kept | A refused, `NoSuchUpload`; **the PUT** kept |
+| A 512 MiB PUT starts; during it an upload is created and completed | **the PUT** kept — ranked when its body arrived | not measured | not measured |
+
+So on AWS a client can be told its multipart upload succeeded and find the key
+holding another write. That is AWS's rule and the gateway passes it on unchanged.
+What the gateway does about it is to keep from making it worse:
+
+- A completion deletes the manifest of the version it replaced only once a HEAD
+  has seen the replacement. Before 1.1, two overlapping uploads of one key on AWS
+  could leave the object that stayed visible without its manifest, and every
+  read of it failed with `IntegrityCheckFailed`.
+- `rotate` and `migrate-names` give way to a client's upload of the same key. A
+  copy that completed first would outrank an upload the client began earlier,
+  and AWS would discard the client's write. Such an object is reported, as
+  `conflicted` by `rotate` and `failed` by `migrate-names`, and the next run
+  handles it. Both commands therefore need `s3:ListBucketMultipartUploads` on
+  the bucket, as `gc` already did.
 
 ### Key services
 

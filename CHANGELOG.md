@@ -194,6 +194,33 @@ startup. No metric, type or label changes.
 **The README's key-age query took `max` where it meant `min`.** `time() - max(...)`
 over the key creation timestamps is the age of the newest key, not the oldest.
 
+**On AWS, two overlapping uploads of one key could leave an object nobody can
+read.** AWS keeps whichever write *began* last, and answers a completion it then
+discards with a success. Upload B, created after A and completed before it,
+stayed visible; A's completion, discarded, deleted B's manifest as the version
+it had replaced -- and every read of B failed with `IntegrityCheckFailed`. The
+data was intact but unreachable through the gateway. A completion now deletes
+the manifest it observed only once a HEAD shows that version replaced, and does
+not record a discarded write for rollback detection. Present since 0.1.0, in
+every release. Of the providers measured only AWS produces it: MinIO keeps the
+write that lands last, and Garage refuses the outranked completion. The AWS workflow
+found it on 2026-10-03, the model now reproduces it in twelve states, and
+[ADR-025](docs/adr/ADR-025-writes-rank-by-when-they-began.md) records what was
+measured on each provider.
+
+**On AWS, `rotate` and `migrate-names` could make a client's upload disappear.**
+For the same reason: a client upload created before the command's copy of that
+object and completed after it was discarded in the copy's favour, after the
+client had been told it succeeded. `If-Match` and `If-None-Match` cannot see an
+upload still in flight. Both commands now give way: before publishing a copy
+they list the key's open uploads and leave the object if there is one --
+`rotate` counts it as conflicted, `migrate-names` as failed with the reason --
+and the next run handles it. Both therefore need `s3:ListBucketMultipartUploads`,
+as `gc` already did. A PUT is not affected: AWS ranks it when its body has
+arrived, so it outranks any copy it outlasts. Two runs of one command over the
+same objects at once now take each other's copies for client uploads: where they
+meet, both leave the object for the next run instead of one finishing it.
+
 **On AWS, a condition that held could read as a provider failure.**
 `CompleteMultipartUpload`, `CopyObject` and `UploadPartCopy` may answer `200 OK`
 and put the error in the body, and AWS does so with a failed `If-Match` or

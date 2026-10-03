@@ -5,6 +5,9 @@
 **Milestone:** M3.5
 **Implements:** `spec/tla/Multipart.tla`; binding on `internal/manifest` and the completion,
 delete, rotation and `gc` paths in M4 and M5
+**Amended by:** [ADR-025](ADR-025-writes-rank-by-when-they-began.md) — on AWS a successful
+completion need not replace what step 2 observed, so R3 deletes only after a HEAD has seen
+the replacement; "AWS S3 guarantees them" below does not hold for that assumption
 
 ## Context
 

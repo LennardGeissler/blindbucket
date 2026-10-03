@@ -529,7 +529,9 @@ specified as rules R1–R4 in
 in [`spec/tla/`](../spec/tla/). In short: every
 operation that makes a multipart object visible mints a fresh manifest id and
 writes its own manifest before the object becomes visible, and deletes at most the
-manifest id it observed beforehand.
+manifest id it observed beforehand -- and that only once it has seen the object
+carrying it replaced, because a provider may acknowledge a write and keep an
+older-initiated one ([ADR-025](adr/ADR-025-writes-rank-by-when-they-began.md)).
 
 Orphaned manifests are expected rather than exceptional. They contain no plaintext.
 

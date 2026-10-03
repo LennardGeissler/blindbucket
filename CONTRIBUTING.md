@@ -271,7 +271,7 @@ happens to have a document alongside it:
 
 Changes to the manifest lifecycle have a parallel obligation: the rules are
 modelled in [`spec/tla/Multipart.tla`](spec/tla/Multipart.tla) and checked with
-TLC, four of the five configurations are *required* to produce a counterexample,
+TLC, all but the design's configurations are *required* to produce a counterexample,
 and each counterexample is also an integration test. The same holds for
 `migrate-names` and [`spec/tla/Migrate.tla`](spec/tla/Migrate.tla). `make tla`
 must still pass.

@@ -5,6 +5,8 @@
 **Milestone:** post-1.0
 **Implements:** `internal/migrate`, `internal/probe`, `internal/objcopy`, `internal/upstream`, `blindbucket migrate-names`
 **Checked by:** [`spec/tla/Migrate.tla`](../../spec/tla/Migrate.tla)
+**Amended by:** [ADR-025](ADR-025-writes-rank-by-when-they-began.md) — the copy gives way to an
+open upload of `E(P)`, which AWS would otherwise discard in the copy's favour
 
 ## Context
 

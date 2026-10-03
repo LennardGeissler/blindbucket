@@ -5,7 +5,9 @@
 **Milestone:** M5
 **Implements:** `internal/rotate`, `internal/upstream` (`CopyObject`, `UploadPartCopy`)
 **Amended by:** [ADR-020](ADR-020-conditional-writes-measured.md) — both guards are measured
-before a run, and a small single-part object with nothing to guard is copied with `CopyObject`
+before a run, and a small single-part object with nothing to guard is copied with `CopyObject`;
+[ADR-025](ADR-025-writes-rank-by-when-they-began.md) — a copy gives way to an open upload of
+its key, which AWS would otherwise discard in the copy's favour
 
 ## Context
 
