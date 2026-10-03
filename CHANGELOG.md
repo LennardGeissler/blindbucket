@@ -194,6 +194,21 @@ startup. No metric, type or label changes.
 **The README's key-age query took `max` where it meant `min`.** `time() - max(...)`
 over the key creation timestamps is the age of the newest key, not the oldest.
 
+**On AWS, a condition that held could read as a provider failure.**
+`CompleteMultipartUpload`, `CopyObject` and `UploadPartCopy` may answer `200 OK`
+and put the error in the body, and AWS does so with a failed `If-Match` or
+`If-None-Match` once a completion has started streaming. Such an error was given
+the status 500, and a `PreconditionFailed` is recognised by its 412 — so `probe`
+could report a condition AWS enforces as `refused`, which stopped rotations and
+migrations from starting; a guard that fired during `rotate` or `migrate-names`
+was counted as a failed object instead of one that changed under it; and a
+server-side copy whose source changed while it was copied answered 502 instead
+of `PreconditionFailed`. Nothing was written
+that should not have been: AWS had refused the write. `PreconditionFailed` and
+`ConditionalRequestConflict` inside a 200 now carry 412 and 409. Found by the AWS
+workflow on 2026-10-03, where `probe` measured the same condition as enforced in
+one run and refused in the next.
+
 **The threat model left three headers off what the provider sees.**
 `Content-Disposition`, `Content-Encoding` and `Content-Language` have been
 stored in clear, as the client sent them, since 0.1.0;

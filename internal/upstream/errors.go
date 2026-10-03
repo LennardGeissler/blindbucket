@@ -81,15 +81,30 @@ func errorInBody(resp *http.Response, body []byte) *APIError {
 	if requestID == "" {
 		requestID = resp.Header.Get("x-amz-request-id")
 	}
-	// The status was 2xx, so it says nothing about the failure. 500 is what an
-	// error with no status of its own maps onto.
+	// The status was 2xx, so it says nothing about the failure. A failed
+	// condition gets back the status it has when S3 answers it up front --
+	// PreconditionFailed is recognised by its 412, and AWS delivers it inside a
+	// 200 when the completion has already started streaming (measured on
+	// 2026-10-03; until then a guard that held read as a provider failure).
+	// Anything else maps onto 500, the status of an error with none of its own.
+	status, ok := inBodyStatus[parsed.Code]
+	if !ok {
+		status = http.StatusInternalServerError
+	}
 	return &APIError{
-		StatusCode: http.StatusInternalServerError,
+		StatusCode: status,
 		Code:       parsed.Code,
 		Message:    parsed.Message,
 		RequestID:  requestID,
 		Resource:   parsed.Resource,
 	}
+}
+
+// inBodyStatus is the status of each error code a conditional write can fail
+// with, for when the code arrives inside a 2xx response.
+var inBodyStatus = map[string]int{
+	"PreconditionFailed":         http.StatusPreconditionFailed,
+	"ConditionalRequestConflict": http.StatusConflict,
 }
 
 // parseErrorXML reports whether body is an S3 Error document, and decodes it.
