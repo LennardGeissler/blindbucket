@@ -1,14 +1,10 @@
 package proxy
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
-	"net/http/httputil"
-	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -21,12 +17,15 @@ import (
 // requests a test picks: with an S3 error, by dropping the connection before
 // answering, or by cutting a response off partway through its body.
 //
-// Every other request is forwarded untouched, Host header included, so the
-// gateway's signatures still verify at the provider. The harness keeps its own
-// direct client, which is how a test sees what the provider really holds after
-// the gateway was told something failed.
+// It is the transport of the gateway's upstream client rather than a server in
+// front of the provider, so every request it lets through goes to the
+// provider's own address, signed for it. A proxy in front would have to be
+// reached under a host of its own -- which a provider addressed by virtual
+// host, AWS among them, cannot be. The harness keeps its own direct client,
+// which is how a test sees what the provider really holds after the gateway was
+// told something failed.
 type faultyProvider struct {
-	srv *httptest.Server
+	base http.RoundTripper
 
 	mu    sync.Mutex
 	rules []*fault
@@ -40,7 +39,7 @@ type fault struct {
 
 	status   int    // answer with this status and an S3 error document
 	code     string // the error code in that document; InjectedFault if empty
-	drop     bool   // close the connection without answering
+	drop     bool   // fail without an answer, as a dropped connection does
 	cutAfter int64  // forward, but end the response body after this many bytes
 	// setHeader forwards the request and adds these to the provider's answer,
 	// for what a real provider would send and MinIO does not.
@@ -49,62 +48,60 @@ type fault struct {
 	hits int
 }
 
-type ruleKey struct{}
-
 func newFaultyProvider(t *testing.T) *faultyProvider {
 	t.Helper()
-	target, err := url.Parse(upstreamConfig(t).Endpoint)
-	if err != nil {
-		t.Fatalf("parsing the provider endpoint: %v", err)
-	}
-	f := &faultyProvider{}
-	rp := &httputil.ReverseProxy{
-		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(target)
-			// The gateway signed for this host; the provider checks it as sent.
-			pr.Out.Host = pr.In.Host
-		},
-		ModifyResponse: func(resp *http.Response) error {
-			rule, ok := resp.Request.Context().Value(ruleKey{}).(*fault)
-			if !ok {
-				return nil
-			}
-			if rule.cutAfter > 0 {
-				resp.Body = &cutBody{r: resp.Body, left: rule.cutAfter}
-			}
-			for name, value := range rule.setHeader {
-				resp.Header.Set(name, value)
-			}
-			return nil
-		},
-		// A cut body surfaces here; aborting the handler is what makes the
-		// gateway see a broken connection rather than a short, clean response.
-		ErrorHandler: func(http.ResponseWriter, *http.Request, error) { panic(http.ErrAbortHandler) },
-	}
-	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rule := f.take(r)
-		switch {
-		case rule == nil:
-			rp.ServeHTTP(w, r)
-		case rule.drop:
-			_, _ = io.Copy(io.Discard, r.Body)
-			panic(http.ErrAbortHandler)
-		case rule.status != 0:
-			_, _ = io.Copy(io.Discard, r.Body)
-			code := rule.code
-			if code == "" {
-				code = "InjectedFault"
-			}
-			w.Header().Set("Content-Type", "application/xml")
-			w.WriteHeader(rule.status)
-			_, _ = fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?>`+
-				`<Error><Code>%s</Code><Message>injected by the test</Message></Error>`, code)
-		default:
-			rp.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ruleKey{}, rule)))
+	return &faultyProvider{base: http.DefaultTransport}
+}
+
+// RoundTrip sends what no rule matches to the provider, and fails the rest.
+// A failed request's body is read to the end first, as a provider would have
+// received it before answering.
+func (f *faultyProvider) RoundTrip(r *http.Request) (*http.Response, error) {
+	rule := f.take(r)
+	switch {
+	case rule == nil:
+		return f.base.RoundTrip(r)
+	case rule.drop:
+		drainBody(r)
+		return nil, errors.New("connection dropped by the test")
+	case rule.status != 0:
+		drainBody(r)
+		code := rule.code
+		if code == "" {
+			code = "InjectedFault"
 		}
-	}))
-	t.Cleanup(f.srv.Close)
-	return f
+		body := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>`+
+			`<Error><Code>%s</Code><Message>injected by the test</Message></Error>`, code)
+		return &http.Response{
+			Status:     fmt.Sprintf("%d %s", rule.status, http.StatusText(rule.status)),
+			StatusCode: rule.status, Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
+			Header:        http.Header{"Content-Type": {"application/xml"}},
+			Body:          io.NopCloser(strings.NewReader(body)),
+			ContentLength: int64(len(body)),
+			Request:       r,
+		}, nil
+	default:
+		resp, err := f.base.RoundTrip(r)
+		if err != nil {
+			return nil, err
+		}
+		// The headers are out by the time a body is cut, so the gateway sees
+		// a read that fails partway, as it would on a broken connection.
+		if rule.cutAfter > 0 {
+			resp.Body = &cutBody{r: resp.Body, left: rule.cutAfter}
+		}
+		for name, value := range rule.setHeader {
+			resp.Header.Set(name, value)
+		}
+		return resp, nil
+	}
+}
+
+func drainBody(r *http.Request) {
+	if r.Body != nil {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+	}
 }
 
 // fail adds a fault and returns it, so a test can check that it was reached.
@@ -133,12 +130,12 @@ func (f *faultyProvider) hits(rule *fault) int {
 	return rule.hits
 }
 
-// option points a harness's gateway at the faulty provider, with retries off so
-// that one injected failure is one failure the gateway sees.
+// option gives a harness's gateway the faulty provider as its transport, with
+// retries off so that one injected failure is one failure the gateway sees.
 func (f *faultyProvider) option(t *testing.T) func(*Config) {
 	t.Helper()
 	cfg := upstreamConfig(t)
-	cfg.Endpoint = f.srv.URL
+	cfg.HTTPClient = &http.Client{Transport: f}
 	cfg.MaxRetries = 1
 	client, err := upstream.New(cfg)
 	if err != nil {
