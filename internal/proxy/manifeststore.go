@@ -104,6 +104,28 @@ func (p *Proxy) observedManifest(ctx context.Context, bucket, key string) (manif
 	return meta.ManifestID, true
 }
 
+// replacedSince reports whether the object at key has stopped using the
+// manifest id observed at step 2 -- the check that licenses step 5 (ADR-025).
+//
+// A successful completion is not proof. AWS S3 keeps the write that was
+// initiated last, so an upload created before the visible version's write is
+// acknowledged and then discarded, and the version observed at step 2 is still
+// the one every reader gets. Only an answer that shows something else -- another
+// version, or none -- counts as replaced: a HEAD that failed, or metadata that
+// does not parse, says nothing, and a manifest kept by mistake is an orphan for
+// gc while one deleted by mistake is an object nobody can read.
+func (p *Proxy) replacedSince(ctx context.Context, bucket, key string, observed manifest.ID) bool {
+	info, err := p.upstream.HeadObject(ctx, bucket, key)
+	if err != nil {
+		return upstream.NotFound(err)
+	}
+	meta, err := parseObjectMeta(info.Metadata, p.log2C)
+	if err != nil {
+		return false
+	}
+	return !meta.Multipart || meta.ManifestID != observed
+}
+
 // isManifestFailure reports whether err means the manifest could not be trusted,
 // as opposed to the provider being unreachable.
 func isManifestFailure(err error) bool {

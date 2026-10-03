@@ -308,3 +308,43 @@ func TestFaultDeleteAndListAreReported(t *testing.T) {
 		t.Errorf("a failed listing answered %d: %s", status, body)
 	}
 }
+
+// TestFaultDiscardedCompletionKeepsTheVisibleManifest: AWS keeps the write that
+// was initiated last, so a completion can succeed while the version it observed
+// at step 2 stays the visible one. Step 5 must not take that version's manifest
+// with it (ADR-025), and with rollback detection on, the write that was
+// discarded must not be recorded as the one the key holds. The discard is
+// simulated here -- the completion is answered 200 and never reaches the
+// provider -- because MinIO keeps the write that lands last and Garage refuses
+// the outranked one; the AWS workflow meets the real thing.
+func TestFaultDiscardedCompletionKeepsTheVisibleManifest(t *testing.T) {
+	f := newFaultyProvider(t)
+	h := newHarness(t, f.option(t), withFreshness(t))
+	key := testKey(t, "discarded.bin")
+	visible := h.mpuStore(t, key, [][]byte{randomBytes(t, testPart), randomBytes(t, 10)})
+	visibleManifest, _ := h.manifestKeyOf(t, key)
+
+	token := h.mpuStart(t, key, nil)
+	etag, resp := h.mpuPart(t, key, token, 1, randomBytes(t, 1000))
+	_ = resp.Body.Close()
+	rule := f.fail(&fault{
+		match: objectRequest(http.MethodPost, key, "uploadId"),
+		acknowledge: `<?xml version="1.0" encoding="UTF-8"?>` +
+			`<CompleteMultipartUploadResult><ETag>"discarded-1"</ETag></CompleteMultipartUploadResult>`,
+	})
+	resp = h.mpuComplete(t, key, token, []completeReqPart{{PartNumber: 1, ETag: etag}})
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the acknowledged completion answered %d", resp.StatusCode)
+	}
+	if f.hits(rule) == 0 {
+		t.Fatal("the fault was never reached")
+	}
+
+	if _, err := h.upstream.HeadObject(t.Context(), testBucket, visibleManifest); err != nil {
+		t.Errorf("the manifest of the version still visible was deleted: %v", err)
+	}
+	if got := h.mustRead(t, key, "after a discarded completion"); !bytes.Equal(got, visible) {
+		t.Error("the visible object reads differently after a discarded completion")
+	}
+}

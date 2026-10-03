@@ -44,6 +44,11 @@ type fault struct {
 	// setHeader forwards the request and adds these to the provider's answer,
 	// for what a real provider would send and MinIO does not.
 	setHeader map[string]string
+	// acknowledge answers 200 with this document and does not forward the
+	// request: a write the provider reports as done and then discards, as AWS
+	// does with a completion whose upload was initiated before the visible
+	// version's write (ADR-025).
+	acknowledge string
 
 	hits int
 }
@@ -64,6 +69,15 @@ func (f *faultyProvider) RoundTrip(r *http.Request) (*http.Response, error) {
 	case rule.drop:
 		drainBody(r)
 		return nil, errors.New("connection dropped by the test")
+	case rule.acknowledge != "":
+		drainBody(r)
+		return &http.Response{
+			Status: "200 OK", StatusCode: http.StatusOK, Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
+			Header:        http.Header{"Content-Type": {"application/xml"}},
+			Body:          io.NopCloser(strings.NewReader(rule.acknowledge)),
+			ContentLength: int64(len(rule.acknowledge)),
+			Request:       r,
+		}, nil
 	case rule.status != 0:
 		drainBody(r)
 		code := rule.code

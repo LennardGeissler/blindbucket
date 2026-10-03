@@ -308,8 +308,9 @@ func (p *Proxy) uploadPart(
 //  1. ListParts        -- the ciphertext sizes, converted and checked (10.5)
 //  2. HEAD the key     -- remember the manifest id of whatever is visible now
 //  3. PUT the manifest -- before the object becomes visible, never after (R2)
-//  4. Complete         -- the object becomes visible
-//  5. DELETE           -- only the id observed at step 2, and only now (R3)
+//  4. Complete         -- the object becomes visible, if the provider keeps it
+//  5. HEAD, DELETE     -- only the id observed at step 2, only now, and only
+//     once a HEAD shows that version is no longer visible (R3, ADR-025)
 func (p *Proxy) completeMultipartUpload(
 	w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger,
 ) *s3api.Error {
@@ -398,20 +399,31 @@ func (p *Proxy) completeMultipartUpload(
 	}
 	p.at(hookUpComplete, req)
 
-	// The object is visible, so the write it is can be written down. After the
-	// acknowledgement for the reason PutObject records after its own: an index
-	// entry for a completion that failed would make the next read of whatever is
-	// actually there look like a rollback.
-	p.recordFreshness(req.Bucket, req.Key, manifestSalts(m), log)
-
-	// Step 5: and only now, the manifest of the version just replaced. Best
-	// effort -- a failure here leaves an orphan for gc, which is harmless,
-	// whereas retrying in the request would delay a completed upload.
+	// Step 5: and only now, the manifest of the version just replaced -- once
+	// it has been seen to be replaced, because on AWS a completion that
+	// succeeded may have been discarded for a write initiated after this
+	// upload (ADR-025). Best effort either way: a manifest left behind is an
+	// orphan for gc, which is harmless, whereas retrying in the request would
+	// delay a completed upload.
+	discarded := false
 	if hadManifest && observed != token.ManifestID {
-		if err := p.deleteManifest(r.Context(), req.Bucket, storedKey, observed); err != nil {
+		if !p.replacedSince(r.Context(), req.Bucket, storedKey, observed) {
+			discarded = true
+			log.Info("the version this upload was to replace is still visible; "+
+				"the provider kept a newer write, and its manifest stays",
+				"manifest_id", observed.String())
+		} else if err := p.deleteManifest(r.Context(), req.Bucket, storedKey, observed); err != nil {
 			log.Warn("could not remove the replaced manifest; gc will collect it",
 				"manifest_id", observed.String(), "err", err)
 		}
+	}
+
+	// The write can be written down -- after the acknowledgement for the reason
+	// PutObject records after its own: an index entry for a write that is not
+	// what the key holds would make the next read of whatever is actually there
+	// look like a rollback. A completion step 5 saw discarded is such a write.
+	if !discarded {
+		p.recordFreshness(req.Bucket, req.Key, manifestSalts(m), log)
 	}
 
 	p.at(hookUpCleanup, req)
