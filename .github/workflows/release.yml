@@ -67,9 +67,16 @@ jobs:
       # Syft produces the SBOM goreleaser attaches to each archive.
       - uses: anchore/sbom-action/download-syft@v0
 
+      # The release's text is its section of CHANGELOG.md, joined into lines a
+      # release page renders and with its links pinned to the tag. A tag the
+      # changelog does not describe stops here, before anything is published:
+      # every release up to 1.1.0 went out with no text but the footer.
+      - name: Release notes from CHANGELOG.md
+        run: go run ./build/releasenotes "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -98,5 +98,8 @@ release:
     manager, and it runs as uid 65532. Mount the keyring read-only and give the
     container a read-only root filesystem.
 
-changelog:
-  disable: true
+# The release notes are the release's section of CHANGELOG.md, which the
+# release workflow renders with build/releasenotes and passes as
+# --release-notes; goreleaser then writes no changelog of its own. Not
+# `disable: true`: that skips the step which loads the file, and the release
+# goes out with nothing but the footer above, as every one up to 1.1.0 did.

@@ -16,6 +16,18 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Fixed
+
+**Every GitHub release went out without notes.** goreleaser's changelog had been
+switched off since 0.1.0, so that a list of commit subjects would not stand in for
+this file -- and nothing put this file in its place, so each release said how to
+verify a download and nothing about what it contained. The release workflow now
+renders the release's section of this file with `build/releasenotes`: paragraphs
+joined into single lines, because a release page breaks a line wherever the file
+does, and links pinned to the tag, because a release page has no repository root
+to resolve them against. A tag this file does not describe stops the release
+before anything is published.
+
 ## [1.1.0] — 2026-10-03
 
 Three things 1.0 could not do: move a bucket to encrypted names, move a keyring
