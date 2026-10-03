@@ -294,6 +294,52 @@ func TestIntegrationMigrateKeepsAClientWrite(t *testing.T) {
 	}
 }
 
+// TestIntegrationMigrateYieldsToAnUploadInProgress: a client uploading to the
+// encrypted key when the run reaches the object goes first. A provider that
+// ranks uploads by when they were created -- AWS S3 -- would discard that
+// upload if it completed after the run's copy, and no condition sees it while
+// it is still open (ADR-025, MCMigrateAwsOrder). So the run leaves the object
+// and reports it, and the next run finds the client's write and the object in
+// clear obsolete. MinIO and Garage would keep the client's upload either way;
+// what this pins is that the run gives way.
+func TestIntegrationMigrateYieldsToAnUploadInProgress(t *testing.T) {
+	m := newMigration(t)
+	key := testKey(t, "yield.bin")
+	m.clear.mpuStore(t, key, [][]byte{randomBytes(t, testPart), randomBytes(t, 10)})
+	m.stored(t, key)
+	// The next run tells the client's write from the older object by
+	// Last-Modified, which has a resolution of a second.
+	time.Sleep(1100 * time.Millisecond)
+
+	token := m.enc.mpuStart(t, key, nil)
+	clientWrote := randomBytes(t, 1000)
+	etag := m.enc.uploadOnePart(t, key, token, clientWrote)
+
+	cfg := m.anyConfig(t, key)
+	if got := m.mustRun(t, cfg); got.Failed != 1 || got.Migrated != 0 {
+		t.Fatalf("with an upload to the encrypted key open: %+v, want the object reported and left", *got)
+	}
+	if !m.clear.exists(t, key) {
+		t.Fatal("the object in clear was deleted while a client was uploading over it")
+	}
+
+	resp := m.enc.mpuComplete(t, key, token, []completeReqPart{{PartNumber: 1, ETag: etag}})
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the client's completion answered %d", resp.StatusCode)
+	}
+
+	if got := m.mustRun(t, cfg); got.Superseded != 1 || got.Incomplete() {
+		t.Fatalf("once the upload completed: %+v, want the object in clear superseded", *got)
+	}
+	if got := m.enc.mustRead(t, key, "after the migration"); !bytes.Equal(got, clientWrote) {
+		t.Error("the client's upload did not survive the migration")
+	}
+	if m.clear.exists(t, key) {
+		t.Error("the older object is still stored in clear")
+	}
+}
+
 // TestIntegrationMigrateLosesAWriteInClear is MCMigrateStaleWriter, and pins a
 // limit rather than a fix. A gateway instance still serving names in clear
 // writes the key in clear while a run is between its copy and its delete; the
@@ -486,8 +532,11 @@ func TestIntegrationMigrateKeepsObjectsFresh(t *testing.T) {
 }
 
 // TestIntegrationMigrateTwoRunsAtOnce: two operators starting the command at
-// the same time is the other thing the model's second run stands for. Every
-// object ends up migrated exactly once, and neither run fails over the other.
+// the same time is the other thing the model's second run stands for. Nothing
+// is lost and no object is copied twice. Where both runs reach an object at
+// once, each finds the other's copy upload open and gives way to it, because
+// an open upload of the encrypted key may be a client's (ADR-025); both report
+// the object, and a third run finishes what they left.
 func TestIntegrationMigrateTwoRunsAtOnce(t *testing.T) {
 	m := newMigration(t)
 	prefix := testKey(t, "twice")
@@ -515,16 +564,20 @@ func TestIntegrationMigrateTwoRunsAtOnce(t *testing.T) {
 			t.Fatalf("migrate: %v", err)
 		}
 		r := <-results
-		if r.Incomplete() {
-			t.Errorf("a run reports %+v", *r)
+		if r.Conflicted != 0 || r.TooLong != 0 || r.Foreign != 0 {
+			t.Errorf("a run reports %+v; only objects left for the next run may be counted", *r)
 		}
 		moved += r.Migrated
 	}
-	// If-None-Match lets exactly one copy of each object be published, and the
-	// run that published it is the one that counts it as migrated; the other
-	// finds it gone, or finds the copy and counts it resumed.
+	third := m.mustRun(t, cfg)
+	if third.Incomplete() {
+		t.Fatalf("the third run reports %+v", *third)
+	}
+	moved += third.Migrated
+	// If-None-Match lets at most one copy of each object be published, and the
+	// run that published it is the one that counts it as migrated.
 	if moved != int64(len(bodies)) {
-		t.Errorf("the two runs migrated %d objects between them, want %d", moved, len(bodies))
+		t.Errorf("the three runs migrated %d objects between them, want %d", moved, len(bodies))
 	}
 	for key, want := range bodies {
 		if got := m.enc.mustRead(t, key, "after two concurrent runs"); !bytes.Equal(got, want) {

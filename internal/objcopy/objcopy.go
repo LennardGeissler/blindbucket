@@ -62,6 +62,11 @@ const SmallObject = 5 << 20
 // own x-amz-copy-source-if-* condition coming back.
 var ErrPreconditionFailed = errors.New("objcopy: the object changed during the copy")
 
+// ErrUploadInProgress reports that a copy asked to yield to open uploads found
+// one at the destination, and was abandoned before it was published (ADR-025).
+// Nothing was written; the object is for a later run.
+var ErrUploadInProgress = errors.New("objcopy: an upload of the destination is in progress")
+
 // Hook points, named as spec/tla/Multipart.tla names the steps. They exist so
 // an integration test can hold a copy open and replay a counterexample; they are
 // nil everywhere else.
@@ -69,6 +74,7 @@ const (
 	HookCreate   = "copyCreate"   // after the upload is opened
 	HookParts    = "copyParts"    // after the last part is copied
 	HookManifest = "copyManifest" // after the new manifest is written
+	HookUploads  = "copyUploads"  // after the destination's open uploads are checked
 	HookComplete = "copyComplete" // after the publishing write lands
 )
 
@@ -156,6 +162,20 @@ type Request struct {
 	// that does not know leaves it nil and lets `blindbucket gc` collect the
 	// orphan, which is what the ordinary PutObject path does too.
 	ReplacedManifest *manifest.ID
+
+	// YieldToUploads abandons the copy, with ErrUploadInProgress, if any other
+	// upload of the destination is open when it is about to be published.
+	// rotate and migrate-names set it; a client's own CopyObject does not.
+	//
+	// A provider that ranks writes by when they began, as AWS S3 does, keeps
+	// whichever of two uploads was created last. An upload a client created
+	// before this copy and completes after it would be discarded in the copy's
+	// favour -- the client told its write succeeded, the object holding the
+	// copy instead -- and no condition can prevent that, because the client's
+	// object is not visible yet. Checking after this copy's own upload exists
+	// leaves no such upload unseen: one created later outranks the copy anyway
+	// (ADR-025, MCAwsRotate and MCMigrateAwsOrder in spec/tla).
+	YieldToUploads bool
 
 	// Hook is called at the steps named above.
 	Hook func(point string)
@@ -352,6 +372,19 @@ func publish(ctx context.Context, deps Deps, req Request,
 		}
 	}
 	req.at(HookManifest)
+
+	if req.YieldToUploads {
+		open, err := deps.Upstream.ListMultipartUploads(ctx, dst.Bucket, dst.StoredKey)
+		if err != nil {
+			return nil, fmt.Errorf("listing the open uploads of the destination: %w", err)
+		}
+		for _, u := range open {
+			if u.Key == dst.StoredKey && u.UploadID != uploadID {
+				return nil, ErrUploadInProgress
+			}
+		}
+	}
+	req.at(HookUploads)
 
 	out, err := deps.Upstream.CompleteMultipartUpload(ctx, upstream.CompleteMultipartUploadInput{
 		Bucket: dst.Bucket, Key: dst.StoredKey, UploadID: uploadID,

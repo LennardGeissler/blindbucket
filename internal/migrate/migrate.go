@@ -356,6 +356,13 @@ func attemptOne(ctx context.Context, cfg Config, key string, log *slog.Logger) o
 	if encInfo == nil {
 		switch err := copyToEncrypted(ctx, cfg, key, stored, plainInfo, plainMeta); {
 		case err == nil:
+		case errors.Is(err, objcopy.ErrUploadInProgress):
+			// A client is uploading to the encrypted key: its write is newer
+			// than P, and publishing the copy first could make the provider
+			// discard it (ADR-025, MCMigrateAwsOrder). The model's run stops
+			// here; the next one finds the client's object and P obsolete.
+			log.Warn("an upload to the object's encrypted key is in progress; run again")
+			return failed
 		case errors.Is(err, objcopy.ErrPreconditionFailed), upstream.NotFound(err):
 			// Something reached E(P), or P changed or went away -- another
 			// run, or a client. Read both again and decide afresh; the model's
@@ -480,6 +487,7 @@ func copyToEncrypted(ctx context.Context, cfg Config, key, stored string,
 		},
 		SourceIfMatch:   info.ETag,
 		DestIfNoneMatch: ifNoneMatch,
+		YieldToUploads:  true,
 		Hook:            cfg.hookAdapter(key),
 	})
 	return err

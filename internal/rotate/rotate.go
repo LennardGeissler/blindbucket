@@ -133,8 +133,9 @@ type Result struct {
 	Rotated int64
 	// AlreadyCurrent counts objects already wrapped under the target KEK.
 	AlreadyCurrent int64
-	// Conflicted counts objects a client wrote during the rotation. They keep
-	// the client's version and the old KEK, and a later run picks them up.
+	// Conflicted counts objects a client wrote during the rotation, or was
+	// still uploading when the copy was ready (ADR-025). They keep the client's
+	// version and the old KEK, and a later run picks them up.
 	Conflicted int64
 	// Foreign counts objects this gateway did not write.
 	Foreign int64
@@ -323,6 +324,13 @@ func rotateOne(ctx context.Context, cfg Config, key objectKeys, result *Result) 
 		// this is invariant I2 holding, not a failure.
 		log.Info("skipped: a client wrote during the rotation")
 		atomic.AddInt64(&result.Conflicted, 1)
+	case errors.Is(err, objcopy.ErrUploadInProgress):
+		// A client is uploading the object right now. Publishing the copy
+		// could make the provider discard that upload once it completes
+		// (ADR-025), so the client's write goes first and a later run rotates
+		// whatever it leaves.
+		log.Info("skipped: a client upload of the object is in progress")
+		atomic.AddInt64(&result.Conflicted, 1)
 	default:
 		log.Warn("could not write the rotated object back", "err", err)
 		atomic.AddInt64(&result.Failed, 1)
@@ -389,6 +397,7 @@ func writeBack(ctx context.Context, cfg Config, key objectKeys, info *upstream.O
 		SourceIfMatch:    info.ETag,
 		DestIfMatch:      destIfMatch,
 		ReplacedManifest: replaced,
+		YieldToUploads:   true,
 		Hook:             cfg.hookAdapter(key.identity),
 	})
 	return err

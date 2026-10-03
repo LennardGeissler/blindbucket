@@ -241,6 +241,58 @@ func TestIntegrationRotateKeepsContentHeaders(t *testing.T) {
 	}
 }
 
+// TestIntegrationRotateYieldsToAnUploadInProgress: an object a client is
+// uploading over right now is left for a later run. A provider that ranks
+// uploads by when they were created -- AWS S3 -- would discard the client's
+// upload if it completed after the rotation's copy, and If-Match cannot see an
+// upload that is still open (ADR-025, MCAwsRotate). Guarded where the provider
+// allows it; unconditionally, through the same part-by-part copy, everywhere.
+func TestIntegrationRotateYieldsToAnUploadInProgress(t *testing.T) {
+	for _, guarded := range []bool{true, false} {
+		t.Run(fmt.Sprintf("guarded=%t", guarded), func(t *testing.T) {
+			h := newHarness(t)
+			key := testKey(t, "busy.bin")
+			h.mpuStore(t, key, [][]byte{randomBytes(t, testPart), randomBytes(t, 10)})
+			before := h.objectKID(t, key)
+
+			token := h.mpuStart(t, key, nil)
+			clientWrote := randomBytes(t, 1000)
+			etag := h.uploadOnePart(t, key, token, clientWrote)
+
+			var cfg rotate.Config
+			if guarded {
+				cfg = h.rotateConfig(t, key)
+			} else {
+				cfg = h.unguardedRotateConfig(t, key)
+				cfg.AllowUnconditional = true
+			}
+			result, err := rotate.Run(t.Context(), cfg)
+			if err != nil {
+				t.Fatalf("rotate: %v", err)
+			}
+			if result.Conflicted != 1 || result.Rotated != 0 {
+				t.Fatalf("with an upload open: %+v, want the object left as conflicted", *result)
+			}
+			if after := h.objectKID(t, key); after != before {
+				t.Errorf("the object was re-wrapped under %q while a client was uploading", after)
+			}
+
+			resp := h.mpuComplete(t, key, token, []completeReqPart{{PartNumber: 1, ETag: etag}})
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("the client's completion answered %d", resp.StatusCode)
+			}
+			if got := h.mustRead(t, key, "after the upload completed"); !bytes.Equal(got, clientWrote) {
+				t.Error("the client's upload is not what the object holds")
+			}
+
+			if again, err := rotate.Run(t.Context(), cfg); err != nil || again.Rotated != 1 {
+				t.Fatalf("the next run: %+v, %v; want the client's object rotated", again, err)
+			}
+		})
+	}
+}
+
 // A multipart object keeps its part boundaries, because the copy is made part by
 // part rather than flattened into one.
 func TestIntegrationRotateMultipart(t *testing.T) {
