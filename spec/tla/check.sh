@@ -10,7 +10,8 @@
 # three that show what a provider ranking writes by when they began does to the
 # rules as they were (ADR-025).
 #
-# Usage:  ./check.sh [config-name ...]     (default: all of them)
+# Usage:  ./check.sh [config-name ...]     (default: all of them but MCFixedFull,
+#                                            which runs only when named: hours)
 # Env:    TLA_TOOLS    path to tla2tools.jar (default ../../.tools/tla2tools.jar)
 #         TLC_WORKERS  worker threads (default: auto)
 set -uo pipefail
@@ -77,10 +78,17 @@ run_one() {
     return 1
 }
 
+# Run only when named: MCFixed with three uploads instead of two.
+FULL_CASES=(
+  "MCFixedFull             Multipart  holds         MCFixed with three uploads"
+)
+FULL_NAMES="MCFixedFull"
+
 failed=0
-for case in "${CASES[@]}"; do
+for case in "${CASES[@]}" "${FULL_CASES[@]}"; do
     read -r name module expect why <<<"$case"
     if [[ $# -gt 0 ]] && [[ ! " $* " == *" $name "* ]]; then continue; fi
+    if [[ $# -eq 0 ]] && [[ " $FULL_NAMES " == *" $name "* ]]; then continue; fi
     run_one "$name" "$module" "$expect" "$why" || failed=1
 done
 exit $failed

@@ -76,7 +76,8 @@ does not know about, so "no counterexample" is a failing result for those four.
 
 | Configuration | Rules | Expected |
 |---|---|---|
-| `MCFixed` | R1–R4 with R3 deleting only after a HEAD has seen the replacement, rotation conditional and giving way to open uploads, `Ordering = "either"`, 3 uploads | no counterexample |
+| `MCFixed` | R1–R4 with R3 deleting only after a HEAD has seen the replacement, rotation conditional and giving way to open uploads, `Ordering = "either"`, 2 uploads | no counterexample |
+| `MCFixedFull` | the same with 3 uploads — run only when named, see below | no counterexample |
 | `MCLegacyCleanup` | completion deletes *every other* manifest of the key (v0.1) | **I1 violated** |
 | `MCLegacyGc` | `gc` never checks for open uploads (v0.1) | **I1 violated** |
 | `MCGcOrder` | R4 with steps 1 and 2 swapped | **I1 violated** |
@@ -91,7 +92,7 @@ only operations that M4 itself implements and can replay as integration tests.
 
 ```sh
 make tla-tools     # downloads tla2tools.jar into .tools/ (not committed)
-make tla           # runs all thirteen configurations of both models
+make tla           # runs the thirteen configurations of both models
 make tla-translate # re-run the PlusCal translator after editing an algorithm
 ```
 
@@ -101,10 +102,21 @@ make tla-translate # re-run the PlusCal translator after editing an algorithm
 ./check.sh MCLegacyGc MCGcOrder
 ```
 
-`MCFixed` explores about 38.5 million distinct states — roughly 21 CPU-minutes, so about
-three minutes on eight cores. `MCMigrate` explores about 3.1 million in well under a
-minute, and the other eight finish in seconds. The CI job runs on changes to
-`spec/tla/` or to the coordination code rather than on every push.
+`MCFixed` explores about 8.7 million distinct states and `MCMigrate` about 8.1 million,
+each in five to seven CPU-minutes; the other eleven finish in seconds, and `make tla` takes
+about two minutes on ten cores. The CI job runs on changes to `spec/tla/` or to the
+coordination code rather than on every push.
+
+`MCFixedFull` is not among them. Until ADR-025, `MCFixed` ran three uploads under the
+old assumption, in about 38.5 million states. Under `"either"` three uploads outgrow a
+laptop: a run passed 112 million distinct states, still without a violation, before it
+was stopped. That is evidence, not an exhaustive result. Every counterexample either model
+has produced needs at most two uploads, which is what `MCFixed` checks exhaustively. Run
+it alone, with time and disk to spare:
+
+```sh
+./check.sh MCFixedFull
+```
 
 One caveat worth stating plainly, since "exhaustive" is doing a lot of work above: TLC
 recognises a state it has already seen by a 64-bit fingerprint, so at tens of millions of

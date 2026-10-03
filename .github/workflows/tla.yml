@@ -2,8 +2,9 @@ name: Formal model
 
 # The models in spec/tla cover the manifest coordination (ADR-010, ADR-009) and
 # the name migration (ADR-022), not the Go code, so they run when a model or
-# the coordination logic changes rather than on every push. MCFixed explores
-# ~38.5 million states and is the reason for the path filter. rotate and
+# the coordination logic changes rather than on every push. MCFixed and
+# MCMigrate explore ~8.7 and ~8.1 million states and are the reason for the
+# path filter; MCFixedFull, with a third upload, is run by hand (ADR-025). rotate and
 # objcopy are in it because the model's Rot process is theirs, and migrate
 # because Migrate.tla is.
 on:
