@@ -26,7 +26,9 @@ renders the release's section of this file with `build/releasenotes`: paragraphs
 joined into single lines, because a release page breaks a line wherever the file
 does, and links pinned to the tag, because a release page has no repository root
 to resolve them against. A tag this file does not describe stops the release
-before anything is published.
+before anything is published. The footer goreleaser adds is now one line per
+paragraph for the same reason. Every existing release has been given its notes,
+except v0.3.0, which had hand-written ones; those were only joined into lines.
 
 ## [1.1.0] — 2026-10-03
 

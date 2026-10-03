@@ -84,6 +84,8 @@ release:
   # release that writes format 1, which is the point.
   extra_files:
     - glob: ./testdata/vectors/*_v*.json
+  # One line per paragraph: a release page breaks a line wherever its text
+  # does, as build/releasenotes explains for the notes above this footer.
   footer: |
     ## Verifying a download
 
@@ -91,12 +93,9 @@ release:
     sha256sum -c checksums.txt --ignore-missing
     ```
 
-    `segment_v1.json` and `names_v1.json` are the known-answer vectors of
-    `docs/FORMAT.md`, for testing another implementation against format 1.
+    `segment_v1.json` and `names_v1.json` are the known-answer vectors of `docs/FORMAT.md`, for testing another implementation against format 1.
 
-    The container image is `distroless/static:nonroot`: no shell, no package
-    manager, and it runs as uid 65532. Mount the keyring read-only and give the
-    container a read-only root filesystem.
+    The container image is `distroless/static:nonroot`: no shell, no package manager, and it runs as uid 65532. Mount the keyring read-only and give the container a read-only root filesystem.
 
 # The release notes are the release's section of CHANGELOG.md, which the
 # release workflow renders with build/releasenotes and passes as
