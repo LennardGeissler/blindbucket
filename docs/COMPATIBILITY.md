@@ -46,6 +46,7 @@ not measured yet.
 | boto3 | 1.43.92 | **Works** | every commit, in CI | none |
 | MinIO client (`mc`) | RELEASE.2025-08-13 | **Works** | 2026-09-28, after `v1.0.0` | `allow_unsigned_payload: true` on the proxy, for multipart only |
 | rclone | 1.75.1 | **Works with settings** | `v0.2.0` | `allow_unsigned_payload: true` on the proxy; `--ignore-checksum`; `--size-only` for `check` |
+| s5cmd | 2.3.0 | **Works** | 2026-10-03, main `8cdb03a` | none, `--endpoint-url` only |
 
 **HTTP and HTTPS are different code paths.** A client chooses how to frame the
 body by the endpoint's scheme. Over HTTP the AWS CLI signs the whole body; over
@@ -184,6 +185,56 @@ rclone check --size-only <dir> bb:bucket/prefix/
 
 With those, `copy`, `sync`, `ls` and `check --size-only` all pass, both
 directions, on nested directories.
+
+## s5cmd
+
+s5cmd works with no settings beyond the endpoint. It was measured on 2026-10-03
+with s5cmd 2.3.0 against a gateway built from main (`8cdb03a`), with object
+names in the clear (`names.encrypt` off, the default), using the setup above.
+The requests in the table were read from s5cmd's own `--log trace` output.
+
+```sh
+export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=us-east-1
+s5cmd --endpoint-url http://127.0.0.1:9000 <command>
+```
+
+| Command | Result |
+|---|---|
+| `s5cmd cp <file> s3://bucket/key` (1 MB) | works, one `PutObject` with the body's SHA-256 in `x-amz-content-sha256` |
+| `s5cmd cp <file> s3://bucket/key` (200 MiB) | works, multipart in 50 MiB parts (four `UploadPart`), every part signed with its own SHA-256 |
+| `s5cmd cp s3://bucket/key <file>` (1 MB and 200 MiB) | works, identical SHA-256; see range reads below |
+| `s5cmd ls s3://bucket/prefix/` | works, `ListObjectsV2` with `delimiter=/`, plaintext sizes, 209715200 for the multipart object |
+| `s5cmd ls s3://bucket/` | works, common prefixes shown as `DIR` |
+| `s5cmd head s3://bucket/key` | works, plaintext size; on a deleted key the gateway answers 404 and s5cmd reports "not found" |
+| `s5cmd rm s3://bucket/key` | works, sent as a `DeleteObjects` request even for one key |
+| `s5cmd rm 's3://bucket/prefix/*'` (1005 keys) | works, two `ListObjectsV2` pages, then two `DeleteObjects` requests; nothing left under the prefix |
+| `s5cmd mv s3://bucket/a s3://bucket/b` (200 MiB multipart) | works, one `CopyObject` then `DeleteObjects`, identical SHA-256 |
+| `s5cmd pipe` / `s5cmd cat` | works, byte-identical round trip |
+| `s5cmd sync <dir> s3://bucket/p/` | works, nested directories; a second run lists the prefix and uploads nothing |
+| `s5cmd sync 's3://bucket/p/*' <dir>` | works, tree identical to the source |
+
+**Range reads.** s5cmd has no flag to ask for a byte range: neither `cp` nor
+`cat` takes one. Every download is ranged anyway. s5cmd downloads through the
+SDK's `s3manager` downloader, which issues `GET` with `Range` in `--part-size`
+pieces (50 MiB by default) and gets `206 Partial Content` back. The 1 MB object
+came back as one `Range: bytes=0-52428799`, and the 200 MiB object as four
+ranges ending at `bytes=157286400-209715199`, with an identical SHA-256. So the
+gateway's range path, mapping a plaintext range onto its 64 KiB chunks, runs
+on every s5cmd download, not only when a range is asked for.
+
+s5cmd joins the AWS CLI and boto3 in needing nothing beyond the endpoint, and
+it gets there by signing every body it sends: each `PutObject`, `UploadPart`
+and `DeleteObjects` request carries the SHA-256 of its body, so the
+unsigned-payload path is never touched. The two behaviours worth knowing are
+s5cmd's own, not the gateway's. `head` of a deleted key reports "not found",
+and a download `sync` refuses a source without a wildcard (`source argument
+must contain wildcard character`) before any request is made.
+
+The SDK is not the one the issue expected. s5cmd 2.3.0 sends
+`aws-sdk-go/1.44.298` in its User-Agent, which is the Go AWS SDK v1, not v2.
+That is still a signing path neither boto3 nor the AWS CLI exercises, and it
+carried every command above with no retries and no error other than the
+expected 404. The Go SDK v2 remains unmeasured.
 
 ---
 
