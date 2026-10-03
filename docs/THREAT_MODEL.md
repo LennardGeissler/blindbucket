@@ -34,7 +34,7 @@ detection, binding to bucket and key), the HTTP surface, client authentication,
 and the multipart path including the manifest and the upload token. Where a
 mitigation is deferred rather than present, the entry says so and names the
 milestone.
-**Last updated:** 2026-09-16
+**Last updated:** 2026-10-03
 
 This document states precisely what blindbucket protects against and what it does not.
 It is deliberately explicit about residual risk. A security tool that overstates its
@@ -98,7 +98,8 @@ must reside in the same trust domain as the clients it serves.
   computable from ciphertext size (`FORMAT.md` §7). This is not an oversight; it is the
   property that makes a streaming `Content-Length` and listing sizes possible without
   buffering or extra requests. Size padding is a deferred M6 option.
-- `Content-Type`, `Cache-Control` and the client's own user metadata.
+- `Content-Type`, `Cache-Control`, `Content-Disposition`, `Content-Encoding`,
+  `Content-Language` and the client's own user metadata, as the client sent them.
 - Timestamps of uploads, downloads and deletions.
 - Access patterns: which objects, which byte ranges, how often.
 - The number of parts of a multipart object.
@@ -147,6 +148,12 @@ So this moves object names from "in the clear" to "confirmable by guessing", whi
 improvement against a provider reading its own storage and close to none against an attacker
 who already knows what they are looking for. A reader who takes it for more than that has
 been misled, which is why it is written out here rather than left to the ADR.
+
+**A name a client repeats elsewhere is in the clear there.** `names.encrypt` covers the key
+and nothing else on the list at the top of this section. A `Content-Disposition` of
+`attachment; filename="payroll-2026-q1.xlsx"`, or user metadata that carries the path,
+is stored as the client sent it, next to the encrypted key it was meant to hide. Keeping
+names out of those headers is the client's part.
 
 **The audit log sees the same names, and hides them the same way.** When audit
 logging is enabled, the bucket and key of every request are written to a local

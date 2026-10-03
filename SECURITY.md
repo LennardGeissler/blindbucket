@@ -136,9 +136,10 @@ the *reasoning* behind one is wrong, say so, and that is in scope as above.
 - **Plaintext between client and proxy** (A6), except where TLS or a sidecar
   deployment is documented as covering it.
 - **Metadata visible to the provider** — exact sizes, timestamps, access
-  patterns, and object names unless `names.encrypt` is on. With it on, a name is
-  confirmable by guessing rather than hidden, and a presigned URL still carries
-  it in clear (§4, §6).
+  patterns, the content headers and user metadata a client sets, and object
+  names unless `names.encrypt` is on. With it on, a name is confirmable by
+  guessing rather than hidden, and a presigned URL, or a header the client puts
+  the name in, still carries it in clear (§4, §6).
 - **Rollback with detection off**, which is the default, and **the limits of
   detection with it on** (§5.1): the first read of an object is trusted, so is a
   copy's destination until it is read once, `HEAD` is not checked, and where

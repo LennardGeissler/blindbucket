@@ -194,6 +194,14 @@ startup. No metric, type or label changes.
 **The README's key-age query took `max` where it meant `min`.** `time() - max(...)`
 over the key creation timestamps is the age of the newest key, not the oldest.
 
+**The threat model left three headers off what the provider sees.**
+`Content-Disposition`, `Content-Encoding` and `Content-Language` have been
+stored in clear, as the client sent them, since 0.1.0;
+§4 named only `Content-Type` and `Cache-Control`. It now names all five, and says
+what that means under `names.encrypt`: a file name a client puts in
+`Content-Disposition`, or a path in user metadata, is not hidden by encrypting
+the key. Nothing in the gateway changed.
+
 ## [1.0.0] — 2026-09-27
 
 The release that says what it promises. Nothing in the format changes: format
