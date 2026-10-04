@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -158,6 +159,7 @@ Flags:
 		expect = fs.String("expect", "",
 			"require the chain to reach at least this checkpoint, as <seq>:<hash>")
 		list = fs.Bool("print", false, "print every entry")
+		asJSON = fs.Bool("json", false, "print the result as JSON")
 		pass passphraseFlags
 	)
 	pass.register(fs)
@@ -204,10 +206,10 @@ Flags:
 	if err != nil {
 		// What verified before the break is still worth printing -- it says
 		// where the log stops being trustworthy -- but the verdict must not be.
-		reportAudit(ordered, results, pub != nil, false)
+		reportAudit(ordered, results, pub != nil, false, *asJSON)
 		return err
 	}
-	reportAudit(ordered, results, pub != nil, true)
+	reportAudit(ordered, results, pub != nil, true, *asJSON)
 
 	if *expect != "" {
 		if err := checkExpected(*expect, seen, pub != nil); err != nil {
@@ -406,7 +408,63 @@ func decodeName(coder *names.Encrypter, value string) string {
 // results of a failed run are the part that verified before the break. Printing
 // "verified" under them would be the single most misleading thing this command
 // could do.
-func reportAudit(paths []string, results []*audit.Result, signaturesChecked, ok bool) {
+func reportAudit(paths []string, results []*audit.Result, signaturesChecked, ok bool, asJSON bool) {
+	if asJSON {
+		type fileReport struct {
+			File            string     `json:"file"`
+			Chain           string     `json:"chain"`
+			Entries         int        `json:"entries"`
+			Checkpoints     int        `json:"checkpoints"`
+			SignedThrough   int        `json:"signed_through"`
+			EntriesPastLast int        `json:"entries_past_last_checkpoint"`
+			TornTail        bool       `json:"torn_tail"`
+			LastCheckpoint  any        `json:"last_checkpoint"`
+			First           *time.Time `json:"first,omitempty"`
+			Last            *time.Time `json:"last,omitempty"`
+		}
+		files := make([]fileReport, 0, len(results))
+		signed := 0
+		for i, result := range results {
+			var last any
+			if point := result.LastCheckpoint; point != nil {
+				last = map[string]any{"seq": point.Seq, "hash": point.Hash}
+			}
+			past := 0
+			if signaturesChecked && result.Entries-result.SignedThrough > 0 {
+				past = result.Entries - result.SignedThrough
+			}
+			signed += result.Checkpoints
+			files = append(files, fileReport{
+				File:            filepath.Base(paths[i]),
+				Chain:           result.Chain,
+				Entries:         result.Entries,
+				Checkpoints:     result.Checkpoints,
+				SignedThrough:   result.SignedThrough,
+				EntriesPastLast: past,
+				TornTail:        result.TornTail,
+				LastCheckpoint:  last,
+				First:           result.First,
+				Last:            result.Last,
+			})
+		}
+		verdict := "verified"
+		switch {
+		case !ok:
+			verdict = "not_verified"
+		case !signaturesChecked:
+			verdict = "chain_intact_signatures_not_checked"
+		case signed == 0:
+			verdict = "chain_intact_nothing_signed"
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"ok":                 ok,
+			"verdict":            verdict,
+			"signatures_checked": signaturesChecked,
+			"files":              files,
+		})
+		return
+	}
+
 	var signed int
 	for i, result := range results {
 		name := filepath.Base(paths[i])
