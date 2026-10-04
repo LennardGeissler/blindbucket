@@ -10,6 +10,7 @@
 package main
 
 import (
+	"runtime"
 	"context"
 	"errors"
 	"flag"
@@ -21,6 +22,9 @@ import (
 
 // version is overwritten at release time via -ldflags.
 var version = "dev"
+
+// commit is overwritten at release time via -ldflags (e.g. -X main.commit=$(git rev-parse --short HEAD)).
+var commit = "unknown"
 
 // command is one subcommand of the CLI.
 type command struct {
@@ -100,7 +104,10 @@ func run(ctx context.Context, args []string) error {
 }
 
 func runVersion(context.Context, []string) error {
-	fmt.Println(version)
+	fmt.Printf("blindbucket %s\n", version)
+	fmt.Printf("  commit:  %s\n", commit)
+	fmt.Printf("  go:      %s\n", runtime.Version())
+	fmt.Printf("  platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	return nil
 }
 
