@@ -9,7 +9,7 @@ in the clear. **AWS CLI and boto3 are re-run against every commit** by the
 `Client compatibility` CI job, so their rows are current for `v1.1.0`; `mc` and
 rclone have not been re-measured since, and are marked as of `v0.2.0` below.
 
-The **object-name encryption** rows were verified on 2026-09-16 with the AWS CLI
+The **object-name encryption** rows were verified on 2026-09-16 with the AWS CLI. CI coverage for `names.encrypt: true` client scenarios is tracked in #66 (requires a `workflow`-scoped token to land the aws.yml change).
 against a real MinIO — a 40 MiB multipart round trip and a server-side copy of it
 with matching SHA-256, 250 objects listed complete and in order across 13 pages,
 and `aws s3 sync --delete` run twice with the second run doing nothing. They are
