@@ -305,8 +305,10 @@ is enforced. Its verdict is a separate field in `probe --json` and does not chan
 a migration needs `--allow-unconditional`, with nothing writing to the prefix
 while it runs.
 
-Garage also refuses `UploadPartCopy` from a source under 5 MiB, even as the only
-part of an upload, where AWS accepts it. A small single-part object with no
+Garage also refuses `UploadPartCopy` from a source it stores inline — under 3072
+bytes — even as the only part of an upload, where AWS accepts it; the error says
+*"minimum part size is 5Mb"*, but from 3072 bytes up the copy works (measured
+2026-10-04; the first record said "under 5 MiB", [ADR-020](adr/ADR-020-conditional-writes-measured.md)). A small single-part object with no
 condition to carry — every server-side copy, and every rotation under
 `--allow-unconditional` — is therefore copied with one `CopyObject` instead,
 which keeps the source precondition and works on both.

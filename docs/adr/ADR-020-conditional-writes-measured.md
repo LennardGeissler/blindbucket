@@ -5,6 +5,7 @@
 **Milestone:** M7
 **Implements:** `internal/probe`, `internal/rotate`, `internal/objcopy`
 **Amended by:** [ADR-022](ADR-022-migrating-to-encrypted-names.md) — the probe measures a third condition, `If-None-Match` on the completion, which a name migration relies on
+**Corrected:** 2026-10-04 — Garage's refusal of `UploadPartCopy` is of a source it stores inline, under 3072 bytes, not of one under 5 MiB; the decision stands, see the note under *Context*
 
 ## Context
 
@@ -32,7 +33,7 @@ gateway involved:
 | `CopyObject` with a wrong `x-amz-copy-source-if-match` | **412** — enforced |
 | `CompleteMultipartUpload` with a wrong `If-Match` | **200 — ignored**; the object is replaced |
 | `PutObject` with a wrong `If-Match` | **200 — ignored** |
-| `UploadPartCopy` from a source under 5 MiB | 400, even as the only part; precondition checked first |
+| `UploadPartCopy` from a source under 3072 bytes (first recorded as "under 5 MiB"; corrected below) | 400, even as the only part; precondition checked first |
 
 So on Garage guard 2 does nothing, and nothing said so. A client write landing
 after the copy and before the completion is replaced by the pre-rotation
@@ -49,6 +50,19 @@ every object through a multipart upload, single-part ones included, because the
 completion is where guard 2 lives. Garage refuses to copy a source under 5 MiB
 into a part, where AWS allows it for the last part of an upload, so every copy
 and rotation of a small object failed there.
+
+> **Corrected on 2026-10-04.** The limit is not 5 MiB. Garage v2.4.1 stores an
+> object under 3072 bytes inline, in its metadata, and refuses `UploadPartCopy`
+> from such a source with *"Source object is too small (minimum part size is
+> 5Mb)"*; from 3072 bytes up the copy is accepted and completes as the only
+> part. Measured with the AWS CLI on sources of 0, 1, 100, 2048, 3071, 3072,
+> 3073, 4096, 8192 bytes, 64 KiB and 1 MiB, and confirmed in Garage's source
+> (`src/api/s3/copy.rs`, the `ObjectVersionData::Inline` check). The test that
+> found it used small objects, and the message named 5 MiB; the record above
+> generalised from the message rather than from a measurement of the bound.
+> The decision below does not change: copying a small single-part object with
+> `CopyObject` covers the inline sources with room to spare, and its threshold
+> is S3's part minimum on purpose, so that it means the same on every provider.
 
 ## Decision
 

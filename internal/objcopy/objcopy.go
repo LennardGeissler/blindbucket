@@ -50,7 +50,9 @@ const MaxManifestBytes = 1 << 20
 // SmallObject is the ciphertext size below which a single-part object with
 // nothing to guard is copied with CopyObject rather than as a one-part upload.
 // It is S3's minimum part size: AWS lets the last part of an upload be smaller,
-// Garage refuses to copy such a source into a part at all (ADR-020).
+// and Garage refuses to copy a source into a part at all when it stores it
+// inline, under 3072 bytes (ADR-020). The size is S3's rather than Garage's so
+// that the rule means the same on every provider.
 const SmallObject = 5 << 20
 
 // ErrPreconditionFailed reports that one of the conditional writes was refused:
