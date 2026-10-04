@@ -1,0 +1,53 @@
+name: Chart
+
+# Publishes the Helm chart to ghcr.io as an OCI artifact, once per chart
+# version: when a push to main changes the version in Chart.yaml. A push that
+# changes the chart and not its version fails here, because a published
+# version must never change -- build/chart.sh says why the decision is made
+# from git rather than by asking the registry. Run by hand to publish the
+# current version, which is how the first one went out.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/helm/blindbucket/**"
+      - "build/chart.sh"
+      - ".github/workflows/chart.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write   # push the chart to ghcr.io
+
+concurrency:
+  group: chart
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish the chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the version before this push is compared against
+
+      - name: Has the chart version changed?
+        id: check
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: echo "result=$(build/chart.sh check "$BEFORE")" >> "$GITHUB_OUTPUT"
+
+      - uses: azure/setup-helm@v4
+        if: github.event_name == 'workflow_dispatch' || steps.check.outputs.result == 'new'
+        with:
+          version: v4.3.0   # the HELM_IMAGE the Makefile renders with
+
+      - name: Publish
+        if: github.event_name == 'workflow_dispatch' || steps.check.outputs.result == 'new'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GH_TOKEN" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          build/chart.sh publish

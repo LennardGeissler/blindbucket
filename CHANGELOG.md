@@ -16,6 +16,16 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Added
+
+**The Helm chart is published**, as `oci://ghcr.io/lennardgeissler/charts/blindbucket`,
+starting with chart version 0.1.1 (gateway 1.1.0); until now it could only be
+installed from a checkout. A chart version is published once, when main first
+carries it, and never again with other contents: CI refuses a pull request that
+changes the chart without changing its version, and the publishing workflow
+fails on a push to main that does. The values file CI renders with is no longer
+part of the packaged chart.
+
 ### Measured
 
 **OpenBao works as a root-key source, unchanged.** OpenBao, the open-source fork

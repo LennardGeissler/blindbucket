@@ -61,6 +61,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: make chart
+      # A published chart version must not change; the Chart workflow publishes
+      # a version once, when main first carries it. So a pull request that
+      # changes the chart has to give it a new version.
+      - name: A changed chart has a new version
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          git fetch -q --depth=1 origin "$BASE"
+          build/chart.sh check FETCH_HEAD
 
   # The chart installed in a real cluster and used: a client in another pod
   # puts a multipart object through it over TLS, and the provider is checked

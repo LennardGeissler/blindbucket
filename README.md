@@ -205,7 +205,8 @@ go install github.com/LennardGeissler/blindbucket/cmd/blindbucket@latest
 [deploy/helm/blindbucket](deploy/helm/blindbucket) is a Helm chart for the other
 shape, a shared gateway other pods reach over the network. It serves S3 over TLS
 only and refuses to render without a certificate, creates no Secrets, and is
-installed and used in a kind cluster on every commit.
+installed and used in a kind cluster on every commit. It is published as
+`oci://ghcr.io/lennardgeissler/charts/blindbucket`.
 
 [deploy/kubernetes-sidecar.yaml](deploy/kubernetes-sidecar.yaml) is the sidecar
 deployment worked out, and the one to prefer: one gateway per pod, listening on loopback, so the

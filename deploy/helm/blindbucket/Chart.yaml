@@ -3,8 +3,10 @@ name: blindbucket
 description: A transparent S3 encryption gateway, run as a shared service behind TLS.
 type: application
 # The chart's own version. It changes when the chart does; appVersion is the
-# gateway release it deploys by default.
-version: 0.1.0
+# gateway release it deploys by default, and moving it is a change to the chart
+# like any other -- a release commit bumps both. Every version is published to
+# ghcr.io once and never again with other contents (build/chart.sh).
+version: 0.1.1
 appVersion: "1.1.0"
 home: https://github.com/LennardGeissler/blindbucket
 sources:
