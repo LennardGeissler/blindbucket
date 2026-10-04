@@ -42,7 +42,7 @@
 > s5cmd all work, and a 5 GiB `aws s3 cp` across two instances comes back with
 > an identical SHA-256. Key rotation, server-side copy, a signed audit log,
 > object-name encryption, metrics and health endpoints are in, and the keyring can be
-> unsealed by Vault Transit or AWS KMS instead of a passphrase.
+> unsealed by Vault or OpenBao Transit, or AWS KMS, instead of a passphrase.
 >
 > **New in 1.1:** `migrate-names` moves a bucket written in the clear to
 > encrypted names, `reseal` moves a keyring between a passphrase, Vault and KMS,
@@ -658,8 +658,8 @@ plaintext key**, which is the one thing name encryption otherwise keeps out of s
 <details>
 <summary><b>Unsealing the keyring, and server-side copy</b></summary>
 
-**Unsealing the keyring.** The root key can come from a passphrase, from Vault's Transit
-engine or from AWS KMS, and the keyring file records which one sealed it — so a keyring
+**Unsealing the keyring.** The root key can come from a passphrase, from the Transit
+engine of Vault or OpenBao, or from AWS KMS, and the keyring file records which one sealed it — so a keyring
 from the wrong environment is named as such rather than failing as a decryption error. The
 service is asked once, at startup: after that every KEK is in memory and no request pays a
 round trip. That is a deliberate trade, and its limit is stated plainly — the root key is

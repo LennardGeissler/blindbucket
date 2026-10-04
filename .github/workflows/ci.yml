@@ -327,6 +327,40 @@ jobs:
           docker logs vault || true
           docker logs kms || true
 
+  # OpenBao is the open-source fork of Vault and serves the same Transit API.
+  # The same tests, plus the commands that seal and reseal a keyring through it,
+  # so that "works with OpenBao" stays a measurement rather than a claim about
+  # API compatibility.
+  openbao:
+    name: Root-key sources (OpenBao)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Start OpenBao and the KMS emulator
+        env:
+          VAULT_IMAGE: quay.io/openbao/openbao:latest
+        run: test/services/keys.sh
+
+      - name: Run the root-key, keygen and reseal tests
+        env:
+          BLINDBUCKET_TEST_VAULT_ADDR: http://localhost:8200
+          BLINDBUCKET_TEST_VAULT_TOKEN: blindbucket-dev-token
+          BLINDBUCKET_TEST_KMS_ENDPOINT: http://localhost:4599
+        run: |
+          go test -race -count=1 ./internal/rootkey/...
+          go test -race -count=1 -run 'SealedByAService|Reseal' ./cmd/blindbucket
+
+      - name: Service logs on failure
+        if: failure()
+        run: |
+          docker logs vault || true
+          docker logs kms || true
+
   clients:
     name: Client compatibility (AWS CLI, boto3)
     runs-on: ubuntu-latest

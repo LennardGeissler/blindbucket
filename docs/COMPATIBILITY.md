@@ -342,12 +342,14 @@ What the gateway does about it is to keep from making it worse:
 
 ### Key services
 
-The root key that unlocks the keyring can come from a passphrase, from Vault's
-Transit engine or from AWS KMS (ADR-013). Measured, not assumed:
+The root key that unlocks the keyring can come from a passphrase, from the
+Transit engine of Vault or OpenBao, or from AWS KMS (ADR-013). Measured, not
+assumed:
 
 | Service | Version | Result |
 |---|---|---|
 | Vault Transit | `hashicorp/vault` dev mode, 2026-09 | **Works.** Seal a keyring, start the gateway with no passphrase anywhere, round-trip a 3 MB object with an identical SHA-256. Deleting the Transit key stops the next start with `encryption key not found`. |
+| OpenBao Transit | `quay.io/openbao/openbao` 2.7.1 dev mode, 2026-10-04; every commit in CI | **Works**, with `provider: vault` and nothing else changed. A keyring sealed by `keygen`; the gateway started with no passphrase anywhere and round-tripped a 3 MB object and a 40 MB multipart one with identical SHA-256, and read them back after a restart, the provider holding ciphertext; deleting the Transit key stopped the next start with `encryption key not found`. The root-key, `keygen` and `reseal` tests run against it on every commit, including a token allowed to encrypt and not decrypt, which `reseal` refuses before writing anything. |
 | AWS KMS | AWS, `eu-central-1`, 2026-09-26 and 27 | **Works.** A root key sealed and opened again; the blob refused under a changed encryption context and under none; a blob sealed without a context, as keyrings before contexts were, still opens. Under a role that may use the key only with blindbucket's context or none. End to end: `keygen` seals a keyring with the key, a configuration naming a passphrase is refused it, the gateway starts with no passphrase anywhere and serves the client matrix against S3, and a restart opens the keyring through KMS again and reads what the first process wrote. **Not measured against AWS:** what a disabled or deleted key does to the next start — the test role may not disable its own key, and should not be given that. |
 
 An AWS account is still not a build dependency. The regular CI runs the KMS

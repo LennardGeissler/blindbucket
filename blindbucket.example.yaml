@@ -76,7 +76,7 @@ keys:
 
   # provider: vault -- Vault decrypts the root key and never hands out the key
   # that does it. Revoking the transit key locks every instance out at its next
-  # restart.
+  # restart. OpenBao serves the same Transit API and is configured the same way.
   # vault:
   #   address: https://vault.internal:8200
   #   token: ${VAULT_TOKEN}

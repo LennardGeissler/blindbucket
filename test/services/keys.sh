@@ -11,12 +11,20 @@
 # The KMS side is an emulator, not AWS. What it establishes is that the client
 # speaks KMS correctly; docs/COMPATIBILITY.md says so rather than claiming the
 # service was tested.
+#
+# VAULT_IMAGE picks what answers on :8200. OpenBao, the open-source fork of
+# Vault, serves the same Transit API and is run by CI as well; it reads its dev
+# settings from BAO_* rather than VAULT_*, so both are set.
 set -euo pipefail
+
+VAULT_IMAGE=${VAULT_IMAGE:-hashicorp/vault:latest}
 
 docker run -d --name vault --cap-add IPC_LOCK -p 8200:8200 \
 	-e VAULT_DEV_ROOT_TOKEN_ID=blindbucket-dev-token \
 	-e VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200 \
-	hashicorp/vault:latest >/dev/null
+	-e BAO_DEV_ROOT_TOKEN_ID=blindbucket-dev-token \
+	-e BAO_DEV_LISTEN_ADDRESS=0.0.0.0:8200 \
+	"$VAULT_IMAGE" >/dev/null
 docker run -d --name kms -p 4599:8080 \
 	-e PORT=8080 -e KMS_REGION=us-east-1 \
 	nsmithuk/local-kms:latest >/dev/null

@@ -16,6 +16,16 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Measured
+
+**OpenBao works as a root-key source, unchanged.** OpenBao, the open-source fork
+of Vault, serves the same Transit API, so `provider: vault` pointed at it is all
+it takes. Measured with OpenBao 2.7.1: a keyring sealed by it, a gateway started
+with no passphrase that round-trips a multipart object and reads it back after a
+restart, and a deleted Transit key refusing the next start. CI now runs the
+root-key, `keygen` and `reseal` tests against OpenBao as well as Vault on every
+commit.
+
 ### Fixed
 
 **Every GitHub release went out without notes.** goreleaser's changelog had been
