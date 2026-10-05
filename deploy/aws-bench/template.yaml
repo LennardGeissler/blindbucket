@@ -1,0 +1,162 @@
+# The network benchmark (M9): one EC2 instance and one bucket in the same
+# region, so that the gateway and the provider are as far apart as a deployment
+# would put them. A stack of its own rather than part of deploy/aws-test, because
+# it costs by the hour and should exist only while a benchmark runs. See
+# deploy/aws-bench/README.md.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: blindbucket network benchmark, gateway and bucket in one region
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: c7g.2xlarge
+    Description: >-
+      An arm64 (Graviton) type, because the image below is the arm64 one.
+      c7g.2xlarge has 8 vCPUs and up to 15 Gbit/s, enough that neither the
+      instance nor its network is what a run measures.
+  Version:
+    Type: String
+    Default: 1.1.0
+    Description: The release whose linux_arm64 archive the gateway runs, without the v.
+  ScriptsRef:
+    Type: String
+    Default: main
+    Description: The git ref whose bench/ scripts the instance checks out.
+  MaxHours:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 12
+    Description: >-
+      The instance shuts itself down after this many hours, and shutting down
+      terminates it. The ceiling on what a forgotten stack costs.
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+
+Resources:
+  # warp clears this bucket before and after every run, so it holds nothing
+  # else; results go under results/ once the last run is done. The lifecycle
+  # rule is for a run that dies with objects in it.
+  BenchBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub blindbucket-bench-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-everything-after-three-days
+            Status: Enabled
+            ExpirationInDays: 3
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  # The instance's only credentials. warp's direct path and the gateway's
+  # upstream both take them from IMDSv2 -- the gateway through
+  # credential_source: imds (ADR-024), which this is the first real use of.
+  # Session Manager is how a run is started, so the instance needs no key pair
+  # and no inbound port.
+  BenchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: bench-bucket
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Bucket
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:GetBucketLocation
+                Resource: !GetAtt BenchBucket.Arn
+              - Sid: Objects
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectTagging
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:AbortMultipartUpload
+                  - s3:ListMultipartUploadParts
+                Resource: !Sub ${BenchBucket.Arn}/*
+
+  BenchProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref BenchRole]
+
+  # No inbound rule at all; outbound is the default allow-all, which S3, the
+  # Session Manager endpoints, GitHub and Docker Hub need.
+  BenchSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: blindbucket benchmark, no inbound access
+
+  BenchInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref BenchProfile
+      SecurityGroupIds: [!GetAtt BenchSecurityGroup.GroupId]
+      InstanceInitiatedShutdownBehavior: terminate
+      MetadataOptions:
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 30
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: blindbucket-bench
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          shutdown -h +$(( ${MaxHours} * 60 ))
+          dnf install -y docker git
+          systemctl enable --now docker
+          docker pull minio/warp:latest
+          git clone --depth 1 --branch ${ScriptsRef} \
+            https://github.com/LennardGeissler/blindbucket.git /opt/blindbucket
+          cd /tmp
+          curl -fsSLO https://github.com/LennardGeissler/blindbucket/releases/download/v${Version}/blindbucket_${Version}_linux_arm64.tar.gz
+          curl -fsSLO https://github.com/LennardGeissler/blindbucket/releases/download/v${Version}/checksums.txt
+          grep " blindbucket_${Version}_linux_arm64.tar.gz$" checksums.txt | sha256sum -c -
+          tar -xzf blindbucket_${Version}_linux_arm64.tar.gz blindbucket
+          install -m 0755 blindbucket /usr/local/bin/blindbucket
+          cat > /etc/blindbucket-bench.env <<EOF
+          BENCH_BUCKET=${BenchBucket}
+          BENCH_REGION=${AWS::Region}
+          BENCH_VERSION=${Version}
+          BENCH_SCRIPTS_REF=${ScriptsRef}
+          EOF
+          touch /var/run/blindbucket-bench-ready
+
+Outputs:
+  InstanceId:
+    Value: !Ref BenchInstance
+  Bucket:
+    Value: !Ref BenchBucket

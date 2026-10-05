@@ -14,6 +14,7 @@ Published figures and the macro comparison table live in
 | `rss-sample.sh` | Resident set of a command over time, separating the one-time Argon2id spike from the steady state while data streams | memory (CLI) |
 | `gateway-memory.sh` | Resident set of a **running gateway** while a large object streams through it, end to end over HTTP | memory (gateway) |
 | `warp.sh` | MinIO `warp` against the provider directly and through the gateway: throughput and p50/p90/p99 per object size and concurrency | macro, small-object overhead |
+| `aws-run.sh` | The same matrix on an EC2 instance against AWS S3 in its region, so the provider is a network hop away; runs on the instance [`deploy/aws-bench/`](../deploy/aws-bench/) creates | macro over a real network (M9) |
 | `plot/summarise.py` | Parses `warp` output into `results.csv` and a Markdown comparison table | — |
 | `plot/charts.py` | Renders the figures as SVG, light and dark, standard library only | — |
 
@@ -63,6 +64,11 @@ seconds. The first version of this script kept objects between runs to save the
 upload phase, and filled a 20 GB disk in eleven minutes; the symptom is
 `minimum free drive threshold` in the warp output, on the direct path as much as
 through the gateway.
+
+**Against a real provider** `warp.sh` takes the bucket names, TLS, the region and
+credentials from the EC2 instance role through environment variables listed at
+the top of the script; [`deploy/aws-bench/README.md`](../deploy/aws-bench/README.md)
+has the instance, the commands and what a run costs.
 
 ## Measuring the gateway
 

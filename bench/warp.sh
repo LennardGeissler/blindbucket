@@ -25,6 +25,19 @@
 #   WARP_OPS           operations                         (default "put get")
 #   WARP_IMAGE         warp container image               (default minio/warp:latest)
 #   WARP_DOCKER_ARGS   extra docker args, e.g. --network=host on Linux
+#   WARP_DIRECT_BUCKET bucket for the direct path      (default warp-benchmark-bucket)
+#   WARP_PROXY_BUCKET  bucket for the gateway path     (default warp-proxy-bucket)
+#   WARP_DIRECT_TLS    1 to reach the provider over TLS (default 0)
+#   WARP_REGION        region for the direct path      (default: warp's own)
+#   WARP_DIRECT_CREDENTIALS
+#                      "imds" to take the provider's credentials from the EC2
+#                      instance role before every direct run, instead of
+#                      WARP_DIRECT_KEY and WARP_DIRECT_SECRET (default unset)
+#   WARP_PROVIDER      what to record as the provider  (default: the local MinIO
+#                      container's image)
+#
+# Against a real provider -- AWS S3 from an EC2 instance in the same region --
+# bench/aws-run.sh sets these; deploy/aws-bench/ has the instance.
 #
 # On Linux, reach host services with WARP_DOCKER_ARGS=--network=host and
 # 127.0.0.1 endpoints. On Docker Desktop, use host.docker.internal endpoints and
@@ -57,6 +70,11 @@ WARP_DURATION=${WARP_DURATION:-30s}
 WARP_OPS=${WARP_OPS:-"put get"}
 WARP_IMAGE=${WARP_IMAGE:-minio/warp:latest}
 WARP_DOCKER_ARGS=${WARP_DOCKER_ARGS:-}
+WARP_DIRECT_BUCKET=${WARP_DIRECT_BUCKET:-warp-benchmark-bucket}
+WARP_PROXY_BUCKET=${WARP_PROXY_BUCKET:-warp-proxy-bucket}
+WARP_DIRECT_TLS=${WARP_DIRECT_TLS:-0}
+WARP_REGION=${WARP_REGION:-}
+WARP_DIRECT_CREDENTIALS=${WARP_DIRECT_CREDENTIALS:-}
 # Seconds to wait between runs. Providers free deleted space asynchronously, and
 # a run that starts while the previous one is still being reclaimed pays for that
 # work. Because the two paths of a pair run in a fixed order, the cost lands
@@ -101,12 +119,28 @@ record_environment() {
         fi
         echo "go:          $(go version 2>/dev/null || echo 'not installed')"
         echo "warp:        $(docker run --rm "$WARP_IMAGE" --version 2>&1 | head -1)"
-        echo "provider:    $(docker inspect --format '{{.Config.Image}}' blindbucket-minio-1 2>/dev/null || echo unknown)"
+        echo "provider:    ${WARP_PROVIDER:-$(docker inspect --format '{{.Config.Image}}' blindbucket-minio-1 2>/dev/null || echo unknown)}"
         echo "duration:    $WARP_DURATION per run"
         echo "sizes:       $WARP_SIZES"
         echo "concurrency: $WARP_CONCURRENCY"
     } | tee "$out/environment.txt"
     echo
+}
+
+# imds_credentials sets key, secret and token from the EC2 instance role, through
+# IMDSv2. It is called before every direct run rather than once: a full matrix
+# takes hours, and the role's credentials are replaced well within that.
+imds_credentials() {
+    local imds=http://169.254.169.254 itoken role json
+    itoken=$(curl -fsS -X PUT "$imds/latest/api/token" \
+        -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')
+    role=$(curl -fsS -H "X-aws-ec2-metadata-token: $itoken" \
+        "$imds/latest/meta-data/iam/security-credentials/")
+    json=$(curl -fsS -H "X-aws-ec2-metadata-token: $itoken" \
+        "$imds/latest/meta-data/iam/security-credentials/$role")
+    key=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["AccessKeyId"])' <<<"$json")
+    secret=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["SecretAccessKey"])' <<<"$json")
+    token=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["Token"])' <<<"$json")
 }
 
 # run_one runs one cell of the matrix.
@@ -123,15 +157,28 @@ record_environment() {
 # says a component is slow, check whether that component is actually busy.
 run_one() {
     local path=$1 op=$2 size=$3 concurrent=$4 repeat=$5
-    local host key secret bucket file
+    local host key secret token='' bucket file
+    local conn=()
 
     case $path in
         direct) host=$WARP_DIRECT; key=$WARP_DIRECT_KEY; secret=$WARP_DIRECT_SECRET
-                bucket=warp-benchmark-bucket ;;
+                bucket=$WARP_DIRECT_BUCKET
+                if [[ $WARP_DIRECT_CREDENTIALS == imds ]]; then
+                    imds_credentials
+                fi
+                if [[ $WARP_DIRECT_TLS == 1 ]]; then
+                    conn+=(--tls)
+                fi
+                if [[ -n $WARP_REGION ]]; then
+                    conn+=(--region="$WARP_REGION")
+                fi ;;
         proxy)  host=$WARP_PROXY;  key=$WARP_PROXY_KEY;  secret=$WARP_PROXY_SECRET
-                bucket=warp-proxy-bucket ;;
+                bucket=$WARP_PROXY_BUCKET ;;
         *)      echo "unknown path $path" >&2; return 1 ;;
     esac
+    if [[ -n $token ]]; then
+        conn+=(--session-token="$token")
+    fi
 
     file="$out/${path}-${op}-${size}-c${concurrent}-r${repeat}.txt"
     printf '  %-6s %-4s %-6s c=%-3s r%-2s ... ' "$path" "$op" "$size" "$concurrent" "$repeat"
@@ -150,7 +197,7 @@ run_one() {
         --host="$host" --access-key="$key" --secret-key="$secret" \
         --bucket="$bucket" --obj.size="$size" --concurrent="$concurrent" \
         --duration="$WARP_DURATION" \
-        ${extra[@]+"${extra[@]}"} > "$file" 2>&1
+        ${conn[@]+"${conn[@]}"} ${extra[@]+"${extra[@]}"} > "$file" 2>&1
     then
         grep -m1 'Average:' "$file" | sed 's/^ *\* Average: //' || echo "ok"
     else

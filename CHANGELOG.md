@@ -26,6 +26,15 @@ changes the chart without changing its version, and the publishing workflow
 fails on a push to main that does. The values file CI renders with is no longer
 part of the packaged chart.
 
+**The network benchmark can run on AWS.** [`deploy/aws-bench/`](deploy/aws-bench/)
+is a stack of its own -- an EC2 instance and a bucket in one region, the instance
+terminating itself after a set number of hours -- and `bench/aws-run.sh` runs
+`bench/warp.sh`'s matrix on it, direct and through a gateway that takes its
+upstream credentials from the instance role with `credential_source: imds`.
+`bench/warp.sh` gained what a real provider needs: bucket names, TLS, a region,
+and credentials refreshed from IMDSv2 before every direct run. No result yet;
+M9 stays open until a run has been made.
+
 ### Measured
 
 **OpenBao works as a root-key source, unchanged.** OpenBao, the open-source fork
