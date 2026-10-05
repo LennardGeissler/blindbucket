@@ -27,20 +27,33 @@ the hour and should exist only while a run does:
 
 ## Cost
 
-An estimate, not a measurement, for the default matrix (3 sizes × 3
-concurrencies × PUT and GET × 3 repetitions × 2 paths = 108 runs of 30 s), which
-takes about two to two and a half hours:
+Prices are eu-central-1's, read from AWS's price list on 2026-10-05: $0.0054 per
+1000 PUT or LIST requests, $0.00043 per 1000 GET requests, $0.33 an hour for a
+c7g.2xlarge. Traffic between the instance and a bucket in its region is free.
 
-| | |
-|---|---|
-| Instance, ~2.5 h at roughly $0.35/h | ~$1 |
-| PUT requests, dominated by 1 KiB at 64 clients: several hundred thousand at $0.0054 per 1000 | ~$3–5 |
-| GET, LIST, storage for minutes, traffic within the region | cents |
-| **Total** | **~$4–6** |
+What a run costs is decided by how many requests S3 answers, and that is not
+known before a run: at 1 KiB, every client keeps one request in flight, so the
+request rate is the number of clients over S3's latency. The default matrix (3
+sizes × 3 concurrencies × PUT and GET × 3 repetitions × 2 paths = 108 runs of
+30 s, about two and a half hours) under three assumptions for that latency:
 
-That can cross the account's $5 budget alert. `BENCH_REPEAT=2` or
-`BENCH_CONCURRENCY="1 16"` roughly halves the request cost, at the price of the
-statistics or of the most loaded cell.
+| S3 latency, PUT / GET | PUT requests | GET requests | PUT | GET | Instance | **Total** |
+|---|---:|---:|---:|---:|---:|---:|
+| 15 / 8 ms | ~1.1 M | ~1.8 M | $5.84 | $0.78 | $0.91 | **~$7.50** |
+| 25 / 12 ms | ~0.7 M | ~1.2 M | $3.74 | $0.52 | $0.91 | **~$5.20** |
+| 40 / 20 ms | ~0.5 M | ~0.7 M | $2.56 | $0.31 | $0.91 | **~$3.80** |
+
+Almost all of it is 1 KiB at 64 clients. The instance cannot cost more than
+`MaxHours` of itself, $1.65 at the default of five; nothing else in the stack
+costs by the hour beyond fractions of a cent.
+
+**Calibrate before the full run.** The short run below takes minutes and costs
+cents, and its results give the real request rate at 1 KiB and 16 clients
+(`obj/s` in `results.md`). Multiplied by 4 for 64 clients, by 6 runs of 30 s and
+by $0.0054 per 1000, that is the largest line of the bill. The upper case
+crosses the account's $5 budget alert. `BENCH_REPEAT=2` cuts a third,
+`BENCH_DURATION=20s` another third, `BENCH_CONCURRENCY="1 16"` removes most of
+it, each at the price of statistics or of the most loaded cell.
 
 ## Running it
 
