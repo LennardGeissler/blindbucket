@@ -1,0 +1,11 @@
+date:        2026-10-05T14:50:09Z
+host:        Linux 6.18.51-120.163.amzn2023.aarch64 aarch64
+cpu:         unknown
+cores:       8
+memory:      15671 MiB
+go:          not installed
+warp:        warp version 1.3.1 - 143bf4f
+provider:    AWS S3 eu-central-1, from c7g.2xlarge in the same region; gateway 1.1.0
+duration:    30s per run
+sizes:       1GiB
+concurrency: 1 16 64

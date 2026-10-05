@@ -18,7 +18,7 @@ document is gone, so they are kept here.
 | G4 | S3 compatibility | AWS CLI and boto3 pass the integration suite including ranges and multipart; rclone and `mc` documented | Met; [COMPATIBILITY.md](../COMPATIBILITY.md) |
 | G5 | Horizontal scaling | A multipart upload across two instances behind round-robin, without sticky sessions | Met, in CI on every commit |
 | G6 | Rotation without re-upload | Changing the KEK of a prefix only through server-side copy operations | Met; [009](ADR-009-rotation-by-copy.md) |
-| G7 | Traceability | Format specification with test vectors, a threat model, reproducible benchmarks in the repository | Spec, vectors and threat model met. The benchmark scripts are in [`bench/`](../../bench/), but not every figure the README quotes has its raw data committed |
+| G7 | Traceability | Format specification with test vectors, a threat model, reproducible benchmarks in the repository | Spec, vectors and threat model met. The network benchmark has its raw output committed ([`bench/figures/aws/`](../../bench/figures/aws/)); some of the laptop figures the README quotes (cipher throughput, allocations, single-stream RSS) still do not |
 
 ## Records
 

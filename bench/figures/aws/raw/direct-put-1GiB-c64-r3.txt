@@ -1,0 +1,11 @@
+
+Report: PUT. Concurrency: 64. Ran: 34s
+ * Average: 1802.12 MiB/s, 1.76 obj/s
+ * Reqs: Avg: 35814.0ms, 50%: 36338.5ms, 90%: 37261.3ms, 99%: 37376.2ms, Fastest: 32125.1ms, Slowest: 37376.2ms, StdDev: 1351.3ms
+
+Throughput, split into 34 x 1s:
+ * Fastest: 1832.6MiB/s, 1.79 obj/s
+ * 50% Median: 1832.6MiB/s, 1.79 obj/s
+ * Slowest: 1269.2MiB/s, 1.24 obj/s
+
+

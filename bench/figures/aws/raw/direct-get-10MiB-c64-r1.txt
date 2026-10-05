@@ -1,0 +1,12 @@
+
+Report: GET. Concurrency: 64. Ran: 27s
+ * Average: 1767.12 MiB/s, 176.71 obj/s
+ * Reqs: Avg: 388.4ms, 50%: 305.1ms, 90%: 573.8ms, 99%: 2303.9ms, Fastest: 105.7ms, Slowest: 3353.7ms, StdDev: 401.6ms
+ * TTFB: Avg: 25ms, Best: 14ms, 25th: 22ms, Median: 25ms, 75th: 28ms, 90th: 31ms, 99th: 41ms, Worst: 82ms StdDev: 5ms
+
+Throughput, split into 27 x 1s:
+ * Fastest: 1779.1MiB/s, 177.91 obj/s
+ * 50% Median: 1766.8MiB/s, 176.68 obj/s
+ * Slowest: 1751.7MiB/s, 175.17 obj/s
+
+

@@ -1,0 +1,20 @@
+server:
+  listen: "127.0.0.1:9000"
+admin:
+  listen: "127.0.0.1:9100"
+upstream:
+  endpoint: https://s3.eu-central-1.amazonaws.com
+  region: eu-central-1
+  path_style: false
+  credential_source: imds
+keys:
+  provider: file
+  keyring: /opt/bench-runs/20261005T132916Z/keyring.json
+  passphrase_file: /opt/bench-runs/20261005T132916Z/passphrase
+crypto:
+  log2_chunk_size: 16
+clients:
+  - name: bench
+    access_key_id: bench7a25d09883a3
+    secret_access_key: <redacted>
+    buckets: ["blindbucket-bench-730933263599"]

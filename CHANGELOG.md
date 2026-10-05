@@ -32,10 +32,27 @@ terminating itself after a set number of hours -- and `bench/aws-run.sh` runs
 `bench/warp.sh`'s matrix on it, direct and through a gateway that takes its
 upstream credentials from the instance role with `credential_source: imds`.
 `bench/warp.sh` gained what a real provider needs: bucket names, TLS, a region,
-and credentials refreshed from IMDSv2 before every direct run. No result yet;
-M9 stays open until a run has been made.
+and credentials refreshed from IMDSv2 before every direct run. Results go to a
+bucket of their own: in the one warp runs against, the next run deleted them.
+The gateway in the benchmark accepts `UNSIGNED-PAYLOAD`, because warp, built on
+minio-go like `mc`, sends it for every multipart upload.
 
 ### Measured
+
+**The gateway against AWS S3 over a real network (M9).** From a c7g.2xlarge in
+eu-central-1 to S3 in the same region, three repetitions per cell: through the
+gateway, 1 KiB objects move at 92–99 % of the direct path, about 0.3–0.6 ms
+added to a read and 1.2–2.1 ms to a write against S3's own 23.5 ms; 10 MiB and
+1 GiB objects at 99–101 % wherever the network is the limit, with the gateway
+encrypting some 1.8 GB/s at 64 clients. The tail at saturation is where it
+costs: a 10 MiB PUT's p99 at 64 clients goes from 0.56 to 1.26 s. Some upload
+cells run faster through the gateway (up to 114 %), and that is the HTTP
+client, not the gateway: its upstream client sends `Expect: 100-continue`,
+warp's does not, and S3 takes a 10 MiB PUT in 128 ms with the header against
+143 ms without. The laptop measurement had put 1 KiB uploads from one client at
+70 % of direct; here they are at 92 %. Figures, raw output and method in
+[bench/figures/aws/](bench/figures/aws/). This is also the first use of
+`credential_source: imds` against real IMDS rather than a stub.
 
 **OpenBao works as a root-key source, unchanged.** OpenBao, the open-source fork
 of Vault, serves the same Transit API, so `provider: vault` pointed at it is all

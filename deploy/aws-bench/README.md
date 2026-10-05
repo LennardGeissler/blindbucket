@@ -107,6 +107,16 @@ A shorter matrix for a first try, passed to the script as environment:
 --parameters 'commands=["BENCH_SIZES=1KiB BENCH_CONCURRENCY=16 BENCH_REPEAT=1 /opt/blindbucket/bench/aws-run.sh"],executionTimeout=["3600"]'
 ```
 
+## Runs so far
+
+**2026-10-05**, `1.1.0`, the default matrix. Results, raw output and method:
+[bench/figures/aws/](../../bench/figures/aws/). The 1 KiB and 10 MiB cells took
+one pass of about 80 minutes; the 1 GiB cells were measured again in a second
+pass of about 35 minutes, after the first refused them all (warp's multipart
+uploads need `allow_unsigned_payload`, now set by `bench/aws-run.sh`). The
+instance ran for about 2 h 20 min. Cost: estimated at about $5 from the request
+counts; the billed figure replaces this once AWS has posted it.
+
 ## What a result does and does not say
 
 The ratio between the two paths, and the latency the gateway adds per request,

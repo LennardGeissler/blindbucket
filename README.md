@@ -341,6 +341,48 @@ first: the format can be reviewed, fuzzed and measured before any HTTP is involv
 
 ## Numbers
 
+### Over a real network
+
+Measured on 2026-10-05 against AWS S3 in eu-central-1, from a c7g.2xlarge in the
+same region running the published `1.1.0` ([deploy/aws-bench/](deploy/aws-bench/)):
+`warp` directly against S3 and through the gateway, alternating, three
+repetitions of 30 s per cell. Throughput through the gateway as a share of the
+direct path, median of three:
+
+| | 1 client | 16 clients | 64 clients |
+|---|---:|---:|---:|
+| 1 KiB GET | 98 % | 98 % | 99 % |
+| 1 KiB PUT | 92 % | 96 % | 97 % |
+| 10 MiB GET | 100 % | 100 % | 100 % |
+| 10 MiB PUT | 114 %\* | 112 %\* | 100 % |
+| 1 GiB GET | 100 % | 100 % | 101 % |
+| 1 GiB PUT | 105 %\* | 101 % | 99 % |
+
+S3 answers a 1 KiB request from inside its region in about 23.5 ms; the gateway
+adds 0.3–0.6 ms to a read and 1.2–2.1 ms to a write at the median. From 16
+clients on, large objects fill the instance's network (about 15 Gbit/s) on both
+paths, and the gateway keeps pace while encrypting or decrypting some 1.8 GB/s.
+Where it costs is the tail at saturation: at 10 MiB and 64 clients the p99 of a
+PUT goes from 0.56 to 1.26 s. Every figure, with its spread and the raw output,
+is in [bench/figures/aws/](bench/figures/aws/).
+
+\* Faster than direct is not the gateway's doing. Its upstream client sends
+`Expect: 100-continue` and `warp`'s does not, and S3 takes a 10 MiB upload in
+128 ms with that header against 143 ms without -- twenty curl uploads each way,
+alternating. A benchmark of anything in front of S3 has to hold that constant,
+or part of what it measures is the client.
+
+The laptop figures below overstated the gateway's per-request cost: with the
+provider in a VM on the same machine, 1 KiB uploads from one client ran at 70 %
+of direct, against 92 % here.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="bench/figures/aws/throughput-dark.svg">
+  <img alt="Throughput against AWS S3 from the same region, direct and through the gateway, for 1 KiB and 10 MiB objects at 1, 16 and 64 clients: the two bars match except where the gateway is ahead on 10 MiB PUTs" src="bench/figures/aws/throughput-light.svg">
+</picture>
+
+### On one laptop
+
 Measured on an Apple M4 (10 cores, 16 GiB) with Go 1.27.1, against MinIO in a
 local VM — client, gateway and provider all on the one laptop, competing for the
 same cores and the same disk. Absolute figures would be higher on real hardware;
@@ -408,7 +450,8 @@ belongs to the provider rather than to the gateway.
 **One cell does not fit that picture**, and it is left standing rather than
 dropped: 10 MiB PUTs at 64 concurrent clients run at 18 % of direct. It
 reproduces across all three repetitions and is specific to PUT — GET at the same
-load is at 95 %.
+load is at 95 %. Against AWS S3 the same cell runs at 100 % (above), so it is
+the local provider's.
 
 <details>
 <summary><b>Why the gateway is not what is slow there, and one honest asterisk</b></summary>
@@ -619,7 +662,7 @@ the gateway already costs per request.
 | M6 | Stretch: name encryption, presigned URLs, rollback protection | **done** |
 | M7 | The suite against providers other than MinIO: provider profiles, Garage, measured conditional writes | **done** |
 | M8 | Measured against real providers: AWS S3 and KMS done; R2 and B2 not yet | in progress |
-| M9 | Benchmarks over a real network, gateway and bucket in one region | not started |
+| M9 | Benchmarks over a real network, gateway and bucket in one region | **done** (AWS S3, eu-central-1) |
 | M10 | 1.0: the stability promise (ADR-021), an upgrade test over every release, test vectors on every release | **done** |
 | — | `migrate-names`: an existing bucket moved to encrypted names, model-checked first (ADR-022) | **done** in 1.1 |
 | — | `reseal`: a keyring moved between a passphrase, Vault and KMS, verified before it replaces (ADR-023) | **done** in 1.1 |
