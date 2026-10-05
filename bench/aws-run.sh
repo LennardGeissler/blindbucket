@@ -49,9 +49,15 @@ client_key=bench$(openssl rand -hex 6)
 client_secret=$(openssl rand -hex 24)
 blindbucket keygen --out keyring.json --passphrase-file passphrase
 
+# allow_unsigned_payload: warp is built on minio-go, which signs a single PUT per
+# chunk but sends UNSIGNED-PAYLOAD for a multipart upload -- every 1 GiB object --
+# exactly as mc does (docs/COMPATIBILITY.md). Without it every multipart request
+# is refused at CreateMultipartUpload. The listener is loopback, the case the
+# setting is meant for.
 cat > blindbucket.yaml <<EOF
 server:
   listen: "127.0.0.1:9000"
+  allow_unsigned_payload: true
 admin:
   listen: "127.0.0.1:9100"
 upstream:

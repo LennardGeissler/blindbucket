@@ -113,7 +113,10 @@ record_environment() {
             echo "cores:       $(sysctl -n hw.ncpu 2>/dev/null || echo unknown)"
             echo "memory:      $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 / 1024 )) MiB"
         else
-            echo "cpu:         $(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | xargs || echo unknown)"
+            # x86 names the CPU in /proc/cpuinfo; arm64 (Graviton) does not, and lscpu does.
+            cpu=$( { grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2-
+                     lscpu 2>/dev/null | awk -F: '/^Model name/ {print $2}'; } | head -1 | xargs) || true
+            echo "cpu:         ${cpu:-unknown}"
             echo "cores:       $(nproc 2>/dev/null || echo unknown)"
             echo "memory:      $(( $(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0) / 1024 )) MiB"
         fi
