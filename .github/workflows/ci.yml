@@ -226,9 +226,10 @@ jobs:
       # change that drops tests rather than one that adds untested lines. The
       # Vault and KMS paths are tested in their own job and not counted here.
       # The figure depends on the toolchain, not only on the tests: Go 1.27
-      # splits the same code into blocks differently and reports 73.6 % where
-      # the declared floor, 1.24, reports 70.9 %. This job builds with the
-      # floor, so the floor is set against that.
+      # splits the same code into blocks differently from the declared floor,
+      # 1.24 (73.6 % against 70.9 % when the floor was set to 69). This
+      # job builds with the floor, so the floor is set against that; it
+      # measured 84.1 % on 2026-10-05.
       - name: Coverage floor
         id: coverage
         env:

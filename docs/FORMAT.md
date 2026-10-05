@@ -1,9 +1,11 @@
 # blindbucket Wire Format — Version 1
 
 **Status:** Normative for format version `1`, and implemented as specified.
-**Last updated:** 2026-09-16 (section 15, the object name mapping, added with
-`internal/crypto/names`; section 14, the audit log, added with `internal/audit`;
-before that, clarifications from the independent reference decoder, and the manifest
+**Last updated:** 2026-10-03 (section 10.7: R3 deletes the observed manifest only once
+it has seen the object replaced, [ADR-025](adr/ADR-025-writes-rank-by-when-they-began.md);
+before that, format `1` declared stable with `v1.0.0`; section 15, the object name
+mapping, added with `internal/crypto/names`; section 14, the audit log, added with
+`internal/audit`; clarifications from the independent reference decoder, and the manifest
 and upload token of sections 10 and 11 becoming normative with M4)
 
 Every section is implemented. Sections 4 to 9 live in `internal/crypto/stream`,

@@ -72,7 +72,7 @@ keeps one around is still perfectly readable.
 Six of the seven configurations of `Multipart.tla` are expected to **fail**, and five of
 the six of `Migrate.tla` (listed [with that model](#migrating-names--migratetla)). A model that cannot reproduce the
 two races the design already knows about is too coarse to be evidence about the races it
-does not know about, so "no counterexample" is a failing result for those four.
+does not know about, so "no counterexample" is a failing result for those eleven.
 
 | Configuration | Rules | Expected |
 |---|---|---|
@@ -124,7 +124,7 @@ states there is a small chance two distinct states collide and one subtree goes 
 TLC estimates that probability itself and `check.sh` prints it — for `MCFixed` it lands
 between 1e-4 and 3e-3 depending on the run. That is a property of the hash width, not of the
 machine, so more memory does not move it; rerunning with a different `-fp` seed and getting
-the same answer is what buys extra confidence. The four counterexample runs are unaffected: a
+the same answer is what buys extra confidence. The eleven counterexample runs are unaffected: a
 trace TLC prints is a trace that exists.
 
 Each checked-in module contains both its PlusCal algorithm and its translation. CI re-runs

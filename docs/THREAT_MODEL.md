@@ -101,7 +101,7 @@ must reside in the same trust domain as the clients it serves.
 - The **exact** plaintext size. The format is length-deterministic, so plaintext size is
   computable from ciphertext size (`FORMAT.md` §7). This is not an oversight; it is the
   property that makes a streaming `Content-Length` and listing sizes possible without
-  buffering or extra requests. Size padding is a deferred M6 option.
+  buffering or extra requests. Size padding was listed as an M6 option and not built; format 1 has none.
 - `Content-Type`, `Cache-Control`, `Content-Disposition`, `Content-Encoding`,
   `Content-Language` and the client's own user metadata, as the client sent them.
 - Timestamps of uploads, downloads and deletions.

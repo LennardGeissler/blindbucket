@@ -598,7 +598,7 @@ the gateway already costs per request.
 | [ref/python/](ref/python/) | A second decoder written from the format spec alone, and the differential test that compares it against the Go one. |
 | [bench/](bench/) | Benchmark scripts, the figures they produce, and the methodology notes that came out of getting them wrong first. |
 | [demo/](demo/) | The end-to-end demo, as scripts: upload through the gateway, ciphertext at the provider, identical hash back, and `tamper.sh` — the hostile provider, by hand, in one command. |
-| [spec/tla/](spec/tla/) | The formal model of the manifest coordination, its five TLC configurations, and the counterexamples written out. |
+| [spec/tla/](spec/tla/) | The formal models of the manifest coordination and of `migrate-names`, the thirteen TLC configurations `make tla` runs, and the counterexamples written out. |
 | [CHANGELOG.md](CHANGELOG.md) | What each release contains, and what it does not. |
 
 ## Roadmap
@@ -750,7 +750,7 @@ lost to it went on to delete B's manifest under rule R3. MinIO, where every earl
 happened, keeps the write that lands last. The model now takes the provider's choice as a
 parameter. It reproduces the failure in twelve states and two more of the same kind, in
 rotation and migration. It holds the fixed rules under a provider free to keep or
-discard such a write. The fixed rules are a HEAD before R3's delete and a copy that gives
+discard such a write, checked with two uploads in about 8.7 million states. The fixed rules are a HEAD before R3's delete and a copy that gives
 way to a client's upload in flight
 ([ADR-025](docs/adr/ADR-025-writes-rank-by-when-they-began.md)).
 

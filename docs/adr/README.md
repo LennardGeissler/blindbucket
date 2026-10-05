@@ -4,6 +4,24 @@ Each ADR follows the same shape: **context**, **decision**, **alternatives consi
 **consequences**. The alternatives section is the point of the exercise — a decision without
 rejected options is not a decision, it is a default.
 
+## Goals the ADRs cite
+
+Several ADRs argue from goals G1–G7. They were set in the design document the project
+was built from, before any code, each with the criterion that would show it met; that
+document is gone, so they are kept here.
+
+| Goal | | Criterion | Where it stands |
+|---|---|---|---|
+| G1 | Confidentiality of object contents against the storage provider | The provider holds only data in the format of [FORMAT.md](../FORMAT.md); plaintext and keys never leave the trusted side | Met |
+| G2 | Integrity | Any tampering with content ends in an error, never in wrong plaintext | Met; [THREAT_MODEL.md](../THREAT_MODEL.md) section 3 lists what is and is not covered |
+| G3 | Constant memory | Peak RSS for a 10 GiB upload and download under 50 MiB for the proxy and under 20 MiB for the CLI | Met per stream: 0.5 MiB Go heap for 10 GiB, 12 MiB resident for a 5 GiB stream through the proxy. Not met as literally worded: a 10 GiB `aws s3 cp` keeps ten parts in flight and peaks at 82 MiB, and the CLI's ~70 MiB is the one-time Argon2id arena, which [002](ADR-002-key-hierarchy.md) keeps on purpose |
+| G4 | S3 compatibility | AWS CLI and boto3 pass the integration suite including ranges and multipart; rclone and `mc` documented | Met; [COMPATIBILITY.md](../COMPATIBILITY.md) |
+| G5 | Horizontal scaling | A multipart upload across two instances behind round-robin, without sticky sessions | Met, in CI on every commit |
+| G6 | Rotation without re-upload | Changing the KEK of a prefix only through server-side copy operations | Met; [009](ADR-009-rotation-by-copy.md) |
+| G7 | Traceability | Format specification with test vectors, a threat model, reproducible benchmarks in the repository | Spec, vectors and threat model met. The benchmark scripts are in [`bench/`](../../bench/), but not every figure the README quotes has its raw data committed |
+
+## Records
+
 | Nr. | Title | Status | Milestone |
 |---|---|---|---|
 | [001](ADR-001-segment-format.md) | Segment format: STREAM with AES-256-GCM, 64 KiB chunks, authenticated header | Accepted | M0 |

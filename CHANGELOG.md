@@ -50,6 +50,26 @@ before anything is published. The footer goreleaser adds is now one line per
 paragraph for the same reason. Every existing release has been given its notes,
 except v0.3.0, which had hand-written ones; those were only joined into lines.
 
+**Documentation figures that had gone stale, or said more than was measured.**
+The README and `spec/tla/README.md` still counted five configurations, or four
+that must fail, where `make tla` runs thirteen and eleven must fail; the README
+now also gives the size of the check that holds the fixed rules, two uploads in
+about 8.7 million states. Goals G1–G7, which the ADRs argue from, were defined
+only in the design document removed in 0.1.0; [docs/adr/README.md](docs/adr/README.md)
+now lists them, each with its criterion and where it stands, G3 and G7 included
+where they are not met as worded. FORMAT.md's last-updated line predated section
+10.7's change for ADR-025; the threat model called size padding a deferred M6
+option after M6 closed without it; COMPATIBILITY.md said `mc` had not been
+re-measured since 0.2.0 above a table dating it 2026-09-28. Two figures in earlier
+entries of this file are corrected here rather than rewritten there: the 0.4.0
+entry's "about 2.3 seconds to the first page against a same-region provider" is
+the gateway's measured CPU time plus an assumed 20 ms round trip, not a network
+measurement ([ADR-017](docs/adr/ADR-017-listing-order-under-name-encryption.md));
+and the copy Garage refuses, in the 0.5.0 entry, is one from a source stored
+inline, under 3072 bytes, not under 5 MiB
+([ADR-020](docs/adr/ADR-020-conditional-writes-measured.md)). The 5 MiB bound in
+`CopyObject` stays, because it is S3's.
+
 ## [1.1.0] — 2026-10-03
 
 Three things 1.0 could not do: move a bucket to encrypted names, move a keyring
