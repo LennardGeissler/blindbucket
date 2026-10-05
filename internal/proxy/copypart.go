@@ -69,9 +69,9 @@ func (p *Proxy) uploadPartCopy(
 			"the %s prefix is reserved by the gateway", s3api.ReservedPrefix)
 	}
 
-	// UploadPartCopy is still refused while names are encrypted (see names.go),
-	// but the source is addressed by its stored key here so that lifting the
-	// refusal is lifting a refusal rather than another hunt for call sites.
+	// Resolve the source through storedKey so name encryption stays transparent:
+	// the client names the logical key; the upstream request uses the key the
+	// provider actually stores (see names.go). CopyObject does the same.
 	src.Stored, apiErr = p.storedKey(src.Key)
 	if apiErr != nil {
 		return apiErr
