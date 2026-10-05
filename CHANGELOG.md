@@ -105,6 +105,14 @@ commit.
 
 ### Fixed
 
+**`UploadPartCopy` comment still said name encryption refused it.** The gate in
+`names.go` already lets `UploadPartCopy` through, integration tests exercise both
+copy paths, and COMPATIBILITY.md says the same; the comment above `storedKey` in
+`copypart.go` still described a refusal that had been lifted. It now states in the
+present tense why the source key goes through `storedKey`. No behaviour change.
+Released changelog sections that recorded the old refusal are left as the record
+of those releases.
+
 **Every GitHub release went out without notes.** goreleaser's changelog had been
 switched off since 0.1.0, so that a list of commit subjects would not stand in for
 this file -- and nothing put this file in its place, so each release said how to
