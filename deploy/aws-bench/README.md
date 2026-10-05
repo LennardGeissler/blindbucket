@@ -17,9 +17,12 @@ the hour and should exist only while a run does:
   port; a run is started through Systems Manager. It **terminates itself after
   `MaxHours`** (default 5), whatever else happens.
 - **a bucket of its own**, `blindbucket-bench-<account id>`, which warp clears
-  at every run. Results are written under `results/` once the last run is done.
-  Objects expire after three days.
-- **a role for the instance**, allowed that bucket and nothing else, plus
+  at every run. Objects expire after three days.
+- **a results bucket**, `blindbucket-bench-results-<account id>`, written once
+  the last run is done and never touched by warp. Results expire after thirty
+  days. (They once sat under `results/` in the first bucket, and the next run on
+  the same stack deleted them before it began.)
+- **a role for the instance**, allowed those two buckets and nothing else, plus
   Session Manager. warp's direct path and the gateway's upstream both take
   their credentials from it through IMDSv2. For the gateway that is
   `credential_source: imds` ([ADR-024](../../docs/adr/ADR-024-aws-credentials-without-the-sdk.md)),
@@ -87,13 +90,14 @@ aws ssm get-command-invocation --region eu-central-1 \
   --command-id "$cmd" --instance-id "$id" --query Status --output text
 ```
 
-When it reports `Success`, fetch the results, then empty the bucket (a stack
+When it reports `Success`, fetch the results, then empty both buckets (a stack
 cannot delete a bucket that still holds objects) and delete the stack:
 
 ```sh
-bucket=blindbucket-bench-$(aws sts get-caller-identity --query Account --output text)
-aws s3 cp --recursive "s3://$bucket/results/" bench/results-aws/
-aws s3 rm --recursive "s3://$bucket"
+account=$(aws sts get-caller-identity --query Account --output text)
+aws s3 cp --recursive "s3://blindbucket-bench-results-$account/" bench/results-aws/
+aws s3 rm --recursive "s3://blindbucket-bench-$account"
+aws s3 rm --recursive "s3://blindbucket-bench-results-$account"
 aws cloudformation delete-stack --region eu-central-1 --stack-name blindbucket-bench
 ```
 

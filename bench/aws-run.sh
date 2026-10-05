@@ -10,9 +10,9 @@
 #   aws ssm start-session --target <InstanceId>
 #   sudo /opt/blindbucket/bench/aws-run.sh
 #
-# Results land in s3://<bucket>/results/<timestamp>/ when the last run is done --
-# not before, because warp clears the bucket at every run. The bucket expires
-# objects after three days.
+# Results land in s3://<results bucket>/<timestamp>/ when the last run is done.
+# Not in the bucket warp runs against: warp clears that one at every run, the
+# next run included. The results bucket expires objects after thirty days.
 #
 # Environment (defaults in brackets):
 #   BENCH_SIZES        object sizes        ["1KiB 10MiB 1GiB"]
@@ -118,6 +118,6 @@ python3 "$here/plot/summarise.py" "$work/results" || true
 rm -f passphrase keyring.json
 sed -i "s/${client_secret}/<redacted>/" blindbucket.yaml
 aws s3 cp --recursive --region "$BENCH_REGION" --quiet \
-    "$work" "s3://${BENCH_BUCKET}/results/${stamp}/"
-echo "results: s3://${BENCH_BUCKET}/results/${stamp}/"
+    "$work" "s3://${BENCH_RESULTS_BUCKET}/${stamp}/"
+echo "results: s3://${BENCH_RESULTS_BUCKET}/${stamp}/"
 exit "${status:-0}"

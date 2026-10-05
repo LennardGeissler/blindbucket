@@ -36,8 +36,7 @@ Parameters:
 
 Resources:
   # warp clears this bucket before and after every run, so it holds nothing
-  # else; results go under results/ once the last run is done. The lifecycle
-  # rule is for a run that dies with objects in it.
+  # else. The lifecycle rule is for a run that dies with objects in it.
   BenchBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Delete
@@ -58,6 +57,27 @@ Resources:
             ExpirationInDays: 3
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
+
+  # Results get a bucket of their own. They once lived under results/ in the
+  # bucket above, and the next run's first warp invocation deleted them.
+  ResultsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub blindbucket-bench-results-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-results-after-thirty-days
+            Status: Enabled
+            ExpirationInDays: 30
 
   # The instance's only credentials. warp's direct path and the gateway's
   # upstream both take them from IMDSv2 -- the gateway through
@@ -98,6 +118,11 @@ Resources:
                   - s3:AbortMultipartUpload
                   - s3:ListMultipartUploadParts
                 Resource: !Sub ${BenchBucket.Arn}/*
+              - Sid: Results
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub ${ResultsBucket.Arn}/*
 
   BenchProfile:
     Type: AWS::IAM::InstanceProfile
@@ -149,6 +174,7 @@ Resources:
           install -m 0755 blindbucket /usr/local/bin/blindbucket
           cat > /etc/blindbucket-bench.env <<EOF
           BENCH_BUCKET=${BenchBucket}
+          BENCH_RESULTS_BUCKET=${ResultsBucket}
           BENCH_REGION=${AWS::Region}
           BENCH_VERSION=${Version}
           BENCH_SCRIPTS_REF=${ScriptsRef}
@@ -160,3 +186,5 @@ Outputs:
     Value: !Ref BenchInstance
   Bucket:
     Value: !Ref BenchBucket
+  ResultsBucket:
+    Value: !Ref ResultsBucket
