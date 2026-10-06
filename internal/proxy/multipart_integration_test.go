@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/LennardGeissler/blindbucket/internal/crypto/stream"
 	"github.com/LennardGeissler/blindbucket/internal/manifest"
+	"github.com/LennardGeissler/blindbucket/internal/upload"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
@@ -382,14 +384,71 @@ func TestIntegrationMultipartRejectsEmptyLastPart(t *testing.T) {
 	key := testKey(t, "empty-last.bin")
 	token := h.mpuStart(t, key, nil)
 
-	etag, resp := h.mpuPart(t, key, token, 1, nil)
-	_ = resp.Body.Close()
+	_, resp := h.mpuPart(t, key, token, 1, nil)
+	defer func() { _ = resp.Body.Close() }()
+	h.requireEmptyPartRefused(t, key, token, resp, nil)
+
+	// A refused attempt must neither poison the upload nor replace a valid
+	// part: even one byte can be the last part (FORMAT §7.3).
+	body := []byte("x")
+	etag, part := h.mpuPart(t, key, token, 1, body)
+	_ = part.Body.Close()
+	if part.StatusCode != http.StatusOK {
+		t.Fatalf("nonempty part returned %d", part.StatusCode)
+	}
+	before := h.storedParts(t, key, token)
+	_, retry := h.mpuPart(t, key, token, 1, nil)
+	defer func() { _ = retry.Body.Close() }()
+	h.requireEmptyPartRefused(t, key, token, retry, before)
 
 	done := h.mpuComplete(t, key, token, []completeReqPart{{PartNumber: 1, ETag: etag}})
 	defer func() { _ = done.Body.Close() }()
-	if done.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", done.StatusCode, readBody(t, done))
+	if done.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", done.StatusCode, readBody(t, done))
 	}
+	if got := h.getOK(t, key); got != string(body) {
+		t.Errorf("the retained last part reads back as %q, want %q", got, body)
+	}
+}
+
+// storedParts observes the provider directly so an early refusal cannot hide a
+// part that was stored anyway, or an existing attempt that was overwritten.
+func (h *harness) storedParts(t *testing.T, key, token string) []upstream.Part {
+	t.Helper()
+	opened, err := upload.Open(t.Context(), h.keyring, token, testBucket, key)
+	if err != nil {
+		t.Fatalf("opening upload token: %v", err)
+	}
+	parts, err := h.upstream.ListParts(t.Context(), testBucket, key, opened.UploadID)
+	if err != nil {
+		t.Fatalf("listing upstream parts: %v", err)
+	}
+	return parts
+}
+
+func (h *harness) requireEmptyPartRefused(
+	t *testing.T, key, token string, resp *http.Response, before []upstream.Part,
+) {
+	t.Helper()
+	var out struct {
+		Code    string `xml:"Code"`
+		Message string `xml:"Message"`
+	}
+	body := readBody(t, resp)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty part returned %d, want 400: %s", resp.StatusCode, body)
+	}
+	if err := xml.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatalf("parsing part refusal: %v: %s", err, body)
+	}
+	want := manifest.ErrPartRules.Error() + ": the last part is empty"
+	if out.Code != "InvalidRequest" || out.Message != want {
+		t.Fatalf("empty part returned %d: %s; want 400 InvalidRequest: %s", resp.StatusCode, body, want)
+	}
+	if after := h.storedParts(t, key, token); !slices.Equal(after, before) {
+		t.Errorf("refused part changed upstream parts: before %v, after %v", before, after)
+	}
+	h.absentUpstream(t, key)
 }
 
 // Every operation is bound to the object its token was issued for. A token

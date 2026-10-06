@@ -105,6 +105,13 @@ commit.
 
 ### Fixed
 
+**Empty multipart parts are refused when they arrive.** `UploadPartCopy` from
+an empty object and `UploadPart` with an empty body now return `InvalidRequest`
+with the same explanation completion already gave, before storing or replacing
+a part. Small nonempty parts still work as the last part; empty objects written
+with `PutObject` or copied with `CopyObject` are unaffected. The wire format is
+unchanged ([ADR-026](docs/adr/ADR-026-empty-parts-refused-on-arrival.md)).
+
 **`UploadPartCopy` comment still said name encryption refused it.** The gate in
 `names.go` already lets `UploadPartCopy` through, integration tests exercise both
 copy paths, and COMPATIBILITY.md says the same; the comment above `storedKey` in

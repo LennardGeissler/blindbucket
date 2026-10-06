@@ -189,6 +189,11 @@ func (p *Proxy) uploadPart(
 	if plainLen < 0 {
 		return s3api.ErrMissingContentLength
 	}
+	// An empty part is invalid even if it is the last (ADR-008, FORMAT §7.3).
+	// Refuse it before storing a segment the client can never complete.
+	if plainLen == 0 {
+		return s3api.ErrInvalidRequest.WithMessage("%v: the last part is empty", manifest.ErrPartRules)
+	}
 
 	sealedLen, err := stream.SealedSize(plainLen, p.log2C)
 	if err != nil {

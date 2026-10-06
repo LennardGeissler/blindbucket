@@ -201,22 +201,33 @@ func TestIntegrationUploadPartCopySourceEdges(t *testing.T) {
 		}
 	})
 
-	// An empty part is accepted when copied and refused at completion, because
-	// the format has no empty last part (FORMAT §7.3). What matters is that the
-	// refusal is a clean one and publishes nothing.
+	// No position permits an empty part (ADR-008), so refuse it on arrival
+	// without storing a part or replacing a previous, usable attempt.
 	t.Run("an empty source", func(t *testing.T) {
 		src := testKey(t, "empty.bin")
 		h.store(t, src, nil)
 
 		dst := testKey(t, "dst.bin")
 		token := h.mpuStart(t, dst, nil)
-		etag := h.copyPartETag(t, dst, token, 1, src, "")
-		resp := h.mpuComplete(t, dst, token, []completeReqPart{{PartNumber: 1, ETag: etag}})
+		resp := h.mpuPartCopy(t, dst, token, 1, src, "")
 		defer func() { _ = resp.Body.Close() }()
-		if body := readBody(t, resp); resp.StatusCode != http.StatusBadRequest ||
-			!strings.Contains(body, "the last part is empty") {
-			t.Errorf("returned %d: %s", resp.StatusCode, body)
+		h.requireEmptyPartRefused(t, dst, token, resp, nil)
+
+		small := testKey(t, "small.bin")
+		h.store(t, small, []byte("x"))
+		etag := h.copyPartETag(t, dst, token, 1, small, "")
+		before := h.storedParts(t, dst, token)
+		retry := h.mpuPartCopy(t, dst, token, 1, src, "")
+		defer func() { _ = retry.Body.Close() }()
+		h.requireEmptyPartRefused(t, dst, token, retry, before)
+
+		done := h.mpuComplete(t, dst, token, []completeReqPart{{PartNumber: 1, ETag: etag}})
+		defer func() { _ = done.Body.Close() }()
+		if done.StatusCode != http.StatusOK {
+			t.Fatalf("completion returned %d: %s", done.StatusCode, readBody(t, done))
 		}
-		h.absentUpstream(t, dst)
+		if got := h.getOK(t, dst); got != "x" {
+			t.Errorf("the retained last part reads back as %q, want x", got)
+		}
 	})
 }

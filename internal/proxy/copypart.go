@@ -91,6 +91,11 @@ func (p *Proxy) uploadPartCopy(
 		return apiErr
 	}
 	defer func() { _ = reader.Close() }()
+	// Like uploadPart, reject an empty segment before it replaces a usable
+	// attempt: no position in a completed upload permits it (ADR-008).
+	if plainLen == 0 {
+		return s3api.ErrInvalidRequest.WithMessage("%v: the last part is empty", manifest.ErrPartRules)
+	}
 
 	sealedLen, err := stream.SealedSize(plainLen, p.log2C)
 	if err != nil {
