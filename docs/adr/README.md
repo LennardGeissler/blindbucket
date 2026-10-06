@@ -49,6 +49,7 @@ document is gone, so they are kept here.
 | [023](ADR-023-resealing-a-keyring.md) | Resealing a keyring: verified before it replaces, and no second door | Accepted | post-1.0 |
 | [024](ADR-024-aws-credentials-without-the-sdk.md) | AWS credentials without the SDK: a resolver of our own, chosen explicitly | Accepted | post-1.0 |
 | [025](ADR-025-writes-rank-by-when-they-began.md) | On AWS a completion is not a publication: writes rank by when they began | Accepted | post-1.0 |
+| [026](ADR-026-empty-parts-refused-on-arrival.md) | Empty multipart parts are refused on arrival | Accepted | post-1.0 |
 
 Every entry is Accepted. 025 was Accepted with its code: it corrects an assumption
 010 had stated as fact, which the AWS workflow disproved, and amends 009 and 022 for
