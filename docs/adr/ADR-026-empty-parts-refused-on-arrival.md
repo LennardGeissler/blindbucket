@@ -39,5 +39,8 @@ would reject valid uploads.
 The error code and explanation stay the same, but the part operation now fails
 instead of completion. A refused attempt stores nothing and preserves an
 existing part; the client can retry with nonempty data and complete the upload.
+Completion assembles only the parts the client lists, using `matchParts`:
+uploading an empty part and omitting it from completion used to succeed, but
+is now rejected when the part arrives.
 Empty `PutObject` and `CopyObject` objects remain supported. Ciphertext and
 manifest formats, their versions, and publication ordering do not change.
