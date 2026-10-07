@@ -1,0 +1,5 @@
+=== RUN   TestLargeStreamRoundTrip
+    memory_test.go:162: 10.0 GiB round trip in 30.166s (339 MiB/s), peak heap 0.5 MiB, budget 20 MiB
+--- PASS: TestLargeStreamRoundTrip (30.17s)
+PASS
+ok  	github.com/LennardGeissler/blindbucket/internal/crypto/stream	30.559s

@@ -54,6 +54,15 @@ warp's does not, and S3 takes a 10 MiB PUT in 128 ms with the header against
 [bench/figures/aws/](bench/figures/aws/). This is also the first use of
 `credential_source: imds` against real IMDS rather than a stub.
 
+**The laptop figures, again, with their raw output.** Cipher throughput, the
+10 GiB heap, the freshness index, the sorted listing and the audit log, six runs
+each, and a thousand-object rotation three times, all in
+[bench/figures/local/](bench/figures/local/). Most moved by a few per cent; the
+README now quotes 7.1 and 6.9 GB/s. The rotation did not: it moves 2598 bytes per
+object where it moved about 1500, and running the test either side of ADR-025
+puts all of it on the `ListMultipartUploads` a rotation now makes per object so
+as to give way to a client's upload.
+
 **OpenBao works as a root-key source, unchanged.** OpenBao, the open-source fork
 of Vault, serves the same Transit API, so `provider: vault` pointed at it is all
 it takes. Measured with OpenBao 2.7.1: a keyring sealed by it, a gateway started

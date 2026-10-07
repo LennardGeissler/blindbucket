@@ -1,0 +1,11 @@
+# TestIntegrationRotateAtScale at the commit before and at the commit that added
+# objcopy.YieldToUploads (ADR-025), against the same MinIO, 2026-10-07.
+# Worktrees of 4d362e3~1 and 4d362e3; one run each.
+
+4d362e3~1 (before):
+    rotate_integration_test.go:572: rotated 1000 objects (62.5 MiB of payload) in 1.644s, moving 1.6 MiB over the wire -- 1644 bytes per object, 40:1
+ok  	github.com/LennardGeissler/blindbucket/internal/proxy	5.397s
+
+4d362e3 (YieldToUploads added):
+    rotate_integration_test.go:624: rotated 1000 objects (62.5 MiB of payload) in 2.493s, moving 2.5 MiB over the wire -- 2598 bytes per object, 25:1
+ok  	github.com/LennardGeissler/blindbucket/internal/proxy	6.196s

@@ -112,6 +112,10 @@ model checks, or write a new one anyway.
   payload rotated in 1.5 seconds while 1.4 MiB crossed the wire — about 1500
   bytes per object, and that figure does not change with object size, which is
   the actual invariant.
+  *Measured again on 2026-10-07:* 2598 bytes per object, 2.5 MiB for the same
+  thousand. The difference is ADR-025's open-upload check, one
+  `ListMultipartUploads` per object; the same test before it moves 1644
+  ([bench/figures/local/](../../bench/figures/local/)).
 - A rotated single-part object becomes a multipart object of one part at the
   provider: its ETag gains a `-1` suffix. Nothing else changes — the segment is
   byte-identical, it carries no manifest, and `OpenedSizeSegments(S, C, 1)` is
