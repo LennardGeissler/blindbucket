@@ -3,10 +3,11 @@
 // It runs the gateway (serve), manages keyrings (keygen, keys, reseal, rotate), removes
 // orphaned multipart manifests (gc), moves objects stored in clear to their
 // encrypted names (migrate-names), measures what a provider does with
-// conditional writes (probe), verifies the audit log (audit), and
-// encrypts or decrypts a stream against a keyring with no provider in the way
-// (encrypt, decrypt) -- exercising exactly the code the proxy uses for object
-// bodies. The wire format and the decisions behind it are in docs/.
+// conditional writes (probe), verifies the audit log (audit), reports what a
+// stored segment's header says with no key in sight (inspect), and encrypts or
+// decrypts a stream against a keyring with no provider in the way (encrypt,
+// decrypt) -- exercising exactly the code the proxy uses for object bodies. The
+// wire format and the decisions behind it are in docs/.
 package main
 
 import (
@@ -42,6 +43,7 @@ func commands() []command {
 		{"audit", "verify the audit log, or print the key that verifies it", runAudit},
 		{"encrypt", "encrypt a stream into a blindbucket file", runEncrypt},
 		{"decrypt", "decrypt a blindbucket file", runDecrypt},
+		{"inspect", "show a file's format details without decrypting it", runInspect},
 		{"version", "print the version and exit", runVersion},
 	}
 }

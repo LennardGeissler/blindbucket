@@ -29,6 +29,51 @@ func SaltFromHeader(raw []byte) ([SaltSize]byte, bool) {
 	return salt, true
 }
 
+// Header is a segment header that has been read without any key material.
+type Header struct {
+	// Magic and Version are the marker and version byte as they appear in the
+	// bytes rather than as the package constants. A tool that prints the format
+	// should print what it found: today DecodeHeader refuses every version but the
+	// one it knows, so the two agree, and the day a second version becomes
+	// readable the constant would still report 1.
+	Magic   [len(Magic)]byte
+	Version byte
+	// Params are the chunk size, the multipart flag and the part index, as the
+	// header claims them.
+	Params SegmentParams
+	// Salt is the per-segment salt that separates this segment's subkey from every
+	// other segment's.
+	Salt [SaltSize]byte
+}
+
+// DecodeHeader validates and decodes a 32-byte segment header without any key
+// material.
+//
+// The fields it returns are what the header claims, not what has been verified:
+// the header only becomes authentic once a chunk sealed with it has been
+// authenticated, which is step 4 of docs/FORMAT.md section 5.2. A caller that
+// needs trust rather than reporting goes through NewDecryptReader.
+//
+// It exists so that `blindbucket inspect` reports the fields the decoder reads
+// instead of carrying a second copy of section 4.1's offsets, where a change to
+// one could silently disagree with the other. That is also why the magic and the
+// version are returned rather than reached for as constants: the same argument
+// that removes the offsets from the CLI removes them from the report.
+func DecodeHeader(b []byte) (Header, error) {
+	h, err := parseHeader(b)
+	if err != nil {
+		return Header{}, err
+	}
+	var magic [len(Magic)]byte
+	copy(magic[:], h.raw[offMagic:])
+	return Header{
+		Magic:   magic,
+		Version: h.raw[offVersion],
+		Params:  h.params,
+		Salt:    h.salt,
+	}, nil
+}
+
 // newHeader builds a header for p with a freshly generated salt.
 //
 // The salt is what separates one segment's subkey from every other segment's.

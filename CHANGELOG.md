@@ -18,6 +18,27 @@ version 1 would keep being readable.
 
 ### Added
 
+**`blindbucket inspect` reports what a file or a stored segment says it is, without a
+key.** `blindbucket inspect big.tar.zst.bb`, or the same bytes piped in, prints the
+segment header's fields -- format version, chunk size, whether the segment is one part
+of a multipart object and which part, the salt -- plus the key id a `BBF1` file wraps
+its data key under, and the plaintext size derived from the length the way `HEAD`
+derives it. Nothing is decrypted and no keyring is read, which is what makes it usable
+on an object whose provenance is the question being asked.
+
+What it prints is what the headers claim, not what has been verified: a header is
+authenticated together with its chunks rather than on its own. The sizes are arithmetic
+on the length, and a length is not a checksum -- bytes appended to a ciphertext usually
+read as a sound segment of a different plaintext. A segment the header calls a part is
+left without a derived size entirely: a multipart object is its parts concatenated, and
+the count of them lives in the manifest rather than the body, so reading the input's
+length as one segment reports a number that is wrong by a tag per extra part. A length
+no encoder could produce is refused, as is every header field
+[section 5.2 of docs/FORMAT.md](docs/FORMAT.md) forbids, with the check that failed
+named, and a refusal exits non-zero after printing the fields that did arrive. A
+multipart manifest (`BBM1`, `BBM2`) is named as what it is and not reported: it records
+part sizes rather than a segment header.
+
 **The Helm chart is published**, as `oci://ghcr.io/lennardgeissler/charts/blindbucket`,
 starting with chart version 0.1.1 (gateway 1.1.0); until now it could only be
 installed from a checkout. A chart version is published once, when main first

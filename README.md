@@ -335,6 +335,7 @@ first: the format can be reviewed, fuzzed and measured before any HTTP is involv
 ```sh
 ./bin/blindbucket encrypt --keyring keyring.json -i big.tar.zst -o big.tar.zst.bb
 ./bin/blindbucket decrypt --keyring keyring.json -i big.tar.zst.bb -o restored.tar.zst
+./bin/blindbucket inspect big.tar.zst.bb   # what the file says it is, with no key in sight
 ```
 
 </details>

@@ -124,6 +124,34 @@ func KeyID(src io.Reader) (string, error) {
 	return kid, err
 }
 
+// Header is a BBF1 envelope read without any key material.
+type Header struct {
+	// KeyID is the identifier of the key the file's data key is wrapped under.
+	KeyID string
+	// Size is how many bytes the envelope occupies, which is where the file's
+	// single segment begins (docs/FORMAT.md section 9).
+	Size int64
+}
+
+// DecodeHeader reads a BBF1 envelope from src and reports it, without decrypting
+// anything and without needing a keyring.
+//
+// It is the same reading that Decrypt does to find the key id, exported for
+// `blindbucket inspect`. The envelope is not authenticated on its own, but its
+// key id is bound: the wrapped data key is sealed with the key id in its
+// associated data (docs/FORMAT.md section 6.2), so an id that has been altered
+// stops the file decrypting rather than quietly redirecting it to another key.
+func DecodeHeader(src io.Reader) (Header, error) {
+	kid, wrapped, err := readHeader(src)
+	if err != nil {
+		return Header{}, err
+	}
+	return Header{
+		KeyID: kid,
+		Size:  int64(fixedPrefixSize + len(kid) + len(wrapped)),
+	}, nil
+}
+
 func readHeader(src io.Reader) (kid string, wrapped []byte, err error) {
 	prefix := make([]byte, fixedPrefixSize)
 	if _, err := io.ReadFull(src, prefix); err != nil {
