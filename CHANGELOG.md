@@ -75,6 +75,16 @@ warp's does not, and S3 takes a 10 MiB PUT in 128 ms with the header against
 [bench/figures/aws/](bench/figures/aws/). This is also the first use of
 `credential_source: imds` against real IMDS rather than a stub.
 
+**Litmus tests for S3-compatible stores.** `test/litmus/` measures, with a
+fixed request sequence per property and no SDK in between, what a store does
+with conditional writes and with two overlapping writes to one key. Against
+MinIO, Garage v2.4.1 and SeaweedFS 4.48, five repetitions each: Garage accepts
+`If-None-Match` and `If-Match` on `PutObject` and on `CompleteMultipartUpload`
+and ignores them, answering success; the other two enforce them. On overlap,
+Garage keeps the write that began last and refuses the other; MinIO and
+SeaweedFS keep the one that completed last. `test/providers/seaweedfs.sh`
+starts the third store.
+
 **The laptop figures, again, with their raw output.** Cipher throughput, the
 10 GiB heap, the freshness index, the sorted listing and the audit log, six runs
 each, and a thousand-object rotation three times, all in
