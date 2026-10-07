@@ -1,0 +1,7 @@
+date:    2026-10-07T07:26:24Z
+commit:  56f0ac6
+go:      go version go1.27.1 darwin/arm64
+host:    Darwin 25.6.0 arm64
+cpu:     Apple M4 (10 cores)
+memory:  16 GiB
+minio:   RELEASE.2026-09-22T19-25-18Z (cgr.dev/chainguard/minio, image 6a1d0b45c866), Docker 29.5.2

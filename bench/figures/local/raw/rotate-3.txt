@@ -1,0 +1,6 @@
+=== RUN   TestIntegrationRotateAtScale
+    rotate_integration_test.go:624: rotated 1000 objects (62.5 MiB of payload) in 1.622s, moving 2.5 MiB over the wire -- 2598 bytes per object, 25:1
+--- PASS: TestIntegrationRotateAtScale (4.77s)
+PASS
+sweep of bbtest/20261007T073247-e1dd8aa1/: 0 uploads aborted, 0 objects and 0 manifests deleted
+ok  	github.com/LennardGeissler/blindbucket/internal/proxy	5.014s

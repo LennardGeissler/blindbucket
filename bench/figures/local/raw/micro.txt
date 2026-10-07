@@ -1,0 +1,216 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/LennardGeissler/blindbucket/internal/crypto/stream
+cpu: Apple M4
+BenchmarkEncrypt/16KiB-10       	     950	   1133543 ns/op	7400.34 MB/s	    2806 B/op	      22 allocs/op
+BenchmarkEncrypt/16KiB-10       	    1056	   1141229 ns/op	7350.51 MB/s	    2803 B/op	      22 allocs/op
+BenchmarkEncrypt/16KiB-10       	    1023	   1143854 ns/op	7333.64 MB/s	    2786 B/op	      22 allocs/op
+BenchmarkEncrypt/16KiB-10       	    1051	   1148725 ns/op	7302.54 MB/s	    2803 B/op	      22 allocs/op
+BenchmarkEncrypt/16KiB-10       	    1051	   1155040 ns/op	7262.61 MB/s	    2803 B/op	      22 allocs/op
+BenchmarkEncrypt/16KiB-10       	    1045	   1150644 ns/op	7290.36 MB/s	    2786 B/op	      22 allocs/op
+BenchmarkEncrypt/64KiB-10       	    1027	   1185433 ns/op	7076.41 MB/s	    2858 B/op	      22 allocs/op
+BenchmarkEncrypt/64KiB-10       	    1024	   1162619 ns/op	7215.27 MB/s	    2786 B/op	      22 allocs/op
+BenchmarkEncrypt/64KiB-10       	    1033	   1167474 ns/op	7185.27 MB/s	    2786 B/op	      22 allocs/op
+BenchmarkEncrypt/64KiB-10       	    1032	   1166539 ns/op	7191.02 MB/s	    2857 B/op	      22 allocs/op
+BenchmarkEncrypt/64KiB-10       	    1033	   1186731 ns/op	7068.67 MB/s	    2857 B/op	      22 allocs/op
+BenchmarkEncrypt/64KiB-10       	    1029	   1218242 ns/op	6885.83 MB/s	    2858 B/op	      22 allocs/op
+BenchmarkEncrypt/256KiB-10      	    1021	   1192214 ns/op	7036.16 MB/s	    3316 B/op	      22 allocs/op
+BenchmarkEncrypt/256KiB-10      	    1023	   1196899 ns/op	7008.62 MB/s	    3050 B/op	      22 allocs/op
+BenchmarkEncrypt/256KiB-10      	    1028	   1166098 ns/op	7193.74 MB/s	    3049 B/op	      22 allocs/op
+BenchmarkEncrypt/256KiB-10      	    1033	   1163407 ns/op	7210.38 MB/s	    3048 B/op	      22 allocs/op
+BenchmarkEncrypt/256KiB-10      	    1033	   1160984 ns/op	7225.43 MB/s	    3048 B/op	      22 allocs/op
+BenchmarkEncrypt/256KiB-10      	    1033	   1161520 ns/op	7222.10 MB/s	    3309 B/op	      22 allocs/op
+BenchmarkDecrypt/16KiB-10       	     848	   1217339 ns/op	6890.94 MB/s	    3036 B/op	      26 allocs/op
+BenchmarkDecrypt/16KiB-10       	    1010	   1195785 ns/op	7015.15 MB/s	    3034 B/op	      26 allocs/op
+BenchmarkDecrypt/16KiB-10       	    1008	   1192818 ns/op	7032.60 MB/s	    3034 B/op	      26 allocs/op
+BenchmarkDecrypt/16KiB-10       	    1014	   1187494 ns/op	7064.12 MB/s	    3034 B/op	      26 allocs/op
+BenchmarkDecrypt/16KiB-10       	    1011	   1187258 ns/op	7065.53 MB/s	    3034 B/op	      26 allocs/op
+BenchmarkDecrypt/16KiB-10       	    1011	   1186524 ns/op	7069.90 MB/s	    3034 B/op	      26 allocs/op
+BenchmarkDecrypt/64KiB-10       	     984	   1206811 ns/op	6951.06 MB/s	    3034 B/op	      26 allocs/op
+BenchmarkDecrypt/64KiB-10       	     972	   1220113 ns/op	6875.27 MB/s	    3034 B/op	      26 allocs/op
+BenchmarkDecrypt/64KiB-10       	     968	   1227144 ns/op	6835.88 MB/s	    3034 B/op	      26 allocs/op
+BenchmarkDecrypt/64KiB-10       	     973	   1219252 ns/op	6880.13 MB/s	    3034 B/op	      26 allocs/op
+BenchmarkDecrypt/64KiB-10       	     969	   1241088 ns/op	6759.07 MB/s	    3034 B/op	      26 allocs/op
+BenchmarkDecrypt/64KiB-10       	     993	   1219731 ns/op	6877.42 MB/s	    3034 B/op	      26 allocs/op
+BenchmarkDecrypt/256KiB-10      	     956	   1252939 ns/op	6695.15 MB/s	    3035 B/op	      26 allocs/op
+BenchmarkDecrypt/256KiB-10      	     960	   1254745 ns/op	6685.51 MB/s	    3035 B/op	      26 allocs/op
+BenchmarkDecrypt/256KiB-10      	     946	   1260172 ns/op	6656.72 MB/s	    3035 B/op	      26 allocs/op
+BenchmarkDecrypt/256KiB-10      	     952	   1256618 ns/op	6675.55 MB/s	    3035 B/op	      26 allocs/op
+BenchmarkDecrypt/256KiB-10      	     956	   1255276 ns/op	6682.68 MB/s	    3035 B/op	      26 allocs/op
+BenchmarkDecrypt/256KiB-10      	     952	   1258204 ns/op	6667.13 MB/s	    3035 B/op	      26 allocs/op
+BenchmarkChunkSteadyState/16KiB-10         	  593230	      2014 ns/op	8134.08 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/16KiB-10         	  591180	      2010 ns/op	8150.43 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/16KiB-10         	  598935	      2007 ns/op	8162.18 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/16KiB-10         	  598488	      2010 ns/op	8152.52 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/16KiB-10         	  601465	      2006 ns/op	8169.44 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/16KiB-10         	  592063	      2012 ns/op	8144.85 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/64KiB-10         	  150085	      7966 ns/op	8226.85 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/64KiB-10         	  150638	      7951 ns/op	8242.82 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/64KiB-10         	  151203	      7951 ns/op	8242.91 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/64KiB-10         	  151190	      7964 ns/op	8228.88 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/64KiB-10         	  150589	      7953 ns/op	8240.24 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/64KiB-10         	  151266	      7942 ns/op	8251.64 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/256KiB-10        	   37849	     31765 ns/op	8252.61 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/256KiB-10        	   37742	     31874 ns/op	8224.50 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/256KiB-10        	   37560	     31878 ns/op	8223.31 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/256KiB-10        	   37746	     31794 ns/op	8245.09 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/256KiB-10        	   37704	     31906 ns/op	8216.06 MB/s	       0 B/op	       0 allocs/op
+BenchmarkChunkSteadyState/256KiB-10        	   37000	     31791 ns/op	8245.84 MB/s	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/LennardGeissler/blindbucket/internal/crypto/stream	71.809s
+goos: darwin
+goarch: arm64
+pkg: github.com/LennardGeissler/blindbucket/internal/crypto/names
+cpu: Apple M4
+BenchmarkKeyExpansion/one-long-segment-10         	  936030	      1265 ns/op	       624.0 B/max-plaintext-key	         1.641 expansion	    6164 B/op	      17 allocs/op
+BenchmarkKeyExpansion/one-long-segment-10         	  953443	      1257 ns/op	       624.0 B/max-plaintext-key	         1.641 expansion	    6164 B/op	      17 allocs/op
+BenchmarkKeyExpansion/one-long-segment-10         	  960088	      1257 ns/op	       624.0 B/max-plaintext-key	         1.641 expansion	    6164 B/op	      17 allocs/op
+BenchmarkKeyExpansion/one-long-segment-10         	  941840	      1259 ns/op	       624.0 B/max-plaintext-key	         1.641 expansion	    6164 B/op	      17 allocs/op
+BenchmarkKeyExpansion/one-long-segment-10         	  956442	      1264 ns/op	       624.0 B/max-plaintext-key	         1.641 expansion	    6164 B/op	      17 allocs/op
+BenchmarkKeyExpansion/one-long-segment-10         	  954252	      1258 ns/op	       624.0 B/max-plaintext-key	         1.641 expansion	    6164 B/op	      17 allocs/op
+BenchmarkKeyExpansion/realistic-tree-10           	  360372	      3291 ns/op	       560.0 B/max-plaintext-key	         1.827 expansion	   13992 B/op	      81 allocs/op
+BenchmarkKeyExpansion/realistic-tree-10           	  365286	      3290 ns/op	       560.0 B/max-plaintext-key	         1.827 expansion	   13992 B/op	      81 allocs/op
+BenchmarkKeyExpansion/realistic-tree-10           	  361680	      3303 ns/op	       560.0 B/max-plaintext-key	         1.827 expansion	   13992 B/op	      81 allocs/op
+BenchmarkKeyExpansion/realistic-tree-10           	  367081	      3307 ns/op	       560.0 B/max-plaintext-key	         1.827 expansion	   13992 B/op	      81 allocs/op
+BenchmarkKeyExpansion/realistic-tree-10           	  355227	      3326 ns/op	       560.0 B/max-plaintext-key	         1.827 expansion	   13992 B/op	      81 allocs/op
+BenchmarkKeyExpansion/realistic-tree-10           	  363008	      3314 ns/op	       560.0 B/max-plaintext-key	         1.827 expansion	   13992 B/op	      81 allocs/op
+BenchmarkKeyExpansion/segments-of-8-10            	   78890	     15190 ns/op	       214.0 B/max-plaintext-key	         4.785 expansion	   50616 B/op	     435 allocs/op
+BenchmarkKeyExpansion/segments-of-8-10            	   79016	     15176 ns/op	       214.0 B/max-plaintext-key	         4.785 expansion	   50616 B/op	     435 allocs/op
+BenchmarkKeyExpansion/segments-of-8-10            	   78910	     15127 ns/op	       214.0 B/max-plaintext-key	         4.785 expansion	   50616 B/op	     435 allocs/op
+BenchmarkKeyExpansion/segments-of-8-10            	   79233	     15154 ns/op	       214.0 B/max-plaintext-key	         4.785 expansion	   50616 B/op	     435 allocs/op
+BenchmarkKeyExpansion/segments-of-8-10            	   79239	     15146 ns/op	       214.0 B/max-plaintext-key	         4.785 expansion	   50616 B/op	     435 allocs/op
+BenchmarkKeyExpansion/segments-of-8-10            	   79171	     15135 ns/op	       214.0 B/max-plaintext-key	         4.785 expansion	   50616 B/op	     435 allocs/op
+BenchmarkKeyExpansion/segments-of-4-10            	   71745	     16741 ns/op	       128.0 B/max-plaintext-key	         8.000 expansion	   56160 B/op	     483 allocs/op
+BenchmarkKeyExpansion/segments-of-4-10            	   71959	     16694 ns/op	       128.0 B/max-plaintext-key	         8.000 expansion	   56160 B/op	     483 allocs/op
+BenchmarkKeyExpansion/segments-of-4-10            	   71743	     16728 ns/op	       128.0 B/max-plaintext-key	         8.000 expansion	   56160 B/op	     483 allocs/op
+BenchmarkKeyExpansion/segments-of-4-10            	   71652	     16735 ns/op	       128.0 B/max-plaintext-key	         8.000 expansion	   56160 B/op	     483 allocs/op
+BenchmarkKeyExpansion/segments-of-4-10            	   71690	     16877 ns/op	       128.0 B/max-plaintext-key	         8.000 expansion	   56160 B/op	     483 allocs/op
+BenchmarkKeyExpansion/segments-of-4-10            	   71868	     16577 ns/op	       128.0 B/max-plaintext-key	         8.000 expansion	   56160 B/op	     483 allocs/op
+PASS
+ok  	github.com/LennardGeissler/blindbucket/internal/crypto/names	29.181s
+goos: darwin
+goarch: arm64
+pkg: github.com/LennardGeissler/blindbucket/internal/freshness
+cpu: Apple M4
+BenchmarkIndexMemory/objects=100000-10         	      28	  40647629 ns/op	        73.57 B/object	         7.016 MiB/index	28157820 B/op	  900053 allocs/op
+BenchmarkIndexMemory/objects=100000-10         	      30	  39756538 ns/op	        73.51 B/object	         7.010 MiB/index	28158110 B/op	  900053 allocs/op
+BenchmarkIndexMemory/objects=100000-10         	      27	  39959762 ns/op	        73.50 B/object	         7.009 MiB/index	28158166 B/op	  900056 allocs/op
+BenchmarkIndexMemory/objects=100000-10         	      28	  40460311 ns/op	        73.51 B/object	         7.010 MiB/index	28157709 B/op	  900049 allocs/op
+BenchmarkIndexMemory/objects=100000-10         	      28	  39874750 ns/op	        73.50 B/object	         7.009 MiB/index	28158267 B/op	  900053 allocs/op
+BenchmarkIndexMemory/objects=100000-10         	      28	  40106808 ns/op	        73.50 B/object	         7.010 MiB/index	28158101 B/op	  900053 allocs/op
+BenchmarkIndexMemory/objects=1000000-10        	       3	 492540611 ns/op	       117.5 B/object	       112.1 MiB/index	325531872 B/op	 9003874 allocs/op
+BenchmarkIndexMemory/objects=1000000-10        	       2	 501440458 ns/op	       117.5 B/object	       112.1 MiB/index	325531840 B/op	 9003894 allocs/op
+BenchmarkIndexMemory/objects=1000000-10        	       3	 492224194 ns/op	       117.5 B/object	       112.1 MiB/index	325534152 B/op	 9003890 allocs/op
+BenchmarkIndexMemory/objects=1000000-10        	       3	 490317069 ns/op	       117.5 B/object	       112.1 MiB/index	325532170 B/op	 9003877 allocs/op
+BenchmarkIndexMemory/objects=1000000-10        	       3	 487707500 ns/op	       117.5 B/object	       112.1 MiB/index	325534029 B/op	 9003891 allocs/op
+BenchmarkIndexMemory/objects=1000000-10        	       3	 486039778 ns/op	       117.5 B/object	       112.1 MiB/index	325533064 B/op	 9003878 allocs/op
+BenchmarkIndexMemory/objects=10000000-10       	       1	5274053542 ns/op	        94.02 B/object	       896.6 MiB/index	3020200872 B/op	90032615 allocs/op
+BenchmarkIndexMemory/objects=10000000-10       	       1	5015768833 ns/op	        94.02 B/object	       896.6 MiB/index	3020197152 B/op	90032600 allocs/op
+BenchmarkIndexMemory/objects=10000000-10       	       1	5031776709 ns/op	        94.02 B/object	       896.6 MiB/index	3020191608 B/op	90032594 allocs/op
+BenchmarkIndexMemory/objects=10000000-10       	       1	5059374917 ns/op	        94.02 B/object	       896.6 MiB/index	3020193952 B/op	90032589 allocs/op
+BenchmarkIndexMemory/objects=10000000-10       	       1	5123764000 ns/op	        94.02 B/object	       896.6 MiB/index	3020190888 B/op	90032581 allocs/op
+BenchmarkIndexMemory/objects=10000000-10       	       1	5054950334 ns/op	        94.02 B/object	       896.6 MiB/index	3020190280 B/op	90032575 allocs/op
+BenchmarkIndexMemoryPlainNames-10              	       3	 357243653 ns/op	       165.5 B/object	       157.9 MiB/index	277526690 B/op	 6003861 allocs/op
+BenchmarkIndexMemoryPlainNames-10              	       3	 361543486 ns/op	       165.5 B/object	       157.9 MiB/index	277528637 B/op	 6003859 allocs/op
+BenchmarkIndexMemoryPlainNames-10              	       3	 359432597 ns/op	       165.5 B/object	       157.9 MiB/index	277526525 B/op	 6003858 allocs/op
+BenchmarkIndexMemoryPlainNames-10              	       3	 358818222 ns/op	       165.5 B/object	       157.9 MiB/index	277526336 B/op	 6003862 allocs/op
+BenchmarkIndexMemoryPlainNames-10              	       3	 359345292 ns/op	       165.5 B/object	       157.9 MiB/index	277526581 B/op	 6003865 allocs/op
+BenchmarkIndexMemoryPlainNames-10              	       3	 358909861 ns/op	       165.5 B/object	       157.9 MiB/index	277526829 B/op	 6003863 allocs/op
+BenchmarkCheck-10                              	 4015333	       296.7 ns/op	      96 B/op	       4 allocs/op
+BenchmarkCheck-10                              	 4123870	       294.1 ns/op	      96 B/op	       4 allocs/op
+BenchmarkCheck-10                              	 4061007	       294.6 ns/op	      96 B/op	       4 allocs/op
+BenchmarkCheck-10                              	 4110360	       293.5 ns/op	      96 B/op	       4 allocs/op
+BenchmarkCheck-10                              	 4124188	       291.4 ns/op	      96 B/op	       4 allocs/op
+BenchmarkCheck-10                              	 4068720	       292.7 ns/op	      96 B/op	       4 allocs/op
+BenchmarkRecord/sync_every=1-10                	     366	   3827955 ns/op	     403 B/op	       9 allocs/op
+BenchmarkRecord/sync_every=1-10                	     373	   3720776 ns/op	     401 B/op	       9 allocs/op
+BenchmarkRecord/sync_every=1-10                	     375	   3685148 ns/op	     402 B/op	       9 allocs/op
+BenchmarkRecord/sync_every=1-10                	     375	   3646656 ns/op	     399 B/op	       9 allocs/op
+BenchmarkRecord/sync_every=1-10                	     373	   3680292 ns/op	     400 B/op	       9 allocs/op
+BenchmarkRecord/sync_every=1-10                	     380	   3658817 ns/op	     397 B/op	       9 allocs/op
+BenchmarkRecord/sync_every=256-10              	   58786	     19125 ns/op	     471 B/op	      10 allocs/op
+BenchmarkRecord/sync_every=256-10              	   62031	     18923 ns/op	     493 B/op	      10 allocs/op
+BenchmarkRecord/sync_every=256-10              	   63046	     19045 ns/op	     489 B/op	      10 allocs/op
+BenchmarkRecord/sync_every=256-10              	   63460	     18788 ns/op	     486 B/op	      10 allocs/op
+BenchmarkRecord/sync_every=256-10              	   63922	     18526 ns/op	     486 B/op	      10 allocs/op
+BenchmarkRecord/sync_every=256-10              	   63673	     18421 ns/op	     487 B/op	      10 allocs/op
+BenchmarkOpen-10                               	       9	 111527935 ns/op	        48.00 B/object-on-disk	        45.78 MiB/file	235408104 B/op	    8224 allocs/op
+BenchmarkOpen-10                               	      10	 104493954 ns/op	        48.00 B/object-on-disk	        45.78 MiB/file	235431065 B/op	    8224 allocs/op
+BenchmarkOpen-10                               	      10	 104772029 ns/op	        48.00 B/object-on-disk	        45.78 MiB/file	235614657 B/op	    8231 allocs/op
+BenchmarkOpen-10                               	      10	 105262658 ns/op	        48.00 B/object-on-disk	        45.78 MiB/file	235534342 B/op	    8228 allocs/op
+BenchmarkOpen-10                               	      10	 106156979 ns/op	        48.00 B/object-on-disk	        45.78 MiB/file	235580232 B/op	    8230 allocs/op
+BenchmarkOpen-10                               	      10	 104317892 ns/op	        48.00 B/object-on-disk	        45.78 MiB/file	235465502 B/op	    8226 allocs/op
+PASS
+ok  	github.com/LennardGeissler/blindbucket/internal/freshness	102.179s
+goos: darwin
+goarch: arm64
+pkg: github.com/LennardGeissler/blindbucket/internal/audit
+cpu: Apple M4
+BenchmarkAppend-10                  	  319892	      3705 ns/op	    8454 B/op	     100 allocs/op
+BenchmarkAppend-10                  	  331576	      3649 ns/op	    8454 B/op	     100 allocs/op
+BenchmarkAppend-10                  	  328596	      3640 ns/op	    8454 B/op	     100 allocs/op
+BenchmarkAppend-10                  	  328522	      3644 ns/op	    8454 B/op	     100 allocs/op
+BenchmarkAppend-10                  	  328557	      3642 ns/op	    8454 B/op	     100 allocs/op
+BenchmarkAppend-10                  	  328838	      3654 ns/op	    8454 B/op	     100 allocs/op
+BenchmarkAppendWithCheckpoint-10    	   62776	     22148 ns/op	    8412 B/op	      99 allocs/op
+BenchmarkAppendWithCheckpoint-10    	   52590	     22662 ns/op	    8412 B/op	      99 allocs/op
+BenchmarkAppendWithCheckpoint-10    	   53546	     22490 ns/op	    8412 B/op	      99 allocs/op
+BenchmarkAppendWithCheckpoint-10    	   54014	     21769 ns/op	    8412 B/op	      99 allocs/op
+BenchmarkAppendWithCheckpoint-10    	   52796	     22585 ns/op	    8412 B/op	      99 allocs/op
+BenchmarkAppendWithCheckpoint-10    	   53547	     22138 ns/op	    8413 B/op	      99 allocs/op
+BenchmarkVerify-10                  	      51	  21670856 ns/op	 197.88 MB/s	29737395 B/op	  410510 allocs/op
+BenchmarkVerify-10                  	      54	  21741653 ns/op	 197.24 MB/s	29737262 B/op	  410510 allocs/op
+BenchmarkVerify-10                  	      54	  21826597 ns/op	 196.47 MB/s	29738336 B/op	  410514 allocs/op
+BenchmarkVerify-10                  	      54	  21797295 ns/op	 196.74 MB/s	29737167 B/op	  410515 allocs/op
+BenchmarkVerify-10                  	      54	  21837950 ns/op	 196.37 MB/s	29739037 B/op	  410523 allocs/op
+BenchmarkVerify-10                  	      54	  21804130 ns/op	 196.67 MB/s	29739833 B/op	  410548 allocs/op
+PASS
+ok  	github.com/LennardGeissler/blindbucket/internal/audit	22.321s
+goos: darwin
+goarch: arm64
+pkg: github.com/LennardGeissler/blindbucket/internal/proxy
+cpu: Apple M4
+BenchmarkBufferedListing/objects=10000-10         	      16	  68389607 ns/op	       215.3 B/object	         2.054 MiB/prefix	178050086 B/op	 1765766 allocs/op
+BenchmarkBufferedListing/objects=10000-10         	      16	  67467172 ns/op	       213.4 B/object	         2.035 MiB/prefix	178049936 B/op	 1765773 allocs/op
+BenchmarkBufferedListing/objects=10000-10         	      16	  67689508 ns/op	       213.2 B/object	         2.033 MiB/prefix	178048881 B/op	 1765766 allocs/op
+BenchmarkBufferedListing/objects=10000-10         	      16	  67642956 ns/op	       213.6 B/object	         2.037 MiB/prefix	178049805 B/op	 1765761 allocs/op
+BenchmarkBufferedListing/objects=10000-10         	      16	  67993172 ns/op	       213.5 B/object	         2.036 MiB/prefix	178048858 B/op	 1765764 allocs/op
+BenchmarkBufferedListing/objects=10000-10         	      16	  67748531 ns/op	       212.8 B/object	         2.029 MiB/prefix	178050062 B/op	 1765775 allocs/op
+BenchmarkBufferedListing/objects=100000-10        	       2	 616069146 ns/op	       213.0 B/object	        20.31 MiB/prefix	1779928428 B/op	17660306 allocs/op
+BenchmarkBufferedListing/objects=100000-10        	       2	 615292604 ns/op	       212.8 B/object	        20.30 MiB/prefix	1779924028 B/op	17660319 allocs/op
+BenchmarkBufferedListing/objects=100000-10        	       2	 623397042 ns/op	       212.9 B/object	        20.30 MiB/prefix	1779926340 B/op	17660336 allocs/op
+BenchmarkBufferedListing/objects=100000-10        	       2	 617695166 ns/op	       212.9 B/object	        20.30 MiB/prefix	1779925580 B/op	17660325 allocs/op
+BenchmarkBufferedListing/objects=100000-10        	       2	 615537292 ns/op	       212.8 B/object	        20.30 MiB/prefix	1779923176 B/op	17660285 allocs/op
+BenchmarkBufferedListing/objects=100000-10        	       2	 628420375 ns/op	       212.8 B/object	        20.30 MiB/prefix	1779924524 B/op	17660324 allocs/op
+BenchmarkBufferedListing/objects=1000000-10       	       1	6402260209 ns/op	       212.8 B/object	       202.9 MiB/prefix	17797378184 B/op	176601628 allocs/op
+BenchmarkBufferedListing/objects=1000000-10       	       1	6400488583 ns/op	       212.8 B/object	       202.9 MiB/prefix	17797374664 B/op	176601572 allocs/op
+BenchmarkBufferedListing/objects=1000000-10       	       1	6422168291 ns/op	       212.8 B/object	       202.9 MiB/prefix	17797369064 B/op	176601480 allocs/op
+BenchmarkBufferedListing/objects=1000000-10       	       1	6431351292 ns/op	       212.8 B/object	       202.9 MiB/prefix	17797379640 B/op	176601652 allocs/op
+BenchmarkBufferedListing/objects=1000000-10       	       1	6339985000 ns/op	       212.8 B/object	       202.9 MiB/prefix	17797379824 B/op	176601680 allocs/op
+BenchmarkBufferedListing/objects=1000000-10       	       1	6425459000 ns/op	       212.8 B/object	       202.9 MiB/prefix	17797378552 B/op	176601634 allocs/op
+BenchmarkBufferedListingLatency/objects=10000-10  	      38	  30486128 ns/op	         3.049 us/object	88115151 B/op	  878003 allocs/op
+BenchmarkBufferedListingLatency/objects=10000-10  	      38	  30677618 ns/op	         3.068 us/object	88115133 B/op	  878002 allocs/op
+BenchmarkBufferedListingLatency/objects=10000-10  	      36	  30823626 ns/op	         3.082 us/object	88115132 B/op	  878003 allocs/op
+BenchmarkBufferedListingLatency/objects=10000-10  	      38	  30599988 ns/op	         3.060 us/object	88115128 B/op	  878003 allocs/op
+BenchmarkBufferedListingLatency/objects=10000-10  	      38	  30511703 ns/op	         3.051 us/object	88115102 B/op	  878002 allocs/op
+BenchmarkBufferedListingLatency/objects=10000-10  	      38	  30539060 ns/op	         3.054 us/object	88115117 B/op	  878002 allocs/op
+BenchmarkBufferedListingLatency/objects=100000-10 	       4	 302751760 ns/op	         3.028 us/object	881123748 B/op	 8780001 allocs/op
+BenchmarkBufferedListingLatency/objects=100000-10 	       4	 299579000 ns/op	         2.996 us/object	881123732 B/op	 8780001 allocs/op
+BenchmarkBufferedListingLatency/objects=100000-10 	       4	 299813427 ns/op	         2.998 us/object	881123752 B/op	 8780001 allocs/op
+BenchmarkBufferedListingLatency/objects=100000-10 	       4	 303279104 ns/op	         3.033 us/object	881123764 B/op	 8780001 allocs/op
+BenchmarkBufferedListingLatency/objects=100000-10 	       4	 302324510 ns/op	         3.023 us/object	881123744 B/op	 8780001 allocs/op
+BenchmarkBufferedListingLatency/objects=100000-10 	       4	 299340375 ns/op	         2.993 us/object	881123752 B/op	 8780001 allocs/op
+BenchmarkBufferedListingLatency/objects=1000000-10         	       1	3233706250 ns/op	         3.234 us/object	8811203232 B/op	87800001 allocs/op
+BenchmarkBufferedListingLatency/objects=1000000-10         	       1	3256997375 ns/op	         3.257 us/object	8811203216 B/op	87800001 allocs/op
+BenchmarkBufferedListingLatency/objects=1000000-10         	       1	3226646792 ns/op	         3.227 us/object	8811203168 B/op	87800001 allocs/op
+BenchmarkBufferedListingLatency/objects=1000000-10         	       1	3246527458 ns/op	         3.247 us/object	8811203264 B/op	87800001 allocs/op
+BenchmarkBufferedListingLatency/objects=1000000-10         	       1	3232261625 ns/op	         3.232 us/object	8811203168 B/op	87800001 allocs/op
+BenchmarkBufferedListingLatency/objects=1000000-10         	       1	3268658042 ns/op	         3.269 us/object	8811203344 B/op	87800001 allocs/op
+BenchmarkMeanKeyLength-10                                  	1000000000	         0.02791 ns/op	        34.40 B/plaintext-key	       182.2 B/stored-key	         5.297 expansion	       0 B/op	       0 allocs/op
+BenchmarkMeanKeyLength-10                                  	1000000000	         0.02781 ns/op	        34.40 B/plaintext-key	       182.2 B/stored-key	         5.297 expansion	       0 B/op	       0 allocs/op
+BenchmarkMeanKeyLength-10                                  	1000000000	         0.02781 ns/op	        34.40 B/plaintext-key	       182.2 B/stored-key	         5.297 expansion	       0 B/op	       0 allocs/op
+BenchmarkMeanKeyLength-10                                  	1000000000	         0.02800 ns/op	        34.40 B/plaintext-key	       182.2 B/stored-key	         5.297 expansion	       0 B/op	       0 allocs/op
+BenchmarkMeanKeyLength-10                                  	1000000000	         0.02780 ns/op	        34.40 B/plaintext-key	       182.2 B/stored-key	         5.297 expansion	       0 B/op	       0 allocs/op
+BenchmarkMeanKeyLength-10                                  	1000000000	         0.02779 ns/op	        34.40 B/plaintext-key	       182.2 B/stored-key	         5.297 expansion	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/LennardGeissler/blindbucket/internal/proxy	109.444s

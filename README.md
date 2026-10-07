@@ -145,7 +145,7 @@ project.
 | Constant memory | `O(chunk size)` per active stream, independent of object size |
 | Statelessness | No local state; multipart state travels in an encrypted token |
 | Drop-in compatibility | Standard clients unchanged, only `--endpoint-url` |
-| Key rotation | KEK rotation by server-side copy; 1000 objects move 1.4 MiB, not 62.5 MiB, and `keys remove` retires the old key afterwards |
+| Key rotation | KEK rotation by server-side copy; 1000 objects move 2.5 MiB, not 62.5 MiB, and `keys remove` retires the old key afterwards |
 
 ## Why not just use…
 
@@ -288,9 +288,9 @@ leaves the provider:
 ./bin/blindbucket keys remove --keyring keyring.json --force 2026-09     # retire the old one
 ```
 
-A thousand 64 KiB objects rotate in about a second and a half, moving 1.4 MiB
-over the wire for 62.5 MiB of payload — and that per-object cost does not grow
-with object size. Clients may keep writing throughout: the rotation's final write
+A thousand 64 KiB objects rotate in about 1.6 seconds, moving 2.5 MiB over the
+wire for 62.5 MiB of payload — and that per-object cost does not grow with object
+size ([bench/figures/local/](bench/figures/local/)). Clients may keep writing throughout: the rotation's final write
 is conditional on the ETag it started from, so a client write that lands in
 between wins and the object is skipped until the next run.
 
@@ -388,12 +388,13 @@ local VM — client, gateway and provider all on the one laptop, competing for t
 same cores and the same disk. Absolute figures would be higher on real hardware;
 the comparisons are what the setup is built to measure. Reproduce with
 `make bench` and [bench/warp.sh](bench/warp.sh); the scripts and the caveats are
-in [bench/](bench/).
+in [bench/](bench/). The first four rows were measured again on 2026-10-07, with
+the raw output of six runs each, in [bench/figures/local/](bench/figures/local/).
 
 | Measurement | Result |
 |---|---|
-| Encrypt, 64 KiB chunks | 7.2 GB/s |
-| Decrypt, 64 KiB chunks | 7.0 GB/s |
+| Encrypt, 64 KiB chunks | 7.1 GB/s |
+| Decrypt, 64 KiB chunks | 6.9 GB/s |
 | Allocations per chunk, steady state | **0** |
 | Allocations per 8 MiB stream | 22 encrypting, 26 decrypting — constant, not per chunk |
 | 10 GiB encrypt + decrypt | identical SHA-256, **0.5 MiB peak Go heap** |
