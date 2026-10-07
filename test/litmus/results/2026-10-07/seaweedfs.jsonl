@@ -1,0 +1,40 @@
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-put-inm", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:32:03.966158+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-put-im", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:32:03.973041+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-complete-im", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:32:03.985245+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-complete-inm", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:32:03.996363+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "copy-source-im", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:32:04.010963+00:00"}
+{"B": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "seaweedfs", "test": "overlap-mpu-mpu", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:32:05.147684+00:00"}
+{"PUT": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "seaweedfs", "test": "overlap-mpu-put", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:32:06.282178+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "seaweedfs", "test": "read-after-write", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:32:06.411475+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-put-inm", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:32:06.418680+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-put-im", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:32:06.426563+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-complete-im", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:32:06.437537+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-complete-inm", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:32:06.449178+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "copy-source-im", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:32:06.462895+00:00"}
+{"B": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "seaweedfs", "test": "overlap-mpu-mpu", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:32:07.597635+00:00"}
+{"PUT": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "seaweedfs", "test": "overlap-mpu-put", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:32:08.735529+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "seaweedfs", "test": "read-after-write", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:32:08.849870+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-put-inm", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:32:08.856110+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-put-im", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:32:08.863361+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-complete-im", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:32:08.874948+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-complete-inm", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:32:08.887436+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "copy-source-im", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:32:08.900614+00:00"}
+{"B": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "seaweedfs", "test": "overlap-mpu-mpu", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:32:10.036412+00:00"}
+{"PUT": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "seaweedfs", "test": "overlap-mpu-put", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:32:11.164169+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "seaweedfs", "test": "read-after-write", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:32:11.285772+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-put-inm", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:32:11.292360+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-put-im", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:32:11.298673+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-complete-im", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:32:11.311162+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-complete-inm", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:32:11.323984+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "copy-source-im", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:32:11.336788+00:00"}
+{"B": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "seaweedfs", "test": "overlap-mpu-mpu", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:32:12.467482+00:00"}
+{"PUT": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "seaweedfs", "test": "overlap-mpu-put", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:32:13.591279+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "seaweedfs", "test": "read-after-write", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:32:13.708783+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-put-inm", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:13.716067+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-put-im", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:13.722948+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-complete-im", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:13.734038+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "cond-complete-inm", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:13.745643+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "seaweedfs", "test": "copy-source-im", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:13.758532+00:00"}
+{"B": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "seaweedfs", "test": "overlap-mpu-mpu", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:14.892626+00:00"}
+{"PUT": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "seaweedfs", "test": "overlap-mpu-put", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:16.020797+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "seaweedfs", "test": "read-after-write", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:16.141376+00:00"}

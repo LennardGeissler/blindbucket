@@ -1,0 +1,40 @@
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-put-inm", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:31:51.838343+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-put-im", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:31:51.843739+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-complete-im", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:31:51.856550+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-complete-inm", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:31:51.867045+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "garage", "test": "copy-source-im", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:31:51.877930+00:00"}
+{"B": "200", "A": "404/NoSuchUpload", "holds": "B", "verdict": "last-created; loser refused (404/NoSuchUpload)", "provider": "garage", "test": "overlap-mpu-mpu", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:31:53.012731+00:00"}
+{"PUT": "200", "A": "404/NoSuchUpload", "holds": "PUT", "verdict": "last-begun; loser refused (404/NoSuchUpload)", "provider": "garage", "test": "overlap-mpu-put", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:31:54.138450+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "garage", "test": "read-after-write", "repeat": 1, "error_in_200": [], "time": "2026-10-07T11:31:54.252085+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-put-inm", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:31:54.258058+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-put-im", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:31:54.263525+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-complete-im", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:31:54.273673+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-complete-inm", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:31:54.286103+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "garage", "test": "copy-source-im", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:31:54.297154+00:00"}
+{"B": "200", "A": "404/NoSuchUpload", "holds": "B", "verdict": "last-created; loser refused (404/NoSuchUpload)", "provider": "garage", "test": "overlap-mpu-mpu", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:31:55.430475+00:00"}
+{"PUT": "200", "A": "404/NoSuchUpload", "holds": "PUT", "verdict": "last-begun; loser refused (404/NoSuchUpload)", "provider": "garage", "test": "overlap-mpu-put", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:31:56.558093+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "garage", "test": "read-after-write", "repeat": 2, "error_in_200": [], "time": "2026-10-07T11:31:56.676509+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-put-inm", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:31:56.682583+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-put-im", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:31:56.688824+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-complete-im", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:31:56.697342+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-complete-inm", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:31:56.705181+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "garage", "test": "copy-source-im", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:31:56.714669+00:00"}
+{"B": "200", "A": "404/NoSuchUpload", "holds": "B", "verdict": "last-created; loser refused (404/NoSuchUpload)", "provider": "garage", "test": "overlap-mpu-mpu", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:31:57.843941+00:00"}
+{"PUT": "200", "A": "404/NoSuchUpload", "holds": "PUT", "verdict": "last-begun; loser refused (404/NoSuchUpload)", "provider": "garage", "test": "overlap-mpu-put", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:31:58.958594+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "garage", "test": "read-after-write", "repeat": 3, "error_in_200": [], "time": "2026-10-07T11:31:59.073921+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-put-inm", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:31:59.081065+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-put-im", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:31:59.087983+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-complete-im", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:31:59.098625+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-complete-inm", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:31:59.109073+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "garage", "test": "copy-source-im", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:31:59.121173+00:00"}
+{"B": "200", "A": "404/NoSuchUpload", "holds": "B", "verdict": "last-created; loser refused (404/NoSuchUpload)", "provider": "garage", "test": "overlap-mpu-mpu", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:32:00.252532+00:00"}
+{"PUT": "200", "A": "404/NoSuchUpload", "holds": "PUT", "verdict": "last-begun; loser refused (404/NoSuchUpload)", "provider": "garage", "test": "overlap-mpu-put", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:32:01.376419+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "garage", "test": "read-after-write", "repeat": 4, "error_in_200": [], "time": "2026-10-07T11:32:01.497242+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-put-inm", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:01.503732+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-put-im", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:01.509986+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-complete-im", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:01.520342+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "garage", "test": "cond-complete-inm", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:01.529667+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "garage", "test": "copy-source-im", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:01.539833+00:00"}
+{"B": "200", "A": "404/NoSuchUpload", "holds": "B", "verdict": "last-created; loser refused (404/NoSuchUpload)", "provider": "garage", "test": "overlap-mpu-mpu", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:02.675629+00:00"}
+{"PUT": "200", "A": "404/NoSuchUpload", "holds": "PUT", "verdict": "last-begun; loser refused (404/NoSuchUpload)", "provider": "garage", "test": "overlap-mpu-put", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:03.801092+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "garage", "test": "read-after-write", "repeat": 5, "error_in_200": [], "time": "2026-10-07T11:32:03.914809+00:00"}

@@ -1,0 +1,6 @@
+date: 2026-10-07T11:32:16Z
+host: Darwin 25.6.0 arm64, Apple M4
+python: Python 3.14.2
+minio: minio version RELEASE.2026-09-22T19-25-18Z (commit-id=df34868a88cc8c396807e04a7e220810b321bdaa)
+garage: dxflrs/garage:v2.4.1
+seaweedfs: version 30GB 4.48 530be3e37 linux arm64 (image 4e61d15fd359)
