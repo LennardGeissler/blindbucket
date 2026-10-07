@@ -82,8 +82,9 @@ MinIO, Garage v2.4.1 and SeaweedFS 4.48, five repetitions each: Garage accepts
 `If-None-Match` and `If-Match` on `PutObject` and on `CompleteMultipartUpload`
 and ignores them, answering success; the other two enforce them. On overlap,
 Garage keeps the write that began last and refuses the other; MinIO and
-SeaweedFS keep the one that completed last. `test/providers/seaweedfs.sh`
-starts the third store.
+SeaweedFS keep the one that completed last. AWS S3 enforces every condition
+and keeps the write that began last, like Garage, but answers the loser `200`.
+`test/providers/seaweedfs.sh` starts the third store.
 
 **The laptop figures, again, with their raw output.** Cipher throughput, the
 10 GiB heap, the freshness index, the sorted listing and the audit log, six runs

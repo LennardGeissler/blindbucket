@@ -1,0 +1,40 @@
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-put-inm", "repeat": 1, "error_in_200": [], "time": "2026-10-07T14:15:07.730290+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-put-im", "repeat": 1, "error_in_200": [], "time": "2026-10-07T14:15:08.156723+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-complete-im", "repeat": 1, "error_in_200": [], "time": "2026-10-07T14:15:08.885302+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-complete-inm", "repeat": 1, "error_in_200": [], "time": "2026-10-07T14:15:09.569286+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "copy-source-im", "repeat": 1, "error_in_200": [], "time": "2026-10-07T14:15:10.323207+00:00"}
+{"B": "200", "A": "200", "holds": "B", "verdict": "last-created; loser acknowledged", "provider": "aws", "test": "overlap-mpu-mpu", "repeat": 1, "error_in_200": [], "time": "2026-10-07T14:15:12.383257+00:00"}
+{"PUT": "200", "A": "200", "holds": "PUT", "verdict": "last-begun; loser acknowledged", "provider": "aws", "test": "overlap-mpu-put", "repeat": 1, "error_in_200": [], "time": "2026-10-07T14:15:14.127927+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "aws", "test": "read-after-write", "repeat": 1, "error_in_200": [], "time": "2026-10-07T14:15:20.406035+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-put-inm", "repeat": 2, "error_in_200": [], "time": "2026-10-07T14:15:20.803091+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-put-im", "repeat": 2, "error_in_200": [], "time": "2026-10-07T14:15:21.210349+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-complete-im", "repeat": 2, "error_in_200": [], "time": "2026-10-07T14:15:21.918951+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-complete-inm", "repeat": 2, "error_in_200": [], "time": "2026-10-07T14:15:22.696453+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "copy-source-im", "repeat": 2, "error_in_200": [], "time": "2026-10-07T14:15:23.518597+00:00"}
+{"B": "200", "A": "200", "holds": "B", "verdict": "last-created; loser acknowledged", "provider": "aws", "test": "overlap-mpu-mpu", "repeat": 2, "error_in_200": [], "time": "2026-10-07T14:15:25.576533+00:00"}
+{"PUT": "200", "A": "200", "holds": "PUT", "verdict": "last-begun; loser acknowledged", "provider": "aws", "test": "overlap-mpu-put", "repeat": 2, "error_in_200": [], "time": "2026-10-07T14:15:27.438557+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "aws", "test": "read-after-write", "repeat": 2, "error_in_200": [], "time": "2026-10-07T14:15:34.319984+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-put-inm", "repeat": 3, "error_in_200": [], "time": "2026-10-07T14:15:34.725541+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-put-im", "repeat": 3, "error_in_200": [], "time": "2026-10-07T14:15:35.154442+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-complete-im", "repeat": 3, "error_in_200": [], "time": "2026-10-07T14:15:35.873039+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-complete-inm", "repeat": 3, "error_in_200": [], "time": "2026-10-07T14:15:36.686884+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "copy-source-im", "repeat": 3, "error_in_200": [], "time": "2026-10-07T14:15:37.484571+00:00"}
+{"B": "200", "A": "200", "holds": "B", "verdict": "last-created; loser acknowledged", "provider": "aws", "test": "overlap-mpu-mpu", "repeat": 3, "error_in_200": [], "time": "2026-10-07T14:15:39.572166+00:00"}
+{"PUT": "200", "A": "200", "holds": "PUT", "verdict": "last-begun; loser acknowledged", "provider": "aws", "test": "overlap-mpu-put", "repeat": 3, "error_in_200": [], "time": "2026-10-07T14:15:41.343051+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "aws", "test": "read-after-write", "repeat": 3, "error_in_200": [], "time": "2026-10-07T14:15:48.135306+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-put-inm", "repeat": 4, "error_in_200": [], "time": "2026-10-07T14:15:48.543884+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-put-im", "repeat": 4, "error_in_200": [], "time": "2026-10-07T14:15:48.962332+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-complete-im", "repeat": 4, "error_in_200": [], "time": "2026-10-07T14:15:49.656218+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-complete-inm", "repeat": 4, "error_in_200": [], "time": "2026-10-07T14:15:50.392640+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "copy-source-im", "repeat": 4, "error_in_200": [], "time": "2026-10-07T14:15:51.165312+00:00"}
+{"B": "200", "A": "200", "holds": "B", "verdict": "last-created; loser acknowledged", "provider": "aws", "test": "overlap-mpu-mpu", "repeat": 4, "error_in_200": [], "time": "2026-10-07T14:15:53.282027+00:00"}
+{"PUT": "200", "A": "200", "holds": "PUT", "verdict": "last-begun; loser acknowledged", "provider": "aws", "test": "overlap-mpu-put", "repeat": 4, "error_in_200": [], "time": "2026-10-07T14:15:55.072107+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "aws", "test": "read-after-write", "repeat": 4, "error_in_200": [], "time": "2026-10-07T14:16:01.893322+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-put-inm", "repeat": 5, "error_in_200": [], "time": "2026-10-07T14:16:02.315127+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-put-im", "repeat": 5, "error_in_200": [], "time": "2026-10-07T14:16:02.715367+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-complete-im", "repeat": 5, "error_in_200": [], "time": "2026-10-07T14:16:03.406159+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "cond-complete-inm", "repeat": 5, "error_in_200": [], "time": "2026-10-07T14:16:04.119655+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "aws", "test": "copy-source-im", "repeat": 5, "error_in_200": [], "time": "2026-10-07T14:16:04.860883+00:00"}
+{"B": "200", "A": "200", "holds": "B", "verdict": "last-created; loser acknowledged", "provider": "aws", "test": "overlap-mpu-mpu", "repeat": 5, "error_in_200": [], "time": "2026-10-07T14:16:06.928266+00:00"}
+{"PUT": "200", "A": "200", "holds": "PUT", "verdict": "last-begun; loser acknowledged", "provider": "aws", "test": "overlap-mpu-put", "repeat": 5, "error_in_200": [], "time": "2026-10-07T14:16:08.719267+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "aws", "test": "read-after-write", "repeat": 5, "error_in_200": [], "time": "2026-10-07T14:16:15.444577+00:00"}

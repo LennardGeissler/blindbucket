@@ -42,10 +42,11 @@ EMPTY_SHA = hashlib.sha256(b"").hexdigest()
 
 
 class S3:
-    def __init__(self, endpoint, region, access_key, secret_key, bucket):
+    def __init__(self, endpoint, region, access_key, secret_key, bucket, session_token=None):
         u = urllib.parse.urlparse(endpoint)
         self.scheme, self.host = u.scheme, u.netloc
         self.region, self.ak, self.sk, self.bucket = region, access_key, secret_key, bucket
+        self.token = session_token
         self.error_in_200 = []  # (operation, error code) for every 200 with an <Error> body
 
     def _conn(self):
@@ -63,6 +64,8 @@ class S3:
         amzdate, date = now.strftime("%Y%m%dT%H%M%SZ"), now.strftime("%Y%m%d")
         payload = hashlib.sha256(body).hexdigest() if body else EMPTY_SHA
         headers.update({"host": self.host, "x-amz-date": amzdate, "x-amz-content-sha256": payload})
+        if self.token:  # temporary credentials: the token is a signed header
+            headers["x-amz-security-token"] = self.token
         signed = sorted(k.lower() for k in headers)
         canon_headers = "".join(f"{k}:{' '.join(str(headers[h]).split())}\n"
                                 for k in signed for h in headers if h.lower() == k)
@@ -271,11 +274,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     for a in ("endpoint", "region", "bucket", "access-key", "secret-key", "provider"):
         ap.add_argument("--" + a, required=True)
+    ap.add_argument("--session-token", default=None, help="for temporary credentials")
     ap.add_argument("--repeat", type=int, default=3)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
-    s3 = S3(args.endpoint, args.region, args.access_key, args.secret_key, args.bucket)
+    s3 = S3(args.endpoint, args.region, args.access_key, args.secret_key, args.bucket,
+            args.session_token)
     run = f"litmus/{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
     with open(args.out, "a") as f:
         for rep in range(1, args.repeat + 1):

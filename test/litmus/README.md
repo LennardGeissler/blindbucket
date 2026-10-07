@@ -46,30 +46,42 @@ python3 test/litmus/summarise.py results/*.jsonl
 
 ## Results, 2026-10-07
 
-Five repetitions per test, on one M4 with each store in Docker
+Five repetitions per test. MinIO, Garage and SeaweedFS ran in Docker on one M4;
+AWS S3 in eu-central-1 was reached from the same laptop over the internet, in a
+bucket created for the run and deleted after it
 ([`results/2026-10-07/`](results/2026-10-07/): raw JSON lines and versions).
 
-| Test | MinIO RELEASE.2026-09-22 | Garage v2.4.1 | SeaweedFS 4.48 |
-|---|---|---|---|
-| `cond-put-inm` | enforced 5/5 | **ignored** 5/5 | enforced 5/5 |
-| `cond-put-im` | enforced 5/5 | **ignored** 5/5 | enforced 5/5 |
-| `cond-complete-im` | enforced 5/5 | **ignored** 5/5 | enforced 5/5 |
-| `cond-complete-inm` | enforced 5/5 | **ignored** 5/5 | enforced 5/5 |
-| `copy-source-im` | enforced 5/5 | enforced 5/5 | enforced 5/5 |
-| `overlap-mpu-mpu` | last completed 5/5 | **last created**; loser refused (`NoSuchUpload`) 5/5 | last completed 5/5 |
-| `overlap-mpu-put` | last completed 5/5 | **last begun**; loser refused (`NoSuchUpload`) 5/5 | last completed 5/5 |
-| `read-after-write` | consistent 5/5 | consistent 5/5 | consistent 5/5 |
-| error inside a `200` | none | none | none |
+| Test | MinIO RELEASE.2026-09-22 | Garage v2.4.1 | SeaweedFS 4.48 | AWS S3 |
+|---|---|---|---|---|
+| `cond-put-inm` | enforced 5/5 | **ignored** 5/5 | enforced 5/5 | enforced 5/5 |
+| `cond-put-im` | enforced 5/5 | **ignored** 5/5 | enforced 5/5 | enforced 5/5 |
+| `cond-complete-im` | enforced 5/5 | **ignored** 5/5 | enforced 5/5 | enforced 5/5 |
+| `cond-complete-inm` | enforced 5/5 | **ignored** 5/5 | enforced 5/5 | enforced 5/5 |
+| `copy-source-im` | enforced 5/5 | enforced 5/5 | enforced 5/5 | enforced 5/5 |
+| `overlap-mpu-mpu` | last completed 5/5 | **last created**; loser refused (`NoSuchUpload`) 5/5 | last completed 5/5 | **last created; loser acknowledged** (`200`) 5/5 |
+| `overlap-mpu-put` | last completed 5/5 | **last begun**; loser refused (`NoSuchUpload`) 5/5 | last completed 5/5 | **last begun; loser acknowledged** (`200`) 5/5 |
+| `read-after-write` | consistent 5/5 | consistent 5/5 | consistent 5/5 | consistent 5/5 |
+| error inside a `200` | none | none | none | none |
 
 Garage accepts every conditional write it does not implement, and answers it
 as a success. Its documentation says it has no conditional writes; nothing in
 the protocol does. A design that coordinates through `If-None-Match` therefore
 works on MinIO and SeaweedFS and silently does nothing on Garage.
 
-AWS S3 has not been run through this script yet. Its row from the earlier
-manual measurements (ADR-020, ADR-025): every condition enforced, the
-`If-None-Match` completion at times refused inside a `200`; on overlap, the
-write that began last is kept and the loser is **acknowledged** with `200`.
+Overlapping writes split the four stores three ways. MinIO and SeaweedFS keep
+the write that completed last. Garage and AWS keep the one that began last, but
+Garage tells the loser, and AWS answers it `200` and drops it. A design that
+treats a successful completion as "my object is the one the key holds" is
+correct on two of the four and wrong on AWS (ADR-025).
+
+No error inside a `200` showed up in these runs. AWS sent one for a failed
+`If-None-Match` completion during the integration suite on 2026-10-03 (#62), so
+it happens; five repetitions here did not provoke it.
+
+**Python and TLS.** The python.org installer for macOS ships without CA
+certificates until its `Install Certificates.command` is run; against AWS the
+run used Homebrew's Python, which has them. `--session-token` takes the token of
+temporary credentials (`aws configure export-credentials`).
 
 Ceph RGW was planned as the fourth store. Its demo image exists for amd64
 only, and under emulation on an arm64 Mac its OSD fails to create its object
