@@ -4,6 +4,7 @@
 **Date:** 2026-09-11
 **Milestone:** M4
 **Implements:** `internal/manifest` (`PartsFromUpstream`)
+**Amended by:** [ADR-026](ADR-026-empty-parts-refused-on-arrival.md) — empty parts are refused on arrival.
 
 ## Context
 
@@ -44,7 +45,7 @@ Two further rules come with it:
 - **The last part must not be empty.** An empty final segment is one chunk of zero
   bytes, which is legal for an empty *object* but would make the inversion
   ambiguous here. The validator also rejects empty non-final parts; no position
-  permits an empty part. Both `UploadPart` and `UploadPartCopy` now refuse it on
+  permits an empty part. Both `UploadPart` and `UploadPartCopy` refuse it on
   arrival, while completion keeps its check ([ADR-026](ADR-026-empty-parts-refused-on-arrival.md)).
 - **A part's ciphertext must not exceed 5 GiB**, which is S3's own limit, capping
   the plaintext of a part at about 5 GiB − 1.25 MiB. This is checked when the part
