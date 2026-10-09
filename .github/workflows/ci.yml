@@ -32,7 +32,7 @@ jobs:
       # versions install a v1 binary, which rejects this repository's config.
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.13.2
+          version: v2.14.0
 
   tidy:
     name: go.mod is tidy

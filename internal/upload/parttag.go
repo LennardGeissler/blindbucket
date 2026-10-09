@@ -73,7 +73,7 @@ func SealPartTag(
 	plain = append(plain, salt[:]...)
 
 	nonce := make([]byte, aead.NonceSize())
-	if err := randRead(nonce); err != nil {
+	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
 	sealed := aead.Seal(nonce, nonce, plain, partTagAAD(partNumber))
@@ -152,12 +152,6 @@ func partTagAEAD(ctx context.Context, provider keys.KeyProvider, kid string) (ci
 		return nil, err
 	}
 	return cipher.NewGCM(block)
-}
-
-// randRead fills b with randomness or fails loudly.
-func randRead(b []byte) error {
-	_, err := rand.Read(b)
-	return err
 }
 
 func quote(s string) string   { return `"` + s + `"` }
