@@ -1,11 +1,14 @@
 package proxy
 
 import (
+	"encoding/xml"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/LennardGeissler/blindbucket/internal/s3api"
+	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
 // TestTouchesReservedPrefix covers both directions a common prefix can reveal
@@ -47,11 +50,30 @@ func TestIntegrationListingHidesTheReservedPrefix(t *testing.T) {
 		"list-type=2&delimiter=b",
 		"list-type=2&delimiter=l",
 		"list-type=2&prefix=" + url.QueryEscape(s3api.ReservedPrefix),
-		// Not ".": MinIO refuses a lone dot as a resource name, which AWS does not.
+		"list-type=2&prefix=.",
 		"list-type=2&prefix=.b",
 	} {
 		t.Run(query, func(t *testing.T) {
 			status, body, out := h.listQuery(t, query)
+			if query == "list-type=2&prefix=." {
+				// MinIO rejects this client prefix; providers that accept it still
+				// have to hide the reserved entries below.
+				values, _ := url.ParseQuery(query)
+				_, err := h.upstream.ListObjects(t.Context(), testBucket, values)
+				if apiErr, ok := upstream.AsAPIError(err); ok && apiErr.StatusCode == http.StatusBadRequest {
+					var result struct{ Code, Message string }
+					if err := xml.Unmarshal([]byte(body), &result); err != nil {
+						t.Fatalf("error document: %v", err)
+					}
+					if status != http.StatusBadRequest || result.Code != apiErr.Code || result.Message != apiErr.Message {
+						t.Fatalf("listing returned %d: %s; want provider's 400 %s: %s", status, body, apiErr.Code, apiErr.Message)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("direct provider listing: %v", err)
+				}
+			}
 			if status != 200 {
 				t.Fatalf("listing returned %d: %s", status, body)
 			}

@@ -120,6 +120,13 @@ present tense why the source key goes through `storedKey`. No behaviour change.
 Released changelog sections that recorded the old refusal are left as the record
 of those releases.
 
+**A provider's refusal of a plaintext listing is reported as client input.**
+With name encryption off, a provider 400 reaches the client as 400 with the
+provider's code and message, rather than `502 InternalError`. This includes
+MinIO's refusal of `prefix=.`. Listings with name encryption on, other operations
+and other provider statuses keep their existing error handling
+([ADR-027](docs/adr/ADR-027-plaintext-listing-provider-errors.md)).
+
 **Every GitHub release went out without notes.** goreleaser's changelog had been
 switched off since 0.1.0, so that a list of commit subjects would not stand in for
 this file -- and nothing put this file in its place, so each release said how to

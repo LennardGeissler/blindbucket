@@ -39,6 +39,12 @@ func (p *Proxy) listObjects(w http.ResponseWriter, r *http.Request, req s3api.Re
 	result, err := p.upstream.ListObjects(r.Context(), req.Bucket,
 		stripPresign(r.URL.Query()))
 	if err != nil {
+		// This path forwards the client's query, apart from presigning. A
+		// provider 400 therefore describes client input, not a query built by
+		// the gateway as under name encryption (ADR-027).
+		if apiErr, ok := upstream.AsAPIError(err); ok && apiErr.StatusCode == http.StatusBadRequest {
+			return &s3api.Error{Code: apiErr.Code, Message: apiErr.Message, HTTPStatus: http.StatusBadRequest}
+		}
 		return translateUpstream(err)
 	}
 
