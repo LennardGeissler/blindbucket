@@ -10,7 +10,7 @@ import "flag"
 const ignoreUnknownFields = "later releases may add fields; ignore the ones you do not know"
 
 // jsonFlag registers --json with a description that carries that rule, so the
-// four commands that have one cannot come to say different things about it.
+// commands that have one cannot come to say different things about it.
 func jsonFlag(fs *flag.FlagSet, what string) *bool {
 	return fs.Bool("json", false, "emit "+what+" as JSON; "+ignoreUnknownFields)
 }

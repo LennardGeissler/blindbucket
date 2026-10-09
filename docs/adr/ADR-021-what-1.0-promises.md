@@ -4,6 +4,8 @@
 **Date:** 2026-09-26
 **Milestone:** M10
 **Implements:** the upgrade test, the `--json` field-set tests, `TestMetricsAreAContract`, FORMAT §16; it constrains every release from `v1.0.0` on
+**Amended by:** [ADR-022](ADR-022-migrating-to-encrypted-names.md) — `migrate-names --json`
+joins the JSON documents, from 1.1
 
 ## Context
 
@@ -42,7 +44,7 @@ An inventory of what exists, taken from the code rather than from memory:
 | Freshness index | `internal/freshness` | file version `1` |
 | Configuration | `blindbucket.example.yaml`, `internal/config` | — |
 | CLI: commands, flags, exit codes 0 / 1 / 2 / 130 | `cmd/blindbucket` | — |
-| JSON documents: `keys list`, `gc`, `rotate`, `probe` | `cmd/blindbucket` | — |
+| JSON documents: `keys list`, `gc`, `rotate`, `probe`, `migrate-names` | `cmd/blindbucket` | — |
 | Metrics: 13 names | `internal/obs` | — |
 | Admin endpoints: `/healthz`, `/readyz`, `/metrics`, `/debug/pprof/` | `internal/obs` | — |
 | S3 error codes of its own: `IntegrityCheckFailed`, `RollbackDetected`, `ObjectNotEncrypted` | `internal/s3api`, `internal/proxy` | — |
@@ -91,7 +93,8 @@ fact long before it was in the table.
   codes: `0` success, `1` failure — including a partially failed `gc` or
   `rotate`, and a `probe` that finds a guard missing — `2` usage, `130`
   interrupted. New commands and flags may be added.
-- **The JSON documents** of `keys list`, `gc`, `rotate` and `probe`. A field is
+- **The JSON documents** of `keys list`, `gc`, `rotate`, `probe` and, from 1.1,
+  `migrate-names` ([ADR-022](ADR-022-migrating-to-encrypted-names.md)). A field is
   never removed, renamed, or given a different type or meaning. New fields may
   be added in a minor release, so **a consumer must ignore fields it does not
   know**, which each command's help says. Times stay RFC 3339 in UTC and
