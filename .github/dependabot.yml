@@ -1,0 +1,43 @@
+# Updates arrive as pull requests and go through CI like any other change.
+#
+# The actions are pinned by commit, with the version in a comment, because a
+# tag can be moved and a commit cannot: the release workflow hands an action a
+# token that can publish the image. Dependabot reads the comment and keeps both
+# current. Each ecosystem's updates come grouped into one pull request a week,
+# so a week of updates is one review rather than a dozen.
+#
+# Go modules are updated, not added: a new dependency is still a discussion
+# (CONTRIBUTING.md, "Code conventions").
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-modules:
+        patterns: ["*"]
+    commit-message:
+      prefix: build
+
+  # deploy/Dockerfile and deploy/Dockerfile.release: the distroless base the
+  # released image is built on, and the Go image of the local build.
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        patterns: ["*"]
+    commit-message:
+      prefix: build
