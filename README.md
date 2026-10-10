@@ -814,7 +814,7 @@ make tla        # thirteen configurations of both models; eleven must fail, two 
 
 ## Development
 
-Requires Go 1.25 or newer (for `golang.org/x/crypto`) and Docker for the integration tests.
+Requires Go 1.26 or newer (the oldest Go release still patched) and Docker for the integration tests.
 
 ```sh
 make build          # build ./bin/blindbucket
@@ -854,7 +854,7 @@ The coverage badge counts production code only, with MinIO, Vault and the KMS
 emulator running so that the tests which need them run too: about 84 %. The test
 helpers under `internal/testprovider` and `test/` are not counted, and neither are
 the Python client tests or the TLA+ model. CI fails below 82 %. It is measured
-with the declared floor, Go 1.25; Go 1.27 splits the same code into blocks
+with the declared floor, Go 1.26; Go 1.27 splits the same code into blocks
 differently and reports a few points more for the same tests.
 
 Production code is Go, without exception. Anything else in this repository — the Python
