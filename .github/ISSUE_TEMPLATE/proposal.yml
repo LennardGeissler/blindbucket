@@ -1,0 +1,42 @@
+name: Proposal
+description: A feature, a change of behaviour, or a weakness in the reasoning of the design documents.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For anything beyond a typo or an obvious fix, an issue comes before the code: parts of this codebase carry constraints that are not visible locally, and a design discussed first saves a rewrite. Expect to be asked *why* before *whether* — the same question the [ADRs](https://github.com/LennardGeissler/blindbucket/tree/main/docs/adr) answer for the project's own decisions.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What someone using the gateway cannot do today, or what is wrong. Concrete beats general.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: And what is wrong with each. "A decision without rejected options is not a decision, it is a default."
+
+  - type: textarea
+    id: documents
+    attributes:
+      label: Documents it touches
+      description: Whether it would change docs/FORMAT.md, the threat model, an ADR, or something ADR-021 promises to keep stable.
+
+  - type: checkboxes
+    id: work
+    attributes:
+      label: Working on it
+      options:
+        - label: I would like to implement this myself.

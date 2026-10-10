@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/LennardGeissler/blindbucket/security/advisories/new
+    about: Privately, never as an issue. A way to get plaintext, forged data accepted, or a guarantee of the threat model broken. SECURITY.md has the details.
+  - name: Read the documentation first
+    url: https://github.com/LennardGeissler/blindbucket/tree/main/docs
+    about: The format, the threat model, client compatibility and the ADRs. Many "is this a bug?" questions are answered there, including the limits that are deliberate.

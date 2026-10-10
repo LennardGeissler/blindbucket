@@ -39,7 +39,8 @@ are scoped so that they can be finished without reading the whole codebase.
   design that is discussed before it is written saves you from a rewrite, and
   parts of this codebase carry constraints that are not visible locally — the
   manifest lifecycle rules in [ADR-010](docs/adr/ADR-010-manifest-lifecycle-under-concurrency.md)
-  are the clearest example.
+  are the clearest example. The issue forms — a bug report, a client
+  measured, a proposal — ask for what each kind needs.
 - **Say in the issue that you are working on it**, so two people do not do the
   same work.
 - **One logical change per pull request.** A fix and a refactor in one diff take
@@ -213,7 +214,8 @@ say so and why — the unfixed thing is what a future reader will wonder about.
 
 ## Pull requests
 
-A pull request is ready when:
+A pull request is ready when the following holds. The pull request template
+carries the same list, so it is in front of you when you open one:
 
 - [ ] `make all` passes (`fmt`, `lint`, `test`), and the integration tests
       relevant to your change were run with their services up.

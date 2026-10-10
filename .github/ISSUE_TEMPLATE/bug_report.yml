@@ -1,0 +1,66 @@
+name: Bug report
+description: The gateway or a command did something it should not have.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **A security flaw goes through private reporting, not here** — see the link on the previous page, or [SECURITY.md](https://github.com/LennardGeissler/blindbucket/blob/main/SECURITY.md).
+
+        Never paste a keyring, a passphrase, a root key or provider credentials. Object names and bucket names may be sensitive too; replace them if they are.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command or request, what you expected, and what you got instead. Error messages and status codes verbatim.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce it
+      description: The smallest sequence of commands that shows it. If it only happens sometimes, say how often.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Gateway version
+      description: The output of `blindbucket version`, or the image tag.
+      placeholder: "1.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: Storage provider
+      description: Which S3-compatible store, and its version if it has one.
+      placeholder: "MinIO RELEASE.2025-08-13, AWS S3 eu-central-1, Garage 1.1, R2, B2, ..."
+    validations:
+      required: true
+
+  - type: input
+    id: client
+    attributes:
+      label: Client
+      description: The S3 client that talked to the gateway, and its version. Leave empty for a CLI command such as `rotate` or `gc`.
+      placeholder: "aws-cli 2.36.43, boto3 1.43.92, rclone 1.75.1, ..."
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: The parts of the configuration that could matter, for example `names.encrypt`, `freshness`, `allow_unsigned_payload`, the root key source. No secrets.
+      render: yaml
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Gateway log lines
+      description: The lines around the failure, ideally with `-v`. Check them for object names you would rather not share.
+      render: text
