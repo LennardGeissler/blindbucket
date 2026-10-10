@@ -17,44 +17,51 @@ env:
 
 jobs:
   # The release must not be the first time the tests run on this commit, but it
-  # must not be possible to tag a commit that fails them either.
+  # must not be possible to tag a commit that fails them either. Both on the
+  # module's floor, which is what go.mod promises builds, and on current Go,
+  # which is what the release is built with.
   verify:
-    name: Verify before releasing
+    name: Verify before releasing (Go ${{ matrix.go }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: ["1.24", stable]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: ${{ matrix.go }}
       - run: go build ./...
       - run: go test -race -count=1 ./...
 
-  # Separate, and on current Go rather than the module's floor: govulncheck
-  # itself needs a newer toolchain than this module declares, and GOTOOLCHAIN is
-  # local so nothing silently downloads one. It still analyses the module as
-  # declared. ci.yml does the same thing for the same reason -- and the first
-  # version of this file did not, which is what the v0.1.0 tag ran into.
-  vuln:
-    name: govulncheck
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
-      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-
   release:
     name: goreleaser
-    needs: [verify, vuln]
+    needs: [verify]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # goreleaser needs the tag history
+
+      # Current Go, not go.mod's. go-version-file read `go 1.24.0` as an exact
+      # version, so every release up to 1.1.0 was built with Go 1.24.0 and
+      # shipped the standard library's holes since February 2025 -- in net/http
+      # and crypto/tls, the gateway's own front door. The go directive is the
+      # oldest Go the module builds with; it says nothing about which Go a
+      # release should carry, and the answer to that is a patched one.
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: stable
+
+      # In this job, with the Go that builds: govulncheck reports what is
+      # reachable through this toolchain's standard library, so run anywhere
+      # else it vouches for a binary it did not look at. ci.yml's run on
+      # stable never saw what the release shipped, which is how 1.24.0 went
+      # unnoticed.
+      - name: govulncheck, against the toolchain that builds the release
+        run: |
+          go version
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3

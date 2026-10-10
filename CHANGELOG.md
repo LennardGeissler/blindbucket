@@ -111,6 +111,24 @@ commit.
 
 ### Fixed
 
+**Every release so far was built with Go 1.24.0.** The release workflow installed Go
+from `go.mod`, whose `go 1.24.0` is the oldest Go the module builds with, and read it
+as the exact version to use. So every binary and image from 0.1.0 to 1.1.0 carries the
+standard library of February 2025, without the fixes Go has shipped since. `govulncheck`
+run against the source with Go 1.24.0 finds 43 of those vulnerabilities reachable from
+the gateway's own code, most in `net/http`, `crypto/tls` and `crypto/x509`: HTTP/2
+memory exhaustion, connection desynchronisation, certificate parsing. The cryptography
+of the format is not involved -- AES-GCM, HKDF and the key wrapping are unaffected, and
+nothing written by an affected release needs rewriting -- but the HTTP server in front
+of it is the part a client reaches first. CI never saw it: its `govulncheck` ran with
+current Go, which is not what the release was built with.
+
+Releases are now built with current stable Go, and `govulncheck` runs in the release job
+against that same toolchain before anything is built. The module's floor stays 1.24 and
+is still tested, before every release as well. `deploy/Dockerfile`, the image built
+from source, moves from Go 1.25, which no longer receives fixes, to 1.27. A binary built
+with `go install` was never affected: it uses whichever Go installs it.
+
 **Empty multipart parts are refused when they arrive.** `UploadPartCopy` from
 an empty object and `UploadPart` with an empty body now return `InvalidRequest`
 with the same explanation completion already gave, before storing or replacing

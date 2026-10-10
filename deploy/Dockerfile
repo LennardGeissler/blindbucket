@@ -8,7 +8,9 @@
 # This file builds from source. Release images come from goreleaser, which builds
 # the binary once and copies it in; see .goreleaser.yaml.
 
-FROM golang:1.25-alpine AS build
+# A supported Go, not the module's floor: the standard library is part of what
+# this image ships, and a release the Go team no longer patches ships its holes.
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 
 # Dependencies first, so a source-only change does not refetch them.
