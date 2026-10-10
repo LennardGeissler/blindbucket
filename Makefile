@@ -51,7 +51,8 @@ test: ## Run race-enabled Go tests.
 .PHONY: cover
 # Production code only: the test helpers are left out of the count. CI runs this
 # with MinIO, Vault and the KMS emulator up (docker compose --profile keys) and
-# Go 1.24; without them their tests skip and the total drops. Newer toolchains
+# go.mod's Go, the declared floor; without the services their tests skip and the
+# total drops. Newer toolchains
 # count blocks differently and report a few points more.
 COVERPKG = $(shell $(GO) list $(PKG) | grep -v -e /internal/testprovider -e /test/ | paste -sd, -)
 cover: ## Run tests and report coverage of production code.

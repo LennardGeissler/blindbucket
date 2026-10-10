@@ -106,9 +106,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # "1.24" is the declared floor: crypto/hkdf arrived there, and the
-        # dependencies are pinned to releases that still build with it.
-        go: ["1.24", "stable"]
+        # "1.25" is the declared floor: golang.org/x/crypto requires it from
+        # v0.52.0 on. crypto/hkdf, the reason for the earlier floor of 1.24,
+        # arrived a release before.
+        go: ["1.25", "stable"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -226,10 +227,10 @@ jobs:
       # change that drops tests rather than one that adds untested lines. The
       # Vault and KMS paths are tested in their own job and not counted here.
       # The figure depends on the toolchain, not only on the tests: Go 1.27
-      # splits the same code into blocks differently from the declared floor,
-      # 1.24 (73.6 % against 70.9 % when the floor was set to 69). This
-      # job builds with the floor, so the floor is set against that; it
-      # measured 84.1 % on 2026-10-05.
+      # splits the same code into blocks differently from Go 1.24 (73.6 %
+      # against 70.9 % when the floor was set to 69). This job builds with
+      # go.mod's Go, the declared floor, so the floor is set against that; it
+      # measured 84.1 % on 2026-10-05, with 1.24, before the floor moved to 1.25.
       - name: Coverage floor
         id: coverage
         env:

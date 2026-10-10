@@ -64,6 +64,18 @@ bucket of their own: in the one warp runs against, the next run deleted them.
 The gateway in the benchmark accepts `UNSIGNED-PAYLOAD`, because warp, built on
 minio-go like `mc`, sends it for every multipart upload.
 
+### Changed
+
+**Building from source needs Go 1.25.** `golang.org/x/crypto` v0.52.0 requires it, so
+the module's floor moves from 1.24 with the update. With Go's default
+`GOTOOLCHAIN=auto`, an older `go install` fetches 1.25 by itself; with
+`GOTOOLCHAIN=local` it refuses and says which version it needs. Released binaries and
+images are not affected: they are built with current Go. The update clears the 13
+advisories GitHub lists against `x/crypto` v0.45.0. None of them touched blindbucket --
+all are in the SSH packages, and the gateway imports only `argon2` from that module,
+where `govulncheck` finds no affected call -- so no earlier release needs replacing
+on their account.
+
 ### Measured
 
 **The gateway against AWS S3 over a real network (M9).** From a c7g.2xlarge in
