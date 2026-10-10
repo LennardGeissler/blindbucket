@@ -47,9 +47,9 @@ are scoped so that they can be finished without reading the whole codebase.
 
 ## Setting up
 
-Requires **Go 1.24 or newer** — [`crypto/hkdf`](https://pkg.go.dev/crypto/hkdf)
-arrived there, and 1.24 is the declared floor CI builds against — and **Docker**
-for the integration tests.
+Requires **Go 1.25 or newer** — `golang.org/x/crypto` needs it from v0.52.0 on,
+and 1.25 is the declared floor CI builds against — and **Docker** for the
+integration tests.
 
 ```sh
 git clone https://github.com/LennardGeissler/blindbucket
@@ -153,7 +153,7 @@ Nothing here is a surprise if `make all` passes locally, except the jobs that
 need services:
 
 `go vet` and `golangci-lint` · `go mod tidy` leaves no diff · `go test -race` on
-both Go 1.24 and current · a 30-second fuzz smoke run · integration tests against
+both Go 1.25 and current · a 30-second fuzz smoke run · integration tests against
 MinIO and Garage · Vault and the KMS emulator · the boto3 and AWS CLI client scenarios,
 including a multipart upload across **two gateway instances behind a
 round-robin balancer** — statelessness is tested, not asserted · every released
