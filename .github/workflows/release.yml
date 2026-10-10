@@ -8,9 +8,11 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write   # create the release
-  packages: write   # push the image to ghcr.io
-  id-token: write   # for provenance, if it is added later
+  contents: write           # create the release
+  packages: write           # push the image, and its attestation, to ghcr.io
+  id-token: write           # a Sigstore certificate for the attestations
+  attestations: write       # store them with GitHub
+  artifact-metadata: write  # and the image's storage record
 
 env:
   GOTOOLCHAIN: local
@@ -87,3 +89,28 @@ jobs:
           args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Provenance: a statement, signed with a certificate Sigstore issues to
+      # this workflow and logged publicly, that these bytes were built here from
+      # this commit. checksums.txt is unsigned and travels with the files it
+      # describes, so on its own it proves only that a download is intact, not
+      # where it came from. The attestation is what `gh attestation verify`
+      # checks. Attesting through checksums.txt covers every archive and vector
+      # it lists; the image is attested by the digest of its multi-arch index.
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/checksums.txt
+
+      - name: Image digest
+        id: image
+        run: |
+          digest=$(docker buildx imagetools inspect \
+            "ghcr.io/lennardgeissler/blindbucket:${GITHUB_REF_NAME#v}" \
+            --format '{{.Manifest.Digest}}')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/lennardgeissler/blindbucket
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true

@@ -64,6 +64,17 @@ bucket of their own: in the one warp runs against, the next run deleted them.
 The gateway in the benchmark accepts `UNSIGNED-PAYLOAD`, because warp, built on
 minio-go like `mc`, sends it for every multipart upload.
 
+**Releases carry provenance attestations.** Every archive and test vector listed in
+`checksums.txt`, and the container image by the digest of its multi-arch index, gets a
+[SLSA build provenance](https://slsa.dev/spec/v1.0/provenance) statement signed with a
+certificate Sigstore issues to the release workflow and recorded in its public log.
+`gh attestation verify <file> --repo LennardGeissler/blindbucket` checks that a
+download was built by that workflow from a tagged commit of this repository, which
+`checksums.txt` cannot show on its own: it travels with the files it describes. The
+release page says how. Releases up to 1.1.0 have no attestations. What it does not
+cover: a compromise of the workflow itself, or of the commit it builds, is attested
+like anything else.
+
 ### Changed
 
 **Building from source needs Go 1.25.** `golang.org/x/crypto` v0.52.0 requires it, so
