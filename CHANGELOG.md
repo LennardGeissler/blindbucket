@@ -35,10 +35,15 @@ the count of them lives in the manifest rather than the body, so reading the inp
 length as one segment reports a number that is wrong by a tag per extra part. A length
 no encoder could produce is refused, as is every header field
 [section 5.2 of docs/FORMAT.md](docs/FORMAT.md) forbids, with the check that failed
-named, and a refusal exits non-zero after printing the fields that did arrive. A
-multipart manifest (`BBM1`, `BBM2`) is named as what it is and not reported: it records
-part sizes rather than a segment header.
+named, and a refusal exits non-zero after printing the fields that did arrive unless
+`--json` was given. A multipart manifest (`BBM1`, `BBM2`) is named as what it is and
+not reported: it records part sizes rather than a segment header.
 
+`--json` prints the same fields as one JSON document, for a script that checks stored
+segments: sizes are numbers, the salt is in full, and `kid` and `envelope_bytes` are
+`null` for a raw segment. `plaintext_bytes` is `null` for a part, whose size is not
+derived, and `0` only for an empty single-part object. A refused input prints nothing
+to stdout, so a consumer that reads only stdout cannot mistake a failure for a result.
 **The Helm chart is published**, as `oci://ghcr.io/lennardgeissler/charts/blindbucket`,
 starting with chart version 0.1.1 (gateway 1.1.0); until now it could only be
 installed from a checkout. A chart version is published once, when main first

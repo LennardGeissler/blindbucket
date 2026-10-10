@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -42,8 +43,9 @@ const inspectLabelWidth = 13
 // its usage says so.
 func runInspect(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("inspect", flag.ContinueOnError)
+	jsonOutput := jsonFlag(fs, "the fields")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintf(fs.Output(), `Usage: blindbucket inspect [file]
+		_, _ = fmt.Fprintf(fs.Output(), `Usage: blindbucket inspect [flags] [file]
 
 Reports the format fields of a blindbucket file (BBF1, what encrypt writes) or of a
 raw segment (BLBK, what the proxy stores per part): the chunk size, the part index,
@@ -63,8 +65,16 @@ file's envelope is excluded from it. For a segment whose header calls it a part,
 input may be the whole object's body rather than one part, so its plaintext size is
 reported as not derived: the part count lives in the manifest, not in the bytes.
 
+With --json the same fields are printed as one JSON document: sizes are numbers, the
+salt is in full, and a field that does not apply is null (the key id and envelope
+size of a raw segment, the plaintext size of a part). A refused input prints nothing
+to stdout.
+
 The file is read from stdin when the argument is absent or -.
+
+Flags:
 `)
+		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -194,6 +204,8 @@ The file is read from stdin when the argument is absent or -.
 	// section 4 makes a single-part object exactly one segment.
 	var note string
 	var plainErr error
+	// The plaintext size is meaningful only when the header is not multipart.
+	var plain int64
 	if params.Multipart {
 		fields = append(fields, [2]string{"plaintext", "not derived"})
 		note = indentNote("a part is stored concatenated with the object's other parts, and how\n" +
@@ -201,12 +213,62 @@ The file is read from stdin when the argument is absent or -.
 			"sections 4 and 10). Reading this input's length as one segment would report\n" +
 			"a size wrong by a tag per part, so it is left unsaid rather than guessed.")
 	} else {
-		plain, err := stream.OpenedSize(sealed, params.Log2ChunkSize)
+		derived, err := stream.OpenedSize(sealed, params.Log2ChunkSize)
 		if err != nil {
 			plainErr = err
 		} else {
-			fields = append(fields, [2]string{"plaintext", fmt.Sprintf("%d bytes (derived)", plain)})
+			plain = derived
+			fields = append(fields, [2]string{"plaintext", fmt.Sprintf("%d bytes (derived)", derived)})
 		}
+	}
+
+	var failErr error
+	if plainErr != nil {
+		// failErr is built once, before anything is written, so that --json can refuse
+		// without having printed a field while the table path still prints what arrived
+		// and then fails.
+		failErr = inspectError(path, fmt.Errorf("no plaintext length corresponds to %d ciphertext bytes at chunk size 2^%d (%w)",
+			sealed, params.Log2ChunkSize, plainErr))
+	}
+
+	if *jsonOutput {
+		if failErr != nil {
+			return failErr
+		}
+		format := "segment"
+		var kid *string
+		var envBytes *int64
+		if isFile {
+			format = "file"
+			k := hdr.KeyID
+			kid = &k
+			e := hdr.Size
+			envBytes = &e
+		}
+		var ptBytes *int64
+		if !params.Multipart {
+			v := plain
+			ptBytes = &v
+		}
+		doc := inspectJSON{
+			Format:          format,
+			KID:             kid,
+			EnvelopeBytes:   envBytes,
+			Version:         int(seg.Version),
+			ChunkSizeBytes:  params.ChunkSize(),
+			Log2ChunkSize:   int(params.Log2ChunkSize),
+			Multipart:       params.Multipart,
+			PartIndex:       params.Index,
+			Salt:            hex.EncodeToString(salt[:]),
+			CiphertextBytes: sealed,
+			PlaintextBytes:  ptBytes,
+		}
+		data, err := marshalInspectJSON(doc)
+		if err != nil {
+			return err
+		}
+		_, err = os.Stdout.Write(data)
+		return err
 	}
 
 	for _, f := range fields {
@@ -216,15 +278,11 @@ The file is read from stdin when the argument is absent or -.
 		_, _ = fmt.Fprintln(os.Stdout, note)
 	}
 
-	if plainErr != nil {
-		// Everything readable has been printed, so the reader can identify the
-		// segment, and the exit code still says the input is not a sound one: a
-		// diagnostic that returned 0 on a file no decoder could read would be a
-		// tool that vouches for the thing it exists to question.
-		return inspectError(path, fmt.Errorf("no plaintext length corresponds to %d ciphertext bytes at chunk size 2^%d (%w)",
-			sealed, params.Log2ChunkSize, plainErr))
-	}
-	return nil
+	// Everything readable has been printed, so the reader can identify the segment,
+	// and the exit code still says the input is not a sound one: a diagnostic that
+	// returned 0 on a file no decoder could read would be a tool that vouches for
+	// the thing it exists to question.
+	return failErr
 }
 
 // stdinIsTerminal reports whether stdin is a terminal, which is the case in which
@@ -335,4 +393,48 @@ func yesNo(v bool) string {
 func shortSalt(salt [stream.SaltSize]byte) string {
 	full := hex.EncodeToString(salt[:])
 	return full[:4] + "…" + full[len(full)-4:]
+}
+
+// marshalInspectJSON renders the document the way gc's is rendered: one line of
+// JSON ending in a newline, with no indentation, so a script reads it with one
+// Decode and a person pipes it to jq.
+func marshalInspectJSON(doc inspectJSON) ([]byte, error) {
+	data, err := json.Marshal(doc)
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}
+
+// inspectJSON is the document `inspect --json` prints: one object with the same
+// keys for every input. It is a stable interface from the release it first ships
+// in (ADR-021, 1.2): a field is never removed, renamed or retyped, and later
+// releases may add fields.
+//
+// A field that does not apply is null rather than absent, so a consumer never has
+// to tell a missing key from a missing value, and the key set does not depend on
+// the input. kid and envelope_bytes are null for a raw segment, which has no
+// envelope. plaintext_bytes is null exactly when multipart is true: a part is
+// stored concatenated with the object's other parts and their count is in the
+// manifest (docs/FORMAT.md sections 4 and 10), so one part's length cannot be read
+// as one segment. A part always has multipart true, so a part's plaintext_bytes
+// is always null, and a part cannot be empty (ADR-008, ADR-026); the case that is
+// 0 is an empty single-part object. Where it is a number it is arithmetic on the
+// length, a hint rather than proof of integrity.
+//
+// magic is not a field: it is BLBK for anything that decodes, and format already
+// says which envelope was read. salt is the full 40 hex characters, where the
+// table prints only its ends.
+type inspectJSON struct {
+	Format          string  `json:"format"`
+	KID             *string `json:"kid"`
+	EnvelopeBytes   *int64  `json:"envelope_bytes"`
+	Version         int     `json:"version"`
+	ChunkSizeBytes  int64   `json:"chunk_size_bytes"`
+	Log2ChunkSize   int     `json:"log2_chunk_size"`
+	Multipart       bool    `json:"multipart"`
+	PartIndex       uint32  `json:"part_index"`
+	Salt            string  `json:"salt"`
+	CiphertextBytes int64   `json:"ciphertext_bytes"`
+	PlaintextBytes  *int64  `json:"plaintext_bytes"`
 }
