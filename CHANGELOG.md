@@ -16,6 +16,17 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Changed
+
+**Building from source needs Go 1.26, and the floor now follows Go's own support.**
+The floor is the oldest Go release the Go team still patches: 1.26 today, moving
+when Go 1.28 is released. The `golang.org/x` modules follow the same rule, and
+`golang.org/x/crypto` v0.57.0, which this updates to with the other dependencies,
+already needs 1.26 -- a floor set by what the code alone needed moved twice in as
+many days. With Go's default `GOTOOLCHAIN=auto`, an older `go install` fetches 1.26
+by itself. Released binaries and images are not affected: they are built with
+current Go.
+
 ## [1.2.0] — 2026-10-10
 
 **Upgrade recommended.** Every release up to 1.1.0 was built with Go 1.24.0 and so
