@@ -93,6 +93,13 @@ release:
     sha256sum -c checksums.txt --ignore-missing
     ```
 
+    That shows a download is intact, not where it came from: `checksums.txt` travels with the files it describes. Every archive, the vectors and the image also carry a provenance attestation, signed for the release workflow and logged publicly, which says which commit and which workflow run built them:
+
+    ```sh
+    gh attestation verify blindbucket_{{ .Version }}_linux_amd64.tar.gz --repo LennardGeissler/blindbucket
+    gh attestation verify oci://ghcr.io/lennardgeissler/blindbucket:{{ .Version }} --repo LennardGeissler/blindbucket
+    ```
+
     `segment_v1.json` and `names_v1.json` are the known-answer vectors of `docs/FORMAT.md`, for testing another implementation against format 1.
 
     The container image is `distroless/static:nonroot`: no shell, no package manager, and it runs as uid 65532. Mount the keyring read-only and give the container a read-only root filesystem.
