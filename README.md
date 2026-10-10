@@ -9,6 +9,7 @@
   <a href="https://github.com/LennardGeissler/blindbucket/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/LennardGeissler/blindbucket/actions/workflows/ci.yml/badge.svg"></a>
   <a href="#development"><img alt="Coverage" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/LennardGeissler/blindbucket/badges/coverage.json"></a>
   <a href="https://goreportcard.com/report/github.com/LennardGeissler/blindbucket"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/LennardGeissler/blindbucket"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/LennardGeissler/blindbucket"><img alt="OpenSSF Scorecard" src="https://api.scorecard.dev/projects/github.com/LennardGeissler/blindbucket/badge"></a>
   <a href="https://github.com/LennardGeissler/blindbucket/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/LennardGeissler/blindbucket?label=release"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
 </p>
@@ -197,6 +198,8 @@ docker pull ghcr.io/lennardgeissler/blindbucket:1.1.0
 
 # Or a binary, with checksums and an SBOM alongside it:
 #   https://github.com/LennardGeissler/blindbucket/releases
+# From 1.2 on, binaries and image carry a provenance attestation; the release
+# page shows how to check it with `gh attestation verify`.
 
 # Or from source:
 go install github.com/LennardGeissler/blindbucket/cmd/blindbucket@latest
