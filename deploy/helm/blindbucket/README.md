@@ -42,7 +42,7 @@ once and never changed afterwards. From a checkout, `deploy/helm/blindbucket`
 works in its place.
 
 ```sh
-helm install blindbucket oci://ghcr.io/lennardgeissler/charts/blindbucket --version 0.1.1 \
+helm install blindbucket oci://ghcr.io/lennardgeissler/charts/blindbucket --version 0.1.2 \
   --set tls.existingSecret=blindbucket-tls \
   --set upstream.endpoint=https://s3.eu-central-1.amazonaws.com \
   --set upstream.region=eu-central-1 \
@@ -70,7 +70,7 @@ creates a ServiceAccount for the role to attach to.
 **IRSA.** Annotate the ServiceAccount with the role, and name the source:
 
 ```sh
-helm install blindbucket oci://ghcr.io/lennardgeissler/charts/blindbucket --version 0.1.1 \
+helm install blindbucket oci://ghcr.io/lennardgeissler/charts/blindbucket --version 0.1.2 \
   --set 'serviceAccount.annotations.eks\.amazonaws\.com/role-arn=arn:aws:iam::123456789012:role/blindbucket' \
   --set upstream.credentialSource=web_identity \
   --set keys.provider=awskms --set keys.awskms.credentialSource=web_identity \

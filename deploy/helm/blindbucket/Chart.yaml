@@ -6,8 +6,8 @@ type: application
 # gateway release it deploys by default, and moving it is a change to the chart
 # like any other -- a release commit bumps both. Every version is published to
 # ghcr.io once and never again with other contents (build/chart.sh).
-version: 0.1.1
-appVersion: "1.1.0"
+version: 0.1.2
+appVersion: "1.2.0"
 home: https://github.com/LennardGeissler/blindbucket
 sources:
   - https://github.com/LennardGeissler/blindbucket

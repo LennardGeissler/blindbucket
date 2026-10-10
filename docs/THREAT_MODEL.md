@@ -1,6 +1,12 @@
 # Threat Model
 
-**Status:** Current as of `v1.1.0`, which adds no guarantee either. Its
+**Status:** Current as of `v1.2.0`, which changes no guarantee. With `names.encrypt`
+off, a provider's `400` on a listing now reaches the client with the provider's own
+code and message ([ADR-027](adr/ADR-027-plaintext-listing-provider-errors.md)), so
+an active provider (A2) chooses that text -- as it already chooses what a listing
+says. `inspect` reads bytes and holds no key, and the release's provenance
+attestations concern how a release is built, which this model does not cover.
+`v1.1.0` added no guarantee either. Its
 `migrate-names` moves objects whose names the provider has already seen, and §4
 says what that leaves behind; `reseal` changes what opens a keyring and not what
 is in it, and §5.5 says what that does not undo; and the AWS credential chain
