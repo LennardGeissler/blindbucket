@@ -16,6 +16,31 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-10
+
+**Upgrade recommended.** Every release up to 1.1.0 was built with Go 1.24.0 and so
+ships the Go standard library of February 2025: `govulncheck` finds 43 known
+vulnerabilities reachable from the gateway's code in that toolchain, most of them in
+`net/http`, `crypto/tls` and `crypto/x509` -- the HTTP server and TLS stack a client
+reaches first. The format's cryptography is not among them, and nothing a release
+wrote needs rewriting. 1.2.0 is built with current Go, and its release workflow now
+checks that toolchain before it builds (see Fixed).
+
+Beyond that, 1.2 adds `blindbucket inspect`, which reports what a file or a stored
+segment claims about itself without a key, as a table or as a JSON document, and
+provenance attestations on every release artifact. All of it is additive under
+[ADR-021](docs/adr/ADR-021-what-1.0-promises.md), and the format is still `1`.
+
+**Upgrading:** nothing to do for the binaries, the image or the Helm chart. Two
+behaviours change at the edges, both towards a clearer answer. With `names.encrypt`
+off, a listing the provider refuses as malformed now returns the provider's `400`
+and its message rather than `502 InternalError`, so a client that retried on 502
+now stops at once ([ADR-027](docs/adr/ADR-027-plaintext-listing-provider-errors.md)).
+And an empty multipart part is refused when it is uploaded rather than at
+completion, which also refuses an upload that sent an empty part and then left it
+out of the completion ([ADR-026](docs/adr/ADR-026-empty-parts-refused-on-arrival.md)).
+Building from source needs Go 1.25.
+
 ### Added
 
 **`blindbucket inspect` reports what a file or a stored segment says it is, without a
@@ -1232,7 +1257,8 @@ figures and the methodology are in [bench/](bench/).
   of ten seconds, so the time is the provider's; why it behaves that way under
   this access pattern is not established.
 
-[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/LennardGeissler/blindbucket/compare/v0.6.0...v1.0.0
 [0.6.0]: https://github.com/LennardGeissler/blindbucket/compare/v0.5.0...v0.6.0

@@ -6,7 +6,7 @@ reading a specification.
 
 **Measured:** the client matrix on 2026-09-12 against `v0.2.0`, with object names
 in the clear. **AWS CLI and boto3 are re-run against every commit** by the
-`Client compatibility` CI job, so their rows are current for `v1.1.0`. The other
+`Client compatibility` CI job, so their rows are current for `v1.2.0`. The other
 clients were measured on the date their row gives; rclone has not been re-measured
 since `v0.2.0`.
 

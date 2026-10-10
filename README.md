@@ -38,18 +38,22 @@
 </sub></p>
 
 > [!NOTE]
-> **Status: `v1.1.0` — stable, and measured against AWS.** Standard S3 clients round-trip
+> **Status: `v1.2.0` — stable, and measured against AWS.** Standard S3 clients round-trip
 > through the gateway, multipart included: AWS CLI, boto3, `mc`, rclone and
 > s5cmd all work, and a 5 GiB `aws s3 cp` across two instances comes back with
 > an identical SHA-256. Key rotation, server-side copy, a signed audit log,
-> object-name encryption, metrics and health endpoints are in, and the keyring can be
-> unsealed by Vault or OpenBao Transit, or AWS KMS, instead of a passphrase.
+> object-name encryption and moving an existing bucket to it, metrics and health
+> endpoints are in. The keyring can be unsealed by Vault or OpenBao Transit, or AWS
+> KMS, instead of a passphrase, and moved between them; on AWS the gateway takes its
+> credentials from the platform — IRSA, EKS Pod Identity, an ECS task role, the
+> instance role.
 >
-> **New in 1.1:** `migrate-names` moves a bucket written in the clear to
-> encrypted names, `reseal` moves a keyring between a passphrase, Vault and KMS,
-> and on AWS the gateway takes its credentials from the platform — IRSA, EKS Pod
-> Identity, an ECS task role, the instance role — so the Helm chart can give it a
-> role instead of a key in a Secret.
+> **New in 1.2:** `blindbucket inspect` reports what a file or a stored segment
+> claims about itself without a key, as a table or as JSON, and every release
+> artifact carries a provenance attestation that `gh attestation verify` checks.
+> **Releases up to 1.1.0 were built with Go 1.24.0** and lack the standard
+> library's fixes since February 2025, in the HTTP and TLS stack among others;
+> 1.2.0 is built with current Go. Upgrade.
 >
 > **Rollback detection** tells that a provider served an older but genuine
 > version of an object — off by default, and worth reading
@@ -194,7 +198,7 @@ in **[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)**.
 
 ```sh
 # Container: distroless, nonroot, no shell, 21 MB.
-docker pull ghcr.io/lennardgeissler/blindbucket:1.1.0
+docker pull ghcr.io/lennardgeissler/blindbucket:1.2.0
 
 # Or a binary, with checksums and an SBOM alongside it:
 #   https://github.com/LennardGeissler/blindbucket/releases
@@ -672,6 +676,8 @@ the gateway already costs per request.
 | — | `migrate-names`: an existing bucket moved to encrypted names, model-checked first (ADR-022) | **done** in 1.1 |
 | — | `reseal`: a keyring moved between a passphrase, Vault and KMS, verified before it replaces (ADR-023) | **done** in 1.1 |
 | — | AWS credentials from the platform — IRSA, Pod Identity, the instance role — without the SDK (ADR-024), and a Helm chart that uses them | **done** in 1.1 |
+| — | `inspect`: what a file or a stored segment claims about itself, without a key, with `--json` | **done** in 1.2 |
+| — | Releases built with current Go, checked by `govulncheck` with the Go that builds them, and attested (SLSA provenance) | **done** in 1.2 |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
 clients" actually means for anything over 8 MiB. M3.5 existed to get its coordination rules
