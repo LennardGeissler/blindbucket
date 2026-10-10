@@ -1,0 +1,80 @@
+name: Client measured
+description: You pointed an S3 client at the gateway and ran it. Record what happened.
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        [docs/COMPATIBILITY.md](https://github.com/LennardGeissler/blindbucket/blob/main/docs/COMPATIBILITY.md) records clients **measured by running them**, not by reading their documentation, and three of the five there found a real bug that no unit test would have. A client that fails is as much a result as one that works.
+
+        You can also turn this into the pull request yourself: a section in COMPATIBILITY.md in the shape of the existing ones, and a row in its summary table.
+
+  - type: input
+    id: client
+    attributes:
+      label: Client and version
+      placeholder: "s3cmd 2.4.0"
+    validations:
+      required: true
+
+  - type: input
+    id: gateway
+    attributes:
+      label: Gateway version or commit
+      placeholder: "1.1.0, or main at 1308721"
+    validations:
+      required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: Storage provider behind the gateway
+      placeholder: "MinIO from docker-compose.yml"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scheme
+    attributes:
+      label: HTTP or HTTPS
+      description: Clients frame the request body differently depending on the scheme, so the two are different measurements.
+      options:
+        - HTTP
+        - HTTPS
+        - Both
+    validations:
+      required: true
+
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works
+        - Works with settings
+        - Partly works
+        - Does not work
+    validations:
+      required: true
+
+  - type: textarea
+    id: commands
+    attributes:
+      label: What you ran, and what each command did
+      description: |
+        The exact commands and their outcome. Worth covering: an upload and download below and above the multipart threshold with a SHA-256 comparison, a listing with a delimiter, sync both ways, delete, and a range read if the client has one.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: settings
+    attributes:
+      label: Settings it needed
+      description: Any non-default flag on the client or setting on the gateway, and why it was needed.
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything surprising
+      description: Errors, retries, warnings, behaviour that differs from going to the provider directly.

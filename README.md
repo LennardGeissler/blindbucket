@@ -892,7 +892,8 @@ private reporting, not an issue.
 [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, what CI checks, and the two conventions
 that are not visible from the code: how commits are written, and when a change needs an ADR.
 Issues labelled [`good first issue`](https://github.com/LennardGeissler/blindbucket/labels/good%20first%20issue)
-are scoped to be finishable without reading the whole codebase.
+are scoped to be finishable without reading the whole codebase. How people treat each
+other here is in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## License
 
