@@ -44,6 +44,7 @@ segments: sizes are numbers, the salt is in full, and `kid` and `envelope_bytes`
 `null` for a raw segment. `plaintext_bytes` is `null` for a part, whose size is not
 derived, and `0` only for an empty single-part object. A refused input prints nothing
 to stdout, so a consumer that reads only stdout cannot mistake a failure for a result.
+
 **The Helm chart is published**, as `oci://ghcr.io/lennardgeissler/charts/blindbucket`,
 starting with chart version 0.1.1 (gateway 1.1.0); until now it could only be
 installed from a checkout. A chart version is published once, when main first
