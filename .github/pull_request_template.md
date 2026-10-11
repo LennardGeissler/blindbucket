@@ -23,7 +23,7 @@ Closes #
 ## Before review
 
 - [ ] New behaviour has tests; security-relevant behaviour has a test that plays the hostile party and requires an error rather than plaintext
-- [ ] `CHANGELOG.md` has an entry under `## [Unreleased]`, written for a user of the gateway and stating the limits of what was added
+- [ ] `CHANGELOG.md` has an entry under `## [Unreleased]`: a list item, a short bold title and two to four sentences, written for a user of the gateway and stating the limits of what was added
 - [ ] Every document the change affects is updated, not only the ones touched (`README.md`, `docs/`, the ADR index, `blindbucket.example.yaml`, the CLI's `usage()`)
 - [ ] A decision later code has to live with is recorded in an ADR
 - [ ] Commit messages explain why, as described in CONTRIBUTING.md, "Commit messages"

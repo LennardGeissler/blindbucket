@@ -222,9 +222,10 @@ carries the same list, so it is in front of you when you open one:
 - [ ] New behaviour has tests. Security-relevant behaviour has a test that plays
       the hostile party and requires an error rather than plaintext.
 - [ ] [`CHANGELOG.md`](CHANGELOG.md) has an entry under `## [Unreleased]`, in
-      the Keep a Changelog sections. Write it for a user of the gateway, and
-      state the limits of what you added — that is the house style, and the
-      existing entries show it.
+      the Keep a Changelog sections: a list item with a short bold title and two
+      to four sentences, written for a user of the gateway and stating the
+      limits of what you added. A larger change gets several items, not a longer
+      one; the commit body is the place for the full reasoning.
 - [ ] **Every document the change affects is updated**, not only the ones you
       touched. This repository states its own status in a lot of places:
       `README.md` (status block, roadmap table, "what is still missing"),
