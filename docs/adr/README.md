@@ -51,6 +51,7 @@ document is gone, so they are kept here.
 | [025](ADR-025-writes-rank-by-when-they-began.md) | On AWS a completion is not a publication: writes rank by when they began | Accepted | post-1.0 |
 | [026](ADR-026-empty-parts-refused-on-arrival.md) | Empty multipart parts are refused on arrival | Accepted | post-1.0 |
 | [027](ADR-027-plaintext-listing-provider-errors.md) | Attribute provider errors in the plaintext listing handler | Accepted | post-1.0 |
+| [028](ADR-028-scrub.md) | Scrub: every stored object verified by the read path's own checks | Accepted | post-1.0 |
 
 Every entry is Accepted. 025 was Accepted with its code: it corrects an assumption
 010 had stated as fact, which the AWS workflow disproved, and amends 009 and 022 for

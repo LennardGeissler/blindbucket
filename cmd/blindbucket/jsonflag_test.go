@@ -12,7 +12,7 @@ import (
 // only half a promise if the consumers are never told the other half.
 func TestJSONFlagsSayToIgnoreUnknownFields(t *testing.T) {
 	for _, cmd := range [][]string{
-		{"keys", "list"}, {"gc"}, {"rotate"}, {"probe"},
+		{"keys", "list"}, {"gc"}, {"rotate"}, {"probe"}, {"scrub"},
 	} {
 		var err error
 		help := captureStderr(t, func() {

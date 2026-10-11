@@ -319,6 +319,20 @@ it is removed. `keys remove` needs `--force` because nothing in the keyring can
 see the bucket: run the rotation with `--dry-run` first and confirm it reports
 nothing left to move.
 
+Whether what is stored is still intact is a separate question, and one that
+otherwise only a read answers — at the moment the data is needed. `scrub` reads
+every object from the provider and verifies it with the gateway's own read
+checks, discarding the plaintext. It changes nothing, names each object that
+fails and what failed, and exits 1 if anything did:
+
+```sh
+./bin/blindbucket scrub --config blindbucket.yaml s3://blindbucket-dev
+```
+
+It sees the version the provider serves now, so an older genuine one passes, and
+it reads every byte, which on AWS is egress at the usual price
+([ADR-028](docs/adr/ADR-028-scrub.md)).
+
 Turning on `names.encrypt` for a bucket that already holds objects hides all of
 them, because an object lives at the encrypted form of its key. `migrate-names`
 moves them across — a rename at the provider, with no object data moving:
@@ -678,6 +692,7 @@ the gateway already costs per request.
 | — | AWS credentials from the platform — IRSA, Pod Identity, the instance role — without the SDK (ADR-024), and a Helm chart that uses them | **done** in 1.1 |
 | — | `inspect`: what a file or a stored segment claims about itself, without a key, with `--json` | **done** in 1.2 |
 | — | Releases built with current Go, checked by `govulncheck` with the Go that builds them, and attested (SLSA provenance) | **done** in 1.2 |
+| — | `scrub`: every stored object verified by the read path's own checks, without waiting for a read (ADR-028) | **done**, unreleased |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
 clients" actually means for anything over 8 MiB. M3.5 existed to get its coordination rules

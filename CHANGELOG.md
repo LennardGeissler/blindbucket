@@ -16,16 +16,17 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Added
+
+- **`blindbucket scrub` verifies stored objects without waiting for a read.** It reads every object under a prefix from the provider, verifies it exactly as a GET through the gateway does, and discards the plaintext. Each object that fails is listed with the kind of check it failed (`chunk`, `header`, `size`, `manifest`, `dek_unwrap`, `metadata`, `unknown_kid`), and the exit code is 1 if any did. Nothing is written, repaired or deleted ([ADR-028](docs/adr/ADR-028-scrub.md)).
+- **No false alarms from concurrent writes.** A failure is rechecked before it is reported: an object replaced during the scrub is verified again, one deleted is counted as vanished. Objects the gateway did not write are counted, not failed.
+- **`scrub --json` for automation.** A stable document under ADR-021, with every count always present and the findings as an array. A cron job or a dashboard can act on it without parsing the text output.
+- **What scrub cannot see.** It checks the version the provider serves now, so an older genuine version passes; rollback detection stays with `freshness.index`. It reads every byte, which on a provider that charges for egress costs what downloading the prefix costs.
+
 ### Changed
 
-**Building from source needs Go 1.26, and the floor now follows Go's own support.**
-The floor is the oldest Go release the Go team still patches: 1.26 today, moving
-when Go 1.28 is released. The `golang.org/x` modules follow the same rule, and
-`golang.org/x/crypto` v0.57.0, which this updates to with the other dependencies,
-already needs 1.26 -- a floor set by what the code alone needed moved twice in as
-many days. With Go's default `GOTOOLCHAIN=auto`, an older `go install` fetches 1.26
-by itself. Released binaries and images are not affected: they are built with
-current Go.
+- **The read path's checks are a package of their own.** They moved from the proxy into `internal/verify`, which the gateway and `scrub` both call, so a scrub cannot pass an object a read would refuse. The gateway's behaviour, error messages and metrics are unchanged.
+- **Building from source needs Go 1.26.** The floor now follows Go's own support: the oldest Go release the Go team still patches, so it moves with Go 1.28. `golang.org/x/crypto` v0.57.0 already requires it, and with the default `GOTOOLCHAIN=auto` an older `go install` fetches 1.26 by itself. Released binaries and images are not affected.
 
 ## [1.2.0] — 2026-10-10
 

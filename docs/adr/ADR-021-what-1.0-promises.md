@@ -6,6 +6,7 @@
 **Implements:** the upgrade test, the `--json` field-set tests, `TestMetricsAreAContract`, FORMAT §16; it constrains every release from `v1.0.0` on
 **Amended by:** [ADR-022](ADR-022-migrating-to-encrypted-names.md) — `migrate-names --json`
 joins the JSON documents, from 1.1
+**Amended by:** [ADR-028](ADR-028-scrub.md) — `scrub --json` joins the JSON documents, from 1.3
 
 ## Context
 
@@ -44,7 +45,7 @@ An inventory of what exists, taken from the code rather than from memory:
 | Freshness index | `internal/freshness` | file version `1` |
 | Configuration | `blindbucket.example.yaml`, `internal/config` | — |
 | CLI: commands, flags, exit codes 0 / 1 / 2 / 130 | `cmd/blindbucket` | — |
-| JSON documents: `keys list`, `gc`, `rotate`, `probe`, `migrate-names`, `inspect` | `cmd/blindbucket` | — |
+| JSON documents: `keys list`, `gc`, `rotate`, `probe`, `migrate-names`, `inspect`, `scrub` | `cmd/blindbucket` | — |
 | Metrics: 13 names | `internal/obs` | — |
 | Admin endpoints: `/healthz`, `/readyz`, `/metrics`, `/debug/pprof/` | `internal/obs` | — |
 | S3 error codes of its own: `IntegrityCheckFailed`, `RollbackDetected`, `ObjectNotEncrypted` | `internal/s3api`, `internal/proxy` | — |
@@ -94,8 +95,9 @@ fact long before it was in the table.
   `rotate`, and a `probe` that finds a guard missing — `2` usage, `130`
   interrupted. New commands and flags may be added.
 - **The JSON documents** of `keys list`, `gc`, `rotate`, `probe`,
-  `migrate-names` (from 1.1, [ADR-022](ADR-022-migrating-to-encrypted-names.md))
-  and `inspect` (from 1.2). A field is never removed, renamed, or given a
+  `migrate-names` (from 1.1, [ADR-022](ADR-022-migrating-to-encrypted-names.md)),
+  `inspect` (from 1.2) and `scrub` (from 1.3, [ADR-028](ADR-028-scrub.md)). A
+  field is never removed, renamed, or given a
   different type or meaning. New fields may be added in a minor release, so **a
   consumer must ignore fields it does not know**, which each command's help says.
   Times stay RFC 3339 in UTC and durations stay seconds.

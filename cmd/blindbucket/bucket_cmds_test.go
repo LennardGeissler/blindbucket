@@ -14,7 +14,7 @@ import (
 // is read differently from how it was meant is the mistake worth stopping.
 func TestBucketCommandsRefuseBadInvocations(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "absent.yaml")
-	for _, cmd := range []string{"rotate", "gc"} {
+	for _, cmd := range []string{"rotate", "gc", "scrub"} {
 		for name, tc := range map[string]struct {
 			args []string
 			want string

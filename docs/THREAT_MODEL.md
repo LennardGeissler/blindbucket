@@ -391,6 +391,13 @@ error rather than plaintext. The catalogue covers chunk-level
 tampering, header manipulation, object and metadata swapping, multipart reordering, token
 forgery, checksum mismatch and authentication failures.
 
+The same checks run without a client, too: `blindbucket scrub` reads every stored
+object through `internal/verify`, the read path's own code rather than a copy of
+it, and reports each one that fails ([ADR-028](adr/ADR-028-scrub.md)). That moves
+detection from the read to a schedule; it adds no guarantee to §3, and like any
+read without `freshness.index` it cannot tell an older genuine version from the
+latest.
+
 `blindbucket_integrity_failures_total` is exported as a metric. A sustained increase means
 either a bug or an actively misbehaving provider, and should alert. So does
 `blindbucket_audit_failures_total` above zero: it counts requests the audit log

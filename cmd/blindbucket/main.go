@@ -40,6 +40,7 @@ func commands() []command {
 		{"rotate", "re-wrap data keys under a new KEK", runRotate},
 		{"migrate-names", "move objects stored in clear to their encrypted names", runMigrateNames},
 		{"probe", "measure the provider's conditional writes", runProbe},
+		{"scrub", "verify every stored object without waiting for a read", runScrub},
 		{"audit", "verify the audit log, or print the key that verifies it", runAudit},
 		{"encrypt", "encrypt a stream into a blindbucket file", runEncrypt},
 		{"decrypt", "decrypt a blindbucket file", runDecrypt},
