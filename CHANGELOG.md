@@ -19,8 +19,8 @@ version 1 would keep being readable.
 ### Added
 
 - **`blindbucket scrub` verifies stored objects without waiting for a read.** It reads every object under a prefix from the provider, verifies it exactly as a GET through the gateway does, and discards the plaintext. Each object that fails is listed with the kind of check it failed (`chunk`, `header`, `size`, `manifest`, `dek_unwrap`, `metadata`, `unknown_kid`), and the exit code is 1 if any did. Nothing is written, repaired or deleted ([ADR-028](docs/adr/ADR-028-scrub.md)).
-- **No false alarms from concurrent writes.** A failure is rechecked before it is reported: an object replaced during the scrub is verified again, one deleted is counted as vanished. Objects the gateway did not write are counted, not failed.
-- **`scrub --json` for automation.** A stable document under ADR-021, with every count always present and the findings as an array. A cron job or a dashboard can act on it without parsing the text output.
+- **Concurrent writes are not reported as damage.** A failure counts only once a HEAD shows the object still at the version that failed; an object replaced during the scrub is verified again, one deleted is counted as vanished. Objects the gateway did not write are counted, not failed.
+- **`scrub --json` for automation.** A stable document under ADR-021, with every count always present and both the findings and the unreadable objects listed by key. An unreadable object is not to be taken as benign: a provider that sends less than it announces makes a damaged object unreadable.
 - **What scrub cannot see.** It checks the version the provider serves now, so an older genuine version passes; rollback detection stays with `freshness.index`. It reads every byte, which on a provider that charges for egress costs what downloading the prefix costs.
 
 ### Changed

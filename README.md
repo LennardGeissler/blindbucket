@@ -330,8 +330,8 @@ fails and what failed, and exits 1 if anything did:
 ```
 
 It sees the version the provider serves now, so an older genuine one passes, and
-it reads every byte, which on AWS is egress at the usual price
-([ADR-028](docs/adr/ADR-028-scrub.md)).
+it reads every byte, which on a provider that charges for egress costs what
+downloading the bucket costs ([ADR-028](docs/adr/ADR-028-scrub.md)).
 
 Turning on `names.encrypt` for a bucket that already holds objects hides all of
 them, because an object lives at the encrypted form of its key. `migrate-names`

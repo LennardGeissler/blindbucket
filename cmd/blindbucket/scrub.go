@@ -25,9 +25,10 @@ segment header, every chunk, the size, and for a multipart object the manifest
 and each part -- then discards the plaintext. Objects that fail are listed with
 what failed. Nothing is written, repaired or deleted (ADR-028).
 
-A failure is rechecked before it is reported: an object replaced while it was
-being read is verified again in its new version, and one deleted meanwhile is
-counted as vanished, so writes during a scrub do not produce findings.
+A failure is confirmed before it is reported: a HEAD must show the object still
+at the version that failed. One replaced meanwhile is verified again in its new
+version, one deleted meanwhile is counted as vanished, and one that keeps
+changing, or whose HEAD fails, is listed as unreadable rather than judged.
 
 What a scrub cannot say. It sees the version the provider serves now, so an
 older genuine version served in place of the latest one passes; rollback is
@@ -36,8 +37,10 @@ shows, so an object the provider deleted is not a finding. And it reads every
 byte: on a provider that charges for egress, scrubbing a bucket costs what
 downloading it costs.
 
-Objects the gateway did not write are counted, not failed. The exit code is 1 if
-any object failed or could not be read.
+Objects the gateway did not write are counted, not failed. Unreadable objects
+are named, and are not to be taken as benign: a provider that sends less than it
+announces turns a damaged object into an unreadable one. The exit code is 1 if
+any object failed or could not be read, and 130 if the run was interrupted.
 
 Flags:
 `)
@@ -123,16 +126,19 @@ Flags:
 	}
 
 	for _, f := range result.Findings {
-		fmt.Printf("FAILED  %s  (%s) %s\n", f.Key, f.Kind, f.Detail)
+		fmt.Printf("FAILED      %s  (%s) %s\n", f.Key, f.Kind, f.Detail)
 	}
-	if len(result.Findings) > 0 {
+	for _, u := range result.Unreadable {
+		fmt.Printf("UNREADABLE  %s  %s\n", u.Key, u.Detail)
+	}
+	if len(result.Findings)+len(result.Unreadable) > 0 {
 		fmt.Println()
 	}
 	fmt.Printf("%d objects scanned in %s\n", result.Scanned, elapsed.Round(time.Millisecond))
 	fmt.Printf("  verified:   %d  (%d bytes of ciphertext)\n", result.Verified, result.CipherBytes)
 	fmt.Printf("  failed:     %d\n", result.Failed)
 	if result.Errors > 0 {
-		fmt.Printf("  unreadable: %d  (could not be read; see the log)\n", result.Errors)
+		fmt.Printf("  unreadable: %d  (nothing could be established; listed above)\n", result.Errors)
 	}
 	if result.Foreign > 0 {
 		fmt.Printf("  not ours:   %d  (not written by this gateway)\n", result.Foreign)
@@ -154,7 +160,7 @@ func scrubErrors(result *scrub.Result) error {
 		errs = append(errs, fmt.Errorf("%d objects failed verification", result.Failed))
 	}
 	if result.Errors > 0 {
-		errs = append(errs, fmt.Errorf("%d objects could not be read; see the log", result.Errors))
+		errs = append(errs, fmt.Errorf("%d objects could not be read", result.Errors))
 	}
 	return errors.Join(errs...)
 }
@@ -168,21 +174,31 @@ type scrubRun struct {
 
 // scrubJSON is the `scrub --json` document, shaped as the other commands' are:
 // every count always present, the start in RFC 3339 UTC, the duration in
-// seconds. findings is always an array, empty when nothing failed, so that a
-// consumer can iterate it without asking first.
+// seconds. findings and unreadable_objects are always arrays, empty when there
+// is nothing in them, so that a consumer can iterate them without asking first.
+// An unreadable object is named for the same reason a finding is: a provider
+// that sends less than it announces makes a damaged object unreadable, and a
+// consumer that only counted them would never learn which one it was.
 type scrubJSON struct {
-	Bucket          string             `json:"bucket"`
-	Prefix          string             `json:"prefix"`
-	Started         string             `json:"started"`
-	DurationSeconds float64            `json:"duration_seconds"`
-	Scanned         int64              `json:"scanned"`
-	Verified        int64              `json:"verified"`
-	Failed          int64              `json:"failed"`
-	Unreadable      int64              `json:"unreadable"`
-	Foreign         int64              `json:"foreign"`
-	Vanished        int64              `json:"vanished"`
-	CiphertextBytes int64              `json:"ciphertext_bytes"`
-	Findings        []scrubFindingJSON `json:"findings"`
+	Bucket            string                `json:"bucket"`
+	Prefix            string                `json:"prefix"`
+	Started           string                `json:"started"`
+	DurationSeconds   float64               `json:"duration_seconds"`
+	Scanned           int64                 `json:"scanned"`
+	Verified          int64                 `json:"verified"`
+	Failed            int64                 `json:"failed"`
+	Unreadable        int64                 `json:"unreadable"`
+	Foreign           int64                 `json:"foreign"`
+	Vanished          int64                 `json:"vanished"`
+	CiphertextBytes   int64                 `json:"ciphertext_bytes"`
+	Findings          []scrubFindingJSON    `json:"findings"`
+	UnreadableObjects []scrubUnreadableJSON `json:"unreadable_objects"`
+}
+
+// scrubUnreadableJSON is one object nothing could be established about.
+type scrubUnreadableJSON struct {
+	Key    string `json:"key"`
+	Detail string `json:"detail"`
 }
 
 // scrubFindingJSON is one object that failed. kind is one of a fixed set
@@ -200,18 +216,23 @@ func marshalScrubJSON(run scrubRun, result *scrub.Result) ([]byte, error) {
 	for _, f := range result.Findings {
 		findings = append(findings, scrubFindingJSON{Key: f.Key, Kind: string(f.Kind), Detail: f.Detail})
 	}
+	unreadable := make([]scrubUnreadableJSON, 0, len(result.Unreadable))
+	for _, u := range result.Unreadable {
+		unreadable = append(unreadable, scrubUnreadableJSON{Key: u.Key, Detail: u.Detail})
+	}
 	data, err := json.Marshal(scrubJSON{
 		Bucket: run.Bucket, Prefix: run.Prefix,
-		Started:         run.Started.UTC().Format(time.RFC3339),
-		DurationSeconds: run.Elapsed.Round(time.Millisecond).Seconds(),
-		Scanned:         result.Scanned,
-		Verified:        result.Verified,
-		Failed:          result.Failed,
-		Unreadable:      result.Errors,
-		Foreign:         result.Foreign,
-		Vanished:        result.Vanished,
-		CiphertextBytes: result.CipherBytes,
-		Findings:        findings,
+		Started:           run.Started.UTC().Format(time.RFC3339),
+		DurationSeconds:   run.Elapsed.Round(time.Millisecond).Seconds(),
+		Scanned:           result.Scanned,
+		Verified:          result.Verified,
+		Failed:            result.Failed,
+		Unreadable:        result.Errors,
+		Foreign:           result.Foreign,
+		Vanished:          result.Vanished,
+		CiphertextBytes:   result.CipherBytes,
+		Findings:          findings,
+		UnreadableObjects: unreadable,
 	})
 	if err != nil {
 		return nil, err

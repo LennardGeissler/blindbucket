@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -282,13 +283,20 @@ func TestIntegrationScrubUnderEncryptedNames(t *testing.T) {
 	h := newHarness(t, option)
 	prefix := fmt.Sprintf("scrub-names/%d/", time.Now().UnixNano())
 
-	for _, name := range []string{"a.txt", "dir/b.txt"} {
+	for _, name := range []string{"a.txt", "dir/b.txt", "dir/multipart.bin"} {
 		key := prefix + name
 		stored, err := enc.EncryptKey(key)
 		if err != nil {
 			t.Fatalf("EncryptKey: %v", err)
 		}
 		h.cleanupStored(t, stored)
+		if strings.HasSuffix(name, ".bin") {
+			// The manifest lives at the hash of the *stored* name and its data
+			// key is bound to the client's: a multipart object is the one that
+			// would fail if scrub mixed the two up.
+			h.mpuStore(t, key, [][]byte{randomBytes(t, testPart), randomBytes(t, 500)})
+			continue
+		}
 		resp := h.put(t, key, []byte("under an encrypted name: "+name), nil)
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
@@ -297,38 +305,70 @@ func TestIntegrationScrubUnderEncryptedNames(t *testing.T) {
 	}
 
 	result := h.scrub(t, h.scrubConfig(prefix))
-	if result.Verified != 2 || result.Incomplete() {
-		t.Errorf("verified %d, failed %d (%+v); want both objects verified",
+	if result.Verified != 3 || result.Incomplete() {
+		t.Errorf("verified %d, failed %d (%+v); want all three objects verified",
 			result.Verified, result.Failed, result.Findings)
-	}
-	for _, f := range result.Findings {
-		if !strings.HasPrefix(f.Key, prefix) {
-			t.Errorf("a finding names the stored key %q instead of the client's", f.Key)
-		}
 	}
 }
 
+// putAsClient writes through the gateway without a *testing.T, for use from a
+// scrub worker's goroutine, where t.Fatal must not be called.
+func (h *harness) putAsClient(key string, body []byte) error {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPut, h.url(key), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.ContentLength = int64(len(body))
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("PUT returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// flipMiddleByte damages a stored object the way the hostile tests do, without
+// a *testing.T.
+func (h *harness) flipMiddleByte(key string) error {
+	ctx := context.Background()
+	get, err := h.upstream.GetObject(ctx, upstream.GetObjectInput{Bucket: testBucket, Key: key})
+	if err != nil {
+		return err
+	}
+	stored, err := io.ReadAll(get.Body)
+	_ = get.Body.Close()
+	if err != nil {
+		return err
+	}
+	stored[len(stored)/2] ^= 0x01
+	_, err = h.upstream.PutObject(ctx, upstream.PutObjectInput{
+		Bucket: testBucket, Key: key, Body: bytes.NewReader(stored),
+		ContentLength: int64(len(stored)), Metadata: get.Metadata,
+	})
+	return err
+}
+
 // TestIntegrationScrubRechecksBeforeReporting: an object that changes while it
-// is being verified is not a finding. Here the first read sees a damaged
-// object, and the hook replaces it with a good one before the recheck -- the
-// order of events an overwrite racing a multipart read produces, where the
-// manifest the read started with is deleted (rule R3). The second case deletes
-// it instead.
+// is being verified is not reported on the strength of the version it was. Here
+// the first read sees a damaged object, and the hook changes it before the
+// recheck -- the order of events an overwrite racing a multipart read
+// produces, where the manifest the read started with is deleted (rule R3).
+// Replaced by a good version, it verifies; deleted, it vanished; replaced by
+// another damaged version, the recheck confirms that one, and it is reported.
 func TestIntegrationScrubRechecksBeforeReporting(t *testing.T) {
 	h := newHarness(t)
+	damaged := func() []byte { return randomBytes(t, 3*(1<<stream.MinLog2ChunkSize)) }
 
 	for name, tc := range map[string]struct {
-		meanwhile              func(h *harness, key string) error
-		wantVerified, wantGone int64
+		meanwhile                          func(h *harness, key string) error
+		wantVerified, wantGone, wantFailed int64
 	}{
 		"replaced by a client": {
 			meanwhile: func(h *harness, key string) error {
-				resp := h.put(t, key, []byte("the client's new version"), nil)
-				_ = resp.Body.Close()
-				if resp.StatusCode != http.StatusOK {
-					return fmt.Errorf("PUT returned %d", resp.StatusCode)
-				}
-				return nil
+				return h.putAsClient(key, []byte("the client's new version"))
 			},
 			wantVerified: 1,
 		},
@@ -338,16 +378,23 @@ func TestIntegrationScrubRechecksBeforeReporting(t *testing.T) {
 			},
 			wantGone: 1,
 		},
+		"replaced by another damaged version": {
+			meanwhile: func(h *harness, key string) error {
+				if err := h.putAsClient(key, bytes.Repeat([]byte("v2"), 3<<stream.MinLog2ChunkSize)); err != nil {
+					return err
+				}
+				return h.flipMiddleByte(key)
+			},
+			wantFailed: 1,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			prefix := scrubPrefix(t)
 			key := prefix + "object"
-			h.store(t, key, randomBytes(t, 3*(1<<stream.MinLog2ChunkSize)))
-			h.rewriteUpstream(t, key, func(b []byte) []byte {
-				out := bytes.Clone(b)
-				out[len(out)/2] ^= 0x01
-				return out
-			})
+			h.store(t, key, damaged())
+			if err := h.flipMiddleByte(key); err != nil {
+				t.Fatalf("damaging the object: %v", err)
+			}
 
 			var hookErr atomic.Value
 			cfg := h.scrubConfig(prefix)
@@ -360,10 +407,31 @@ func TestIntegrationScrubRechecksBeforeReporting(t *testing.T) {
 			if err, _ := hookErr.Load().(error); err != nil {
 				t.Fatalf("changing the object mid-scrub: %v", err)
 			}
-			if result.Failed != 0 || result.Verified != tc.wantVerified || result.Vanished != tc.wantGone {
-				t.Errorf("verified %d, vanished %d, failed %d (%+v); want verified %d, vanished %d, no finding",
-					result.Verified, result.Vanished, result.Failed, result.Findings, tc.wantVerified, tc.wantGone)
+			if result.Failed != tc.wantFailed || result.Verified != tc.wantVerified || result.Vanished != tc.wantGone {
+				t.Errorf("verified %d, vanished %d, failed %d (%+v); want verified %d, vanished %d, failed %d",
+					result.Verified, result.Vanished, result.Failed, result.Findings,
+					tc.wantVerified, tc.wantGone, tc.wantFailed)
 			}
 		})
+	}
+}
+
+// TestIntegrationScrubInterruptedAtTheLastObject: the listing has handed out
+// every key by the time the last ones are verified, so an interrupt then only
+// reaches the workers. The run must still say it did not finish -- a summary
+// of a run that was stopped is not the state of the prefix.
+func TestIntegrationScrubInterruptedAtTheLastObject(t *testing.T) {
+	h := newHarness(t)
+	prefix := scrubPrefix(t)
+	h.store(t, prefix+"only", []byte("the last object of the prefix"))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	cfg := h.scrubConfig(prefix)
+	cfg.Hook = func(string) { cancel() }
+
+	_, err := scrub.Run(ctx, cfg)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("scrub.Run = %v, want context.Canceled", err)
 	}
 }

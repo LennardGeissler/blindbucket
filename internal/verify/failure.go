@@ -36,6 +36,11 @@ const (
 	KindSize Kind = "size"
 	// KindManifest is a manifest that is missing, fails to verify, or names a
 	// different attempt for a part than the one stored.
+	//
+	// The last case is where this set and the proxy's metric label differ. The
+	// proxy finds a substituted attempt while opening the part's header and
+	// counts it under "header"; a scrub names it for what it is, a part the
+	// manifest does not describe. The verdict is the same either way.
 	KindManifest Kind = "manifest"
 )
 

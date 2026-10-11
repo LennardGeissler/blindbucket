@@ -41,15 +41,20 @@ fails, with what failed, and changes nothing.
    bounded set -- `metadata`, `unknown_kid`, `dek_unwrap`, `header`, `chunk`,
    `size`, `manifest`, the integrity metric's labels plus the two outcomes that
    are not tampering but still mean the object cannot be read -- and the phrase
-   the proxy has always logged.
+   the proxy has always logged. One case is named differently from the metric:
+   a part replaced by another genuine attempt is `manifest` here, because that
+   is what it is, while the proxy, which finds it opening the part's header,
+   counts it under `header`. The verdict is the same.
 
 2. **No finding without a recheck.** An object can change while it is being
    read, and a multipart object can then lose the manifest the read started
    with: an overwrite deletes the manifest it replaces (rule R3, ADR-010). A
    scrub of a healthy bucket under write load would report that as a missing
    manifest. So a failure is reported only after a HEAD shows the object still
-   at the version that failed; one replaced meanwhile is verified once more in
-   its new version, and one deleted meanwhile is counted as vanished. A body
+   at the version that failed. One replaced meanwhile is verified once more in
+   its new version, and a second failure is confirmed the same way; one deleted
+   meanwhile is counted as vanished. An object that moved on again, or whose
+   HEAD failed, is listed as unreadable rather than judged either way. A body
    that ends before the length the provider announced is a failure to read
    rather than a truncated object: the decoder cannot tell the two apart, the
    byte count can.
@@ -72,14 +77,20 @@ fails, with what failed, and changes nothing.
    around the gateway. A data key wrapped under a KEK the keyring does not hold
    is a finding (`unknown_kid`): not evidence of tampering, but an object this
    keyring cannot read, which is exactly what a scrub before `keys remove` is
-   for. An object that could not be read at all is counted as unreadable and
-   makes the run incomplete, because nothing is known about it.
+   for. An object that could not be read at all is unreadable and makes the
+   run incomplete, because nothing is known about it. It is named, not only
+   counted, and not to be taken as benign: a provider that announces more than
+   it sends turns a damaged object into an unreadable one, so a consumer that
+   retried unreadable objects as transient would never learn which object it
+   was.
 
 6. **The command shape the other bucket commands have**: `--config`,
    `--concurrency` (4 by default, below rotate's 8, because a scrub moves every
    byte where a rotation moves metadata), `--json` as a stable document under
-   ADR-021 with every count always present and `findings` always an array, and
-   exit `1` if any object failed or could not be read.
+   ADR-021 with every count always present and `findings` and
+   `unreadable_objects` always arrays, exit `1` if any object failed or could
+   not be read, and `130` if the run was interrupted, including during the last
+   objects after the listing finished.
 
 ## Alternatives considered
 
@@ -113,7 +124,7 @@ checksum. It detects the provider's own bit rot, not the provider.
 **Sampling: verify a random fraction per run.** Cheaper on a provider that
 charges for egress. Not rejected so much as deferred: it changes what a clean
 run means, from "every object verified" to a probability, and that deserves a
-flag and a sentence of its own. `--prefix` already bounds a run.
+flag and a sentence of its own. The prefix in the target already bounds a run.
 
 ## Consequences
 

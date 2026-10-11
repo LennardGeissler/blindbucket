@@ -50,10 +50,15 @@ type Config struct {
 	Log         *slog.Logger
 
 	// Hook, when set, is called after an object's first verification and before
-	// any recheck. It exists so that an integration test can replace an object
-	// at exactly that point; it is nil everywhere else.
+	// any recheck. It exists so that an integration test can replace an object,
+	// or stop the run, at exactly that point; it is nil everywhere else.
 	Hook func(key string)
 }
+
+// errKeptChanging is an object that failed twice, in two versions, and had
+// moved on again by the time the second failure was checked. Nothing settled
+// long enough to be judged, so it is unreadable rather than a finding.
+var errKeptChanging = errors.New("scrub: the object changed during each of two verifications")
 
 // Finding is an object that failed verification.
 type Finding struct {
@@ -61,6 +66,16 @@ type Finding struct {
 	Key  string
 	Kind verify.Kind
 	// Detail is the failed check and what it found, for a person.
+	Detail string
+}
+
+// Unreadable is an object nothing could be established about: the provider
+// did not deliver it, or it kept changing while it was checked. It is not a
+// finding, and it is not benign either -- a provider that sends less than it
+// announces turns a damaged object into one of these -- so it is named, not
+// only counted.
+type Unreadable struct {
+	Key    string
 	Detail string
 }
 
@@ -76,13 +91,14 @@ type Result struct {
 	// Vanished counts objects deleted between the listing and the read.
 	Vanished int64
 	// Errors counts objects that could not be read at all. Nothing is known
-	// about them, so a run with any is incomplete.
+	// about them, so a run with any is incomplete. Each one is in Unreadable.
 	Errors int64
 	// CipherBytes is the ciphertext read and verified, manifests excluded.
 	CipherBytes int64
 
-	mu       sync.Mutex
-	Findings []Finding
+	mu         sync.Mutex
+	Findings   []Finding
+	Unreadable []Unreadable
 }
 
 // Incomplete reports whether the run leaves anything unverified or broken.
@@ -92,6 +108,13 @@ func (r *Result) add(f Finding) {
 	atomic.AddInt64(&r.Failed, 1)
 	r.mu.Lock()
 	r.Findings = append(r.Findings, f)
+	r.mu.Unlock()
+}
+
+func (r *Result) unreadable(u Unreadable) {
+	atomic.AddInt64(&r.Errors, 1)
+	r.mu.Lock()
+	r.Unreadable = append(r.Unreadable, u)
 	r.mu.Unlock()
 }
 
@@ -142,13 +165,29 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	})
 	close(targets)
 	wg.Wait()
+	// The listing can finish handing out keys before the last of them are
+	// verified, so an interrupt during those reaches no one but the workers.
+	// It is still an interrupt, and the run did not finish.
+	if err == nil {
+		err = ctx.Err()
+	}
 
 	// In key order, so that two runs over the same bucket print the same list.
 	slices.SortFunc(result.Findings, func(a, b Finding) int { return strings.Compare(a.Key, b.Key) })
+	slices.SortFunc(result.Unreadable, func(a, b Unreadable) int { return strings.Compare(a.Key, b.Key) })
 	return result, err
 }
 
-// scrubOne verifies one object, and rechecks a failure before reporting it.
+// scrubOne verifies one object, and confirms a failure before reporting it.
+//
+// A failure may be the object changing under the read rather than the object
+// being broken: an overwrite between reading a multipart object and reading
+// its manifest deletes the manifest the read started with (rule R3), and the
+// read then finds it missing. So a failure becomes a finding only when a HEAD
+// shows the object still at the version that failed. A replaced object is
+// verified once more in its new version, and a second failure is confirmed the
+// same way; one that moved on again, or a HEAD that fails, leaves the object
+// unreadable rather than judged.
 func scrubOne(ctx context.Context, cfg Config, t verify.Target, result *Result) {
 	atomic.AddInt64(&result.Scanned, 1)
 	log := cfg.Log.With("key", t.Identity)
@@ -157,23 +196,30 @@ func scrubOne(ctx context.Context, cfg Config, t verify.Target, result *Result) 
 	if cfg.Hook != nil {
 		cfg.Hook(t.Identity)
 	}
-	if _, isFailure := verify.AsFailure(err); isFailure {
-		// A failure may be the object changing under the read rather than the
-		// object being broken: an overwrite between reading a multipart object
-		// and reading its manifest deletes the manifest the read started with
-		// (rule R3), and the read then finds it missing. A healthy bucket under
-		// write load must not produce findings, so a failure is reported only
-		// if the object is still the version that failed.
-		info, headErr := cfg.Upstream.HeadObject(ctx, t.Bucket, t.Stored)
-		switch {
-		case headErr != nil && upstream.NotFound(headErr):
-			atomic.AddInt64(&result.Vanished, 1)
-			log.Debug("deleted while it was being verified")
-			return
-		case headErr == nil && info.ETag != res.ETag:
-			log.Debug("replaced while it was being verified; verifying the new version")
-			res, err = verify.Object(ctx, cfg.Upstream, cfg.Keys, t, cfg.Log2ChunkSize)
+	for attempt := 1; ; attempt++ {
+		if _, isFailure := verify.AsFailure(err); !isFailure {
+			break
 		}
+		info, headErr := cfg.Upstream.HeadObject(ctx, t.Bucket, t.Stored)
+		if headErr != nil {
+			if upstream.NotFound(headErr) {
+				atomic.AddInt64(&result.Vanished, 1)
+				log.Debug("deleted while it was being verified")
+				return
+			}
+			err = fmt.Errorf("the object failed verification, and the HEAD that would "+
+				"confirm it is still that version failed: %w", headErr)
+			break
+		}
+		if info.ETag == res.ETag {
+			break // confirmed: the version that failed is the one stored
+		}
+		if attempt == 2 {
+			err = errKeptChanging
+			break
+		}
+		log.Debug("replaced while it was being verified; verifying the new version")
+		res, err = verify.Object(ctx, cfg.Upstream, cfg.Keys, t, cfg.Log2ChunkSize)
 	}
 	record(log, t, res, err, result)
 }
@@ -199,7 +245,7 @@ func record(log *slog.Logger, t verify.Target, res verify.Result, err error, res
 		atomic.AddInt64(&result.Vanished, 1)
 		log.Debug("deleted before it could be read")
 	default:
-		atomic.AddInt64(&result.Errors, 1)
+		result.unreadable(Unreadable{Key: t.Identity, Detail: err.Error()})
 		log.Error("object could not be read", "err", err)
 	}
 }

@@ -15,7 +15,7 @@ import (
 var scrubJSONFields = []string{
 	"bucket", "prefix", "started", "duration_seconds",
 	"scanned", "verified", "failed", "unreadable", "foreign", "vanished",
-	"ciphertext_bytes", "findings",
+	"ciphertext_bytes", "findings", "unreadable_objects",
 }
 
 func TestMarshalScrubJSON(t *testing.T) {
@@ -42,15 +42,18 @@ func TestMarshalScrubJSON(t *testing.T) {
 				t.Errorf("%s = %v, want %v", field, doc[field], want)
 			}
 		}
-		if findings, ok := doc["findings"].([]any); !ok || len(findings) != 0 {
-			t.Errorf("findings = %#v, want []", doc["findings"])
+		for _, list := range []string{"findings", "unreadable_objects"} {
+			if items, ok := doc[list].([]any); !ok || len(items) != 0 {
+				t.Errorf("%s = %#v, want []", list, doc[list])
+			}
 		}
 	})
 
-	t.Run("a finding carries its key, kind and detail", func(t *testing.T) {
+	t.Run("a finding carries its key, kind and detail; an unreadable object its key", func(t *testing.T) {
 		data, err := marshalScrubJSON(run, &scrub.Result{
-			Scanned: 2, Verified: 1, Failed: 1,
-			Findings: []scrub.Finding{{Key: "photos/a.jpg", Kind: verify.KindChunk, Detail: "stream: chunk 3"}},
+			Scanned: 3, Verified: 1, Failed: 1, Errors: 1,
+			Findings:   []scrub.Finding{{Key: "photos/a.jpg", Kind: verify.KindChunk, Detail: "stream: chunk 3"}},
+			Unreadable: []scrub.Unreadable{{Key: "photos/b.jpg", Detail: "short read"}},
 		})
 		if err != nil {
 			t.Fatalf("marshalScrubJSON: %v", err)
@@ -62,6 +65,13 @@ func TestMarshalScrubJSON(t *testing.T) {
 		f, _ := findings[0].(map[string]any)
 		if f["key"] != "photos/a.jpg" || f["kind"] != "chunk" || f["detail"] != "stream: chunk 3" {
 			t.Errorf("finding = %#v", f)
+		}
+		unreadable, _ := decodeFields(t, data)["unreadable_objects"].([]any)
+		if len(unreadable) != 1 {
+			t.Fatalf("unreadable_objects = %#v, want one", unreadable)
+		}
+		if u, _ := unreadable[0].(map[string]any); u["key"] != "photos/b.jpg" || u["detail"] != "short read" {
+			t.Errorf("unreadable object = %#v", u)
 		}
 	})
 }
