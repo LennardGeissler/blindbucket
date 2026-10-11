@@ -84,7 +84,23 @@ mc() {
 	k run "mc-$RANDOM" --rm -i --restart=Never --quiet --image=cgr.dev/chainguard/minio:latest \
 		--command -- sh -c "mc alias set m http://minio:9000 minioadmin minioadmin >/dev/null && $1"
 }
-mc "mc mb m/chart-test"
+
+# Ready is not reachable yet. rollout status returns when the pod passes its
+# readiness probe, and the Service starts sending traffic to it a moment later,
+# once the endpoint has propagated; a client that asks in between is refused,
+# which failed a CI run on 2026-10-10 before the gateway was even installed. So
+# the first request is retried, a few times and briefly, instead of preceded by a
+# sleep that would be too long on most runs and too short on some.
+# --ignore-existing keeps a retry after a creation whose answer was lost from
+# failing on the bucket it just made.
+for attempt in 1 2 3 4 5 6; do
+	mc "mc mb --ignore-existing m/chart-test" && break
+	if [[ "$attempt" == 6 ]]; then
+		echo "MinIO did not accept a request through its Service" >&2
+		exit 1
+	fi
+	sleep 2
+done
 
 echo "==> keyring, TLS and credentials, as Secrets that exist before the chart"
 go build -o "$WORK/blindbucket" ./cmd/blindbucket
