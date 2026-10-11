@@ -14,216 +14,8 @@ import (
 	"github.com/LennardGeissler/blindbucket/internal/obs"
 	"github.com/LennardGeissler/blindbucket/internal/s3api"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
+	"github.com/LennardGeissler/blindbucket/internal/verify"
 )
-
-// partLayout is the ciphertext geometry of a multipart object.
-//
-// A multipart object is the concatenation of one segment per part, so every
-// part's ciphertext offset follows from the plaintext sizes in the manifest and
-// the chunk size. That arithmetic is what makes a range request on a multipart
-// object cost the chunks it touches rather than the whole object.
-type partLayout struct {
-	parts []manifest.Part
-	// sealed[i] is the ciphertext size of part i's segment.
-	sealed []int64
-	// cipherStart[i] and plainStart[i] are part i's offsets within the object.
-	cipherStart []int64
-	plainStart  []int64
-
-	totalCipher int64
-	totalPlain  int64
-	log2C       uint8
-	// hasSalts reports that the manifest names which attempt each part is, so
-	// the segment headers can be checked against it. False for a manifest
-	// written before BBM2, where there is nothing to check against and an
-	// all-zero salt must not be mistaken for one.
-	hasSalts bool
-}
-
-// checkSalt refuses a segment that is not the attempt the manifest names.
-//
-// A client that retries a part leaves two valid segments under the same part
-// number, both authentic. Without this, a provider could serve either one and
-// every tag would verify -- THREAT_MODEL section 5.2. The salt is in the
-// authenticated header, so a provider cannot fake it without breaking every
-// chunk in the segment; it can only substitute a whole genuine segment, which
-// is exactly what this catches.
-func (l *partLayout) checkSalt(i int, got [stream.SaltSize]byte) error {
-	if !l.hasSalts {
-		return nil
-	}
-	if got != l.parts[i].Salt {
-		return fmt.Errorf(
-			"%w: part %d is a different attempt than the manifest names",
-			manifest.ErrVerify, l.parts[i].Number)
-	}
-	return nil
-}
-
-// salts returns the part salts in part order, for the freshness tag of ADR-018.
-//
-// Empty when the manifest predates BBM2 and records none. Nothing can be said
-// about such an object's identity, and an all-zero salt per part would be a
-// confident wrong answer rather than an absent one.
-func (l *partLayout) salts() [][stream.SaltSize]byte {
-	if !l.hasSalts {
-		return nil
-	}
-	out := make([][stream.SaltSize]byte, len(l.parts))
-	for i := range l.parts {
-		out[i] = l.parts[i].Salt
-	}
-	return out
-}
-
-// newPartLayout computes the geometry of the parts a manifest describes.
-func newPartLayout(parts []manifest.Part, log2C uint8, hasSalts bool) (*partLayout, error) {
-	if len(parts) == 0 {
-		return nil, fmt.Errorf("%w: the manifest lists no parts", manifest.ErrVerify)
-	}
-	l := &partLayout{
-		parts:       parts,
-		hasSalts:    hasSalts,
-		sealed:      make([]int64, len(parts)),
-		cipherStart: make([]int64, len(parts)),
-		plainStart:  make([]int64, len(parts)),
-		log2C:       log2C,
-	}
-	for i, part := range parts {
-		sealed, err := stream.SealedSize(part.PlainSize, log2C)
-		if err != nil {
-			return nil, fmt.Errorf("%w: part %d has an impossible size: %w",
-				manifest.ErrVerify, part.Number, err)
-		}
-		l.sealed[i] = sealed
-		l.cipherStart[i] = l.totalCipher
-		l.plainStart[i] = l.totalPlain
-		l.totalCipher += sealed
-		l.totalPlain += part.PlainSize
-	}
-	return l, nil
-}
-
-// checkAgainst verifies the manifest's geometry against the object the provider
-// actually stores.
-//
-// The manifest is authenticated and the stored size is not, so a mismatch means
-// the provider is serving something other than the object this manifest
-// describes -- a truncated object, or parts from elsewhere. Either way it is an
-// integrity failure and not a size to be worked around.
-func (l *partLayout) checkAgainst(storedCipher int64) error {
-	if storedCipher != l.totalCipher {
-		return fmt.Errorf("%w: the object is %d bytes of ciphertext, the manifest describes %d",
-			manifest.ErrVerify, storedCipher, l.totalCipher)
-	}
-	return nil
-}
-
-// locate returns the index of the part holding a plaintext offset.
-func (l *partLayout) locate(offset int64) int {
-	// Linear from the front is fine: the list is at most 10000 entries and this
-	// runs once per range request, not per chunk.
-	for i := len(l.parts) - 1; i >= 0; i-- {
-		if offset >= l.plainStart[i] {
-			return i
-		}
-	}
-	return 0
-}
-
-// segmentChain decrypts the segments of a multipart object in order.
-//
-// Each part is its own segment and must be decrypted as one: a DecryptReader
-// decides whether a chunk is the segment's last by looking one byte ahead, so
-// feeding it the concatenation directly would make every part but the last fail
-// authentication. Bounding each part to its exact ciphertext size is what puts
-// the end of the stream where the format says it is.
-type segmentChain struct {
-	src    io.Reader
-	dek    []byte
-	layout *partLayout
-
-	idx int
-	cur *stream.DecryptReader
-	err error
-}
-
-func newSegmentChain(src io.Reader, dek []byte, layout *partLayout) (*segmentChain, error) {
-	c := &segmentChain{src: src, dek: dek, layout: layout}
-	if err := c.open(); err != nil {
-		return nil, err
-	}
-	return c, nil
-}
-
-// VerifyFirst authenticates the first chunk of the first part, before the caller
-// commits to a status line. See docs/adr/ADR-004-fail-closed.md.
-func (c *segmentChain) VerifyFirst() error {
-	if c.cur == nil {
-		return c.err
-	}
-	return c.cur.VerifyFirst()
-}
-
-// open starts the segment at c.idx.
-func (c *segmentChain) open() error {
-	part := c.layout.parts[c.idx]
-	reader, err := stream.NewDecryptReader(
-		io.LimitReader(c.src, c.layout.sealed[c.idx]),
-		c.dek,
-		// The part number is demanded, not merely read: a provider that serves
-		// part 7 where part 3 belongs fails here, because the index is
-		// authenticated in the segment header.
-		stream.SegmentParams{Log2ChunkSize: c.layout.log2C, Multipart: true, Index: part.Number},
-	)
-	if err != nil {
-		c.err = err
-		return err
-	}
-	if err := c.layout.checkSalt(c.idx, reader.Salt()); err != nil {
-		_ = reader.Close()
-		c.err = err
-		return err
-	}
-	c.cur = reader
-	return nil
-}
-
-func (c *segmentChain) Read(p []byte) (int, error) {
-	for {
-		if c.err != nil {
-			return 0, c.err
-		}
-		n, err := c.cur.Read(p)
-		if n > 0 {
-			return n, nil
-		}
-		if !errors.Is(err, io.EOF) {
-			if err != nil {
-				c.err = err
-			}
-			return 0, err
-		}
-		_ = c.cur.Close()
-		c.cur = nil
-		c.idx++
-		if c.idx >= len(c.layout.parts) {
-			c.err = io.EOF
-			return 0, io.EOF
-		}
-		if err := c.open(); err != nil {
-			return 0, err
-		}
-	}
-}
-
-func (c *segmentChain) Close() error {
-	if c.cur != nil {
-		_ = c.cur.Close()
-		c.cur = nil
-	}
-	return nil
-}
 
 // rangeSpan is one part's contribution to a range request.
 type rangeSpan struct {
@@ -243,28 +35,28 @@ type rangeSpan struct {
 // its own offset zero. That is what keeps the fetch to a single contiguous
 // ciphertext run, plus at most one small request for the first part's header --
 // the same shape as a range on a single-part object.
-func (l *partLayout) planRange(start, end int64) ([]rangeSpan, error) {
-	if start < 0 || end < start || start >= l.totalPlain {
+func planRange(l *verify.Layout, start, end int64) ([]rangeSpan, error) {
+	if start < 0 || end < start || start >= l.TotalPlain {
 		return nil, stream.ErrRangeNotSatisfiable
 	}
-	if end >= l.totalPlain {
-		end = l.totalPlain - 1
+	if end >= l.TotalPlain {
+		end = l.TotalPlain - 1
 	}
 
-	first := l.locate(start)
-	last := l.locate(end)
+	first := l.Locate(start)
+	last := l.Locate(end)
 	spans := make([]rangeSpan, 0, last-first+1)
 
 	for i := first; i <= last; i++ {
-		localStart := start - l.plainStart[i]
+		localStart := start - l.PlainStart[i]
 		if localStart < 0 {
 			localStart = 0
 		}
-		localEnd := end - l.plainStart[i]
-		if localEnd > l.parts[i].PlainSize-1 {
-			localEnd = l.parts[i].PlainSize - 1
+		localEnd := end - l.PlainStart[i]
+		if localEnd > l.Parts[i].PlainSize-1 {
+			localEnd = l.Parts[i].PlainSize - 1
 		}
-		rng, err := stream.MapRange(localStart, localEnd, l.sealed[i], l.log2C)
+		rng, err := stream.MapRange(localStart, localEnd, l.Sealed[i], l.Log2C)
 		if err != nil {
 			return nil, err
 		}
@@ -274,14 +66,14 @@ func (l *partLayout) planRange(start, end int64) ([]rangeSpan, error) {
 }
 
 // bodyRange returns the inclusive ciphertext range covering every span.
-func (l *partLayout) bodyRange(spans []rangeSpan) (int64, int64) {
+func bodyRange(l *verify.Layout, spans []rangeSpan) (int64, int64) {
 	firstSpan := spans[0]
-	start := l.cipherStart[firstSpan.index]
+	start := l.CipherStart[firstSpan.index]
 	if firstSpan.headerSeparate {
 		start += firstSpan.rng.CipherStart
 	}
 	lastSpan := spans[len(spans)-1]
-	end := l.cipherStart[lastSpan.index] + lastSpan.rng.CipherEnd
+	end := l.CipherStart[lastSpan.index] + lastSpan.rng.CipherEnd
 	return start, end
 }
 
@@ -289,7 +81,7 @@ func (l *partLayout) bodyRange(spans []rangeSpan) (int64, int64) {
 type rangeChain struct {
 	src    io.Reader
 	dek    []byte
-	layout *partLayout
+	layout *verify.Layout
 	spans  []rangeSpan
 
 	idx int
@@ -297,7 +89,7 @@ type rangeChain struct {
 	err error
 }
 
-func newRangeChain(src io.Reader, dek []byte, layout *partLayout, spans []rangeSpan) (*rangeChain, error) {
+func newRangeChain(src io.Reader, dek []byte, layout *verify.Layout, spans []rangeSpan) (*rangeChain, error) {
 	c := &rangeChain{src: src, dek: dek, layout: layout, spans: spans}
 	if err := c.open(); err != nil {
 		return nil, err
@@ -315,7 +107,7 @@ func (c *rangeChain) VerifyFirst() error {
 
 func (c *rangeChain) open() error {
 	span := c.spans[c.idx]
-	part := c.layout.parts[span.index]
+	part := c.layout.Parts[span.index]
 
 	header := span.rawHeader
 	if header == nil {
@@ -332,7 +124,7 @@ func (c *rangeChain) open() error {
 		c.err = fmt.Errorf("%w: the header of part %d is short",
 			manifest.ErrVerify, part.Number)
 		return c.err
-	} else if err := c.layout.checkSalt(span.index, salt); err != nil {
+	} else if err := c.layout.CheckSalt(span.index, salt); err != nil {
 		c.err = err
 		return err
 	}
@@ -342,7 +134,7 @@ func (c *rangeChain) open() error {
 	length := span.rng.CipherEnd - span.rng.CipherStart + 1
 	reader, err := stream.NewRangeReader(
 		io.LimitReader(c.src, length), header, c.dek,
-		stream.SegmentParams{Log2ChunkSize: c.layout.log2C, Multipart: true, Index: part.Number},
+		stream.SegmentParams{Log2ChunkSize: c.layout.Log2C, Multipart: true, Index: part.Number},
 		span.rng,
 	)
 	if err != nil {
@@ -465,7 +257,7 @@ func (p *Proxy) getMultipartObject(
 		return apiErr
 	}
 
-	chain, err := newSegmentChain(out.Body, dek, layout)
+	chain, err := verify.NewSegmentChain(out.Body, dek, layout)
 	if err != nil {
 		return p.integrityError(log, "segment header", err)
 	}
@@ -476,13 +268,13 @@ func (p *Proxy) getMultipartObject(
 	}
 
 	// Before the status line, like every other check that can refuse a read.
-	if apiErr := p.checkFreshness(req.Bucket, req.Key, layout.salts(), log); apiErr != nil {
+	if apiErr := p.checkFreshness(req.Bucket, req.Key, layout.Salts(), log); apiErr != nil {
 		return apiErr
 	}
 
 	copyResponseHeaders(w.Header(), out.Header)
 	w.Header().Set("Accept-Ranges", "bytes")
-	w.Header().Set("Content-Length", strconv.FormatInt(layout.totalPlain, 10))
+	w.Header().Set("Content-Length", strconv.FormatInt(layout.TotalPlain, 10))
 	w.WriteHeader(http.StatusOK)
 
 	p.metrics.StreamStarted(obs.Download)
@@ -496,10 +288,10 @@ func (p *Proxy) getMultipartObject(
 	p.metrics.Bytes(obs.OutPlain, written)
 	p.noteObject(r, meta.KeyID, written)
 	if copyErr != nil {
-		p.abortResponse(r, log, written, layout.totalPlain, copyErr)
+		p.abortResponse(r, log, written, layout.TotalPlain, copyErr)
 	}
 	log.Info("multipart object served",
-		"parts", len(layout.parts), "plaintext_bytes", layout.totalPlain, "kid", meta.KeyID)
+		"parts", len(layout.Parts), "plaintext_bytes", layout.TotalPlain, "kid", meta.KeyID)
 	return nil
 }
 
@@ -529,16 +321,16 @@ func (p *Proxy) getMultipartRange(
 		return apiErr
 	}
 
-	start, end, apiErr := parseRange(spec, layout.totalPlain)
+	start, end, apiErr := parseRange(spec, layout.TotalPlain)
 	if apiErr != nil {
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", layout.totalPlain))
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", layout.TotalPlain))
 		return apiErr
 	}
 
-	spans, err := layout.planRange(start, end)
+	spans, err := planRange(layout, start, end)
 	if err != nil {
 		if errors.Is(err, stream.ErrRangeNotSatisfiable) {
-			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", layout.totalPlain))
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", layout.TotalPlain))
 			return s3api.ErrInvalidRange
 		}
 		return p.integrityError(log, "range mapping", err)
@@ -547,7 +339,7 @@ func (p *Proxy) getMultipartRange(
 	// The header of the first part touched has to be fetched separately when the
 	// range starts past that part's first chunk.
 	if spans[0].headerSeparate {
-		offset := layout.cipherStart[spans[0].index]
+		offset := layout.CipherStart[spans[0].index]
 		header, err := p.upstream.GetObject(r.Context(), upstream.GetObjectInput{
 			Bucket: req.Bucket, Key: storedKey,
 			Range:   fmt.Sprintf("bytes=%d-%d", offset, offset+stream.HeaderSize-1),
@@ -565,7 +357,7 @@ func (p *Proxy) getMultipartRange(
 		spans[0].rawHeader = raw
 	}
 
-	fetchStart, fetchEnd := layout.bodyRange(spans)
+	fetchStart, fetchEnd := bodyRange(layout, spans)
 	out, err := p.upstream.GetObject(r.Context(), upstream.GetObjectInput{
 		Bucket: req.Bucket, Key: storedKey,
 		Range:   fmt.Sprintf("bytes=%d-%d", fetchStart, fetchEnd),
@@ -589,14 +381,14 @@ func (p *Proxy) getMultipartRange(
 	// The salts come from the manifest, which is itself bound to bucket, key and
 	// manifest id (FORMAT.md §10.3) -- so an old manifest served with an old
 	// object is a different tag, and this catches the pair.
-	if apiErr := p.checkFreshness(req.Bucket, req.Key, layout.salts(), log); apiErr != nil {
+	if apiErr := p.checkFreshness(req.Bucket, req.Key, layout.Salts(), log); apiErr != nil {
 		return apiErr
 	}
 
 	length := rangeLength(spans)
 	copyResponseHeaders(w.Header(), out.Header)
 	w.Header().Set("Accept-Ranges", "bytes")
-	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, layout.totalPlain))
+	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, layout.TotalPlain))
 	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 	w.WriteHeader(http.StatusPartialContent)
 
@@ -616,7 +408,7 @@ func (p *Proxy) getMultipartRange(
 // multipartLayout loads the manifest and derives the object's geometry from it.
 func (p *Proxy) multipartLayout(
 	r *http.Request, req s3api.Request, meta objectMeta, storedCipher int64, dek []byte, log *slog.Logger,
-) (*partLayout, *s3api.Error) {
+) (*verify.Layout, *s3api.Error) {
 	// The manifest lives at the hash of the *stored* key and is bound to it,
 	// which is what keeps gc free of the name key. The data key went the other
 	// way, bound to the identity.
@@ -632,11 +424,11 @@ func (p *Proxy) multipartLayout(
 		return nil, translateUpstream(err)
 	}
 
-	layout, err := newPartLayout(m.Parts, meta.Log2ChunkSize, m.HasSalts())
+	layout, err := verify.NewLayout(m.Parts, meta.Log2ChunkSize, m.HasSalts())
 	if err != nil {
 		return nil, p.integrityError(log, "manifest", err)
 	}
-	if err := layout.checkAgainst(storedCipher); err != nil {
+	if err := layout.CheckAgainst(storedCipher); err != nil {
 		return nil, p.integrityError(log, "object size", err)
 	}
 	return layout, nil

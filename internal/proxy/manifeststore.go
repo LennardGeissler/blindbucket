@@ -5,18 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 
 	"github.com/LennardGeissler/blindbucket/internal/manifest"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
+	"github.com/LennardGeissler/blindbucket/internal/verify"
 )
-
-// maxManifestBytes bounds a manifest read back from the provider.
-//
-// A manifest of 10000 parts is about 100 KB. The bound matters because the
-// provider is untrusted: without it, a manifest object could be made arbitrarily
-// large and every GET of the object would allocate it.
-const maxManifestBytes = 1 << 20
 
 // writeManifest stores a manifest as a sidecar object.
 //
@@ -42,37 +35,12 @@ func (p *Proxy) writeManifest(ctx context.Context, m *manifest.Manifest, dek []b
 	return nil
 }
 
-// loadManifest fetches and verifies the manifest of a multipart object.
-//
-// bucket, key and id are what the caller expects; the manifest itself gets no
-// say in them. A manifest from another object, or from an earlier upload of this
-// one, therefore fails to verify rather than producing a plausible part list.
+// loadManifest fetches and verifies the manifest of a multipart object; see
+// verify.LoadManifest, which `blindbucket scrub` shares with this read path.
 func (p *Proxy) loadManifest(
 	ctx context.Context, bucket, key string, id manifest.ID, dek []byte,
 ) (*manifest.Manifest, error) {
-	out, err := p.upstream.GetObject(ctx, upstream.GetObjectInput{
-		Bucket: bucket, Key: id.ObjectKey(key),
-	})
-	if err != nil {
-		if upstream.NotFound(err) {
-			// The object is visible but its manifest is not there. That is the
-			// failure invariant I1 exists to prevent, so it is reported as an
-			// integrity failure and not as a missing object: the object is very
-			// much there, it just cannot be served.
-			return nil, fmt.Errorf("%w: the manifest of this object is missing", manifest.ErrVerify)
-		}
-		return nil, err
-	}
-	defer func() { _ = out.Body.Close() }()
-
-	raw, err := io.ReadAll(io.LimitReader(out.Body, maxManifestBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("reading the manifest: %w", err)
-	}
-	if len(raw) > maxManifestBytes {
-		return nil, fmt.Errorf("%w: manifest exceeds %d bytes", manifest.ErrVerify, maxManifestBytes)
-	}
-	return manifest.Unmarshal(raw, dek, bucket, key, id)
+	return verify.LoadManifest(ctx, p.upstream, bucket, key, id, dek)
 }
 
 // deleteManifest removes one manifest.

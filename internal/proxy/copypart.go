@@ -326,19 +326,19 @@ func (p *Proxy) openMultipartSourceRange(
 		return fail(apiErr)
 	}
 
-	start, end := int64(0), layout.totalPlain-1
+	start, end := int64(0), layout.TotalPlain-1
 	if spec != "" {
-		start, end, apiErr = parseRange(spec, layout.totalPlain)
+		start, end, apiErr = parseRange(spec, layout.TotalPlain)
 		if apiErr != nil {
 			return fail(apiErr)
 		}
 	}
-	if layout.totalPlain == 0 {
+	if layout.TotalPlain == 0 {
 		clear(dek)
 		return io.NopCloser(strings.NewReader("")), 0, nil
 	}
 
-	spans, err := layout.planRange(start, end)
+	spans, err := planRange(layout, start, end)
 	if err != nil {
 		if errors.Is(err, stream.ErrRangeNotSatisfiable) {
 			return fail(s3api.ErrInvalidRange)
@@ -347,7 +347,7 @@ func (p *Proxy) openMultipartSourceRange(
 	}
 
 	if spans[0].headerSeparate {
-		offset := layout.cipherStart[spans[0].index]
+		offset := layout.CipherStart[spans[0].index]
 		header, err := p.upstream.GetObject(r.Context(), upstream.GetObjectInput{
 			Bucket: srcReq.Bucket, Key: srcStored,
 			Range:   fmt.Sprintf("bytes=%d-%d", offset, offset+stream.HeaderSize-1),
@@ -365,7 +365,7 @@ func (p *Proxy) openMultipartSourceRange(
 		spans[0].rawHeader = raw
 	}
 
-	fetchStart, fetchEnd := layout.bodyRange(spans)
+	fetchStart, fetchEnd := bodyRange(layout, spans)
 	out, err := p.upstream.GetObject(r.Context(), upstream.GetObjectInput{
 		Bucket: srcReq.Bucket, Key: srcStored,
 		Range:   fmt.Sprintf("bytes=%d-%d", fetchStart, fetchEnd),

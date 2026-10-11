@@ -17,6 +17,7 @@ import (
 	"github.com/LennardGeissler/blindbucket/internal/obs"
 	"github.com/LennardGeissler/blindbucket/internal/s3api"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
+	"github.com/LennardGeissler/blindbucket/internal/verify"
 )
 
 // putObject encrypts the client's body and streams the ciphertext upstream.
@@ -482,19 +483,19 @@ func (p *Proxy) deleteObject(
 
 // unwrapDEK recovers an object's data key, bound to its bucket and key.
 func (p *Proxy) unwrapDEK(r *http.Request, req s3api.Request, meta objectMeta, log *slog.Logger) ([]byte, *s3api.Error) {
-	aad, err := keys.ObjectAAD(meta.KeyID, req.Bucket, req.Key)
-	if err != nil {
-		return nil, s3api.ErrInvalidArgument.WithMessage("%v", err)
+	dek, err := verify.UnwrapDEK(r.Context(), p.keys, req.Bucket, req.Key, meta)
+	if err == nil {
+		return dek, nil
 	}
-	dek, err := p.keys.Unwrap(r.Context(), meta.KeyID, meta.WrappedDEK, aad)
-	if err != nil {
-		if errors.Is(err, keys.ErrUnknownKID) {
-			return nil, s3api.ErrIntegrity.WithMessage(
-				"the key %q that protects this object is not in the keyring", meta.KeyID)
-		}
-		return nil, p.integrityError(log, "data key", err)
+	var aadErr *verify.AADError
+	if errors.As(err, &aadErr) {
+		return nil, s3api.ErrInvalidArgument.WithMessage("%v", aadErr.Err)
 	}
-	return dek, nil
+	if f, ok := verify.AsFailure(err); ok && f.Kind == verify.KindUnknownKID {
+		return nil, s3api.ErrIntegrity.WithMessage(
+			"the key %q that protects this object is not in the keyring", meta.KeyID)
+	}
+	return nil, p.verifyError(log, err)
 }
 
 // openSegment unwraps the data key and authenticates the first chunk.
@@ -518,29 +519,20 @@ func (p *Proxy) openSegment(
 	}
 	defer clear(dek)
 
-	// AnyChunkSize: the segment states its own size, and unlike the metadata
-	// that statement is authenticated.
-	reader, err := stream.NewDecryptReader(body, dek, stream.SegmentParams{Log2ChunkSize: stream.AnyChunkSize})
+	reader, meta, err := verify.OpenSegment(body, dek, meta)
 	if err != nil {
-		return nil, objectMeta{}, p.integrityError(log, "segment header", err)
+		return nil, objectMeta{}, p.verifyError(log, err)
 	}
-	if err := reader.VerifyFirst(); err != nil {
-		_ = reader.Close()
-		return nil, objectMeta{}, p.integrityError(log, "first chunk", err)
-	}
-
-	// Past this point the header is authenticated, so it can be trusted over the
-	// metadata. A recorded chunk size that disagrees with it means the metadata
-	// was altered.
-	authenticated := reader.Header().Log2ChunkSize
-	if meta.HasChunkSize && meta.Log2ChunkSize != authenticated {
-		_ = reader.Close()
-		return nil, objectMeta{}, p.integrityError(log, "chunk size",
-			errors.New("object metadata disagrees with the authenticated segment header"))
-	}
-	meta.Log2ChunkSize = authenticated
-
 	return reader, meta, nil
+}
+
+// verifyError renders a failed check from internal/verify, under the name the
+// check has always been logged and counted with.
+func (p *Proxy) verifyError(log *slog.Logger, err error) *s3api.Error {
+	if f, ok := verify.AsFailure(err); ok {
+		return p.integrityError(log, f.Check, f.Err)
+	}
+	return p.integrityError(log, "segment header", err)
 }
 
 // abortResponse drops the connection after the headers have gone out.
