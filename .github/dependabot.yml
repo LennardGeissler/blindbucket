@@ -41,3 +41,18 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: build
+
+  # The Python the tests run: the reference decoder's and the boto3 scenarios'.
+  # Both are installed by hash, so Dependabot regenerates requirements.txt from
+  # requirements.in with pip-compile rather than editing the pins by hand.
+  - package-ecosystem: pip
+    directories:
+      - /ref/python
+      - /test/integration/clients/boto3
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message:
+      prefix: test

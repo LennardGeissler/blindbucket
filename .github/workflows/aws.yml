@@ -146,7 +146,7 @@ jobs:
           BLINDBUCKET_BUCKET: ${{ vars.AWS_BUCKET }}
           BLINDBUCKET_PREFIX: bbtest/clients-${{ github.run_id }}/boto3/
         run: |
-          pip install --quiet boto3
+          pip install --quiet --require-hashes -r test/integration/clients/boto3/requirements.txt
           python3 test/integration/clients/boto3/scenarios.py
 
       # The client-side steps from ci.yml's compatibility job, against AWS: the

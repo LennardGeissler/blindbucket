@@ -10,7 +10,7 @@ merely a description of one codebase is worth much less than one an outsider can
 build against, and the difference is invisible until somebody tries.
 
 ```sh
-pip install cryptography
+pip install --require-hashes -r requirements.txt
 
 python3 test_vectors.py                  # the normative known-answer vectors
 python3 test_names_vectors.py            # the same, for the object name mapping

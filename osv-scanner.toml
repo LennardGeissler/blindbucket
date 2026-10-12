@@ -1,0 +1,15 @@
+# Advisories OSV reports against go.mod that do not reach blindbucket. OpenSSF
+# Scorecard's Vulnerabilities check reads this file; govulncheck in CI does not
+# need it, because it reports only what the code actually calls.
+#
+# Every entry says why it does not apply and is reviewed again by its date.
+
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+ignoreUntil = 2027-04-12
+reason = """
+golang.org/x/crypto/openpgp is deprecated and unsafe by design, and the advisory
+is filed against every version of golang.org/x/crypto because the package is
+still in the module. blindbucket does not import it: `go list -deps ./...` lists
+no openpgp package. Revisit if that ever changes.
+"""

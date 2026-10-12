@@ -10,7 +10,9 @@
 
 # A supported Go, not the module's floor: the standard library is part of what
 # this image ships, and a release the Go team no longer patches ships its holes.
-FROM golang:1.27-alpine AS build
+# Both bases are pinned by digest, because a tag can be moved and a digest
+# cannot; Dependabot keeps tag and digest current together.
+FROM golang:1.27-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS build
 WORKDIR /src
 
 # Dependencies first, so a source-only change does not refetch them.
@@ -26,7 +28,7 @@ RUN CGO_ENABLED=0 go build \
       -ldflags="-s -w -X main.version=${VERSION}" \
       -o /out/blindbucket ./cmd/blindbucket
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 COPY --from=build /out/blindbucket /blindbucket
 
 # 65532 is distroless's nonroot user. The keyring must be readable by it and by

@@ -1,0 +1,3 @@
+# The reference decoder's one dependency. requirements.txt is generated from
+# this file: pip-compile --generate-hashes requirements.in
+cryptography

@@ -100,6 +100,12 @@ release:
     gh attestation verify oci://ghcr.io/lennardgeissler/blindbucket:{{ .Version }} --repo LennardGeissler/blindbucket
     ```
 
+    The attestation of the archives and the vectors is also attached here, as `blindbucket_{{ .Version }}_provenance.intoto.jsonl`. With it, a download verifies without fetching the attestation from GitHub:
+
+    ```sh
+    gh attestation verify blindbucket_{{ .Version }}_linux_amd64.tar.gz --repo LennardGeissler/blindbucket --bundle blindbucket_{{ .Version }}_provenance.intoto.jsonl
+    ```
+
     `segment_v1.json` and `names_v1.json` are the known-answer vectors of `docs/FORMAT.md`, for testing another implementation against format 1.
 
     The container image is `distroless/static:nonroot`: no shell, no package manager, and it runs as uid 65532. Mount the keyring read-only and give the container a read-only root filesystem.

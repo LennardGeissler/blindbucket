@@ -495,7 +495,7 @@ jobs:
           BLINDBUCKET_ENDPOINT: http://127.0.0.1:9000
           BLINDBUCKET_BUCKET: blindbucket-dev
         run: |
-          pip install --quiet boto3
+          pip install --quiet --require-hashes -r test/integration/clients/boto3/requirements.txt
           python3 test/integration/clients/boto3/scenarios.py
 
       # The AWS CLI is preinstalled on GitHub runners. `aws s3 cp` exercises the

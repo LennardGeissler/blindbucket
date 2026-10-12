@@ -27,6 +27,9 @@ version 1 would keep being readable.
 
 - **The read path's checks are a package of their own.** They moved from the proxy into `internal/verify`, which the gateway and `scrub` both call, so a scrub cannot pass an object a read would refuse. The gateway's behaviour, error messages and metrics are unchanged.
 - **Building from source needs Go 1.26.** The floor now follows Go's own support: the oldest Go release the Go team still patches, so it moves with Go 1.28. `golang.org/x/crypto` v0.57.0 already requires it, and with the default `GOTOOLCHAIN=auto` an older `go install` fetches 1.26 by itself. Released binaries and images are not affected.
+- **The provenance travels with the release.** Each release now attaches its attestation of the archives and vectors as `blindbucket_<version>_provenance.intoto.jsonl`, so `gh attestation verify --bundle` works without fetching it from GitHub. It is the same attestation that was already stored with GitHub.
+- **The supply chain is pinned further.** Both Dockerfiles pin their base images by digest, and the Python the tests install (`cryptography`, `boto3`) is pinned by hash from `requirements.txt` files that Dependabot keeps current. The release workflow's write permissions moved from the whole workflow to the job that publishes, so the tests that run before it hold a read-only token.
+- **CodeQL analyses every change.** The Go, the Python and the workflows are analysed on every pull request and weekly, with findings in the Security tab. `osv-scanner.toml` records, with a reason, the one OSV advisory against `go.mod` that does not reach the code (GO-2026-5932, `x/crypto/openpgp`, which is not imported).
 
 ## [1.2.0] — 2026-10-10
 

@@ -159,7 +159,7 @@ MinIO and Garage · Vault and the KMS emulator · the boto3 and AWS CLI client s
 including a multipart upload across **two gateway instances behind a
 round-robin balancer** — statelessness is tested, not asserted · every released
 version, built from its tag, writes objects that the current build must read
-back. Pull requests
+back · CodeQL over the Go, the Python and the workflows. Pull requests
 additionally get a `benchstat` comparison against the base commit, reported in
 the job summary rather than failing the build.
 

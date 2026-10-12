@@ -9,7 +9,9 @@
 #
 # deploy/Dockerfile is the from-source equivalent, for building without
 # goreleaser.
-FROM gcr.io/distroless/static-debian12:nonroot
+#
+# The base is pinned by digest, as in deploy/Dockerfile.
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 ARG TARGETPLATFORM
 COPY $TARGETPLATFORM/blindbucket /blindbucket
 USER 65532:65532

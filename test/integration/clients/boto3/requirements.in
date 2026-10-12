@@ -1,0 +1,3 @@
+# What scenarios.py needs. requirements.txt is generated from this file:
+# pip-compile --generate-hashes requirements.in
+boto3

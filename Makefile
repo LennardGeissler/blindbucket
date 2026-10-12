@@ -104,7 +104,7 @@ tla: $(TLA_TOOLS) ## Check every TLA+ model configuration.
 
 ##@ Reference decoder (ref/python)
 
-# Needs `pip install cryptography`.
+# Needs `pip install --require-hashes -r ref/python/requirements.txt`.
 .PHONY: ref-vectors
 ref-vectors: ## Check the Python reference against known vectors.
 	cd ref/python && python3 test_vectors.py
