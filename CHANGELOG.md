@@ -16,6 +16,23 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-10-14
+
+**Upgrade recommended** where clients use AWS CLI 2.38 or later, or store objects with
+`Content-Encoding: gzip`. Against 1.2 and earlier with the default configuration, the
+first can neither download nor upload multipart, and the second cannot read such an
+object back -- both fixed here (see Changed and Fixed). 1.3 also adds `blindbucket
+scrub`, which verifies every stored object without waiting for a read. All of it is
+additive under [ADR-021](docs/adr/ADR-021-what-1.0-promises.md), and the format is still
+`1`.
+
+**Upgrading:** nothing to do for the binaries, the image or the Helm chart. One
+default changes: `UNSIGNED-PAYLOAD` is accepted unless the configuration sets
+`allow_unsigned_payload: false`, which keeps refusing it. A listener whose hop in
+front of it is plaintext and not trusted should set `require_signed_payload: true`
+([ADR-029](docs/adr/ADR-029-unsigned-payloads-accepted-by-default.md)). Building from
+source needs Go 1.26.
+
 ### Added
 
 - **`blindbucket scrub` verifies stored objects without waiting for a read.** It reads every object under a prefix from the provider, verifies it exactly as a GET through the gateway does, and discards the plaintext. Each object that fails is listed with the kind of check it failed (`chunk`, `header`, `size`, `manifest`, `dek_unwrap`, `metadata`, `unknown_kid`), and the exit code is 1 if any did. Nothing is written, repaired or deleted ([ADR-028](docs/adr/ADR-028-scrub.md)).
@@ -1278,7 +1295,8 @@ figures and the methodology are in [bench/](bench/).
   of ten seconds, so the time is the provider's; why it behaves that way under
   this access pattern is not established.
 
-[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/LennardGeissler/blindbucket/compare/v0.6.0...v1.0.0

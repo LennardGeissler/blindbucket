@@ -1,6 +1,14 @@
 # Threat Model
 
-**Status:** Current as of `v1.2.0`, which changes no guarantee. With `names.encrypt`
+**Status:** Current as of `v1.3.0`, which changes one default and adds one guarantee.
+`UNSIGNED-PAYLOAD` is now accepted by default
+([ADR-029](adr/ADR-029-unsigned-payloads-accepted-by-default.md)). For current AWS
+clients that leaves A6's reach unchanged, because their uploads over HTTPS were
+always unsigned aws-chunked bodies with a CRC trailer. It is new for clients that send
+`UNSIGNED-PAYLOAD` over plaintext, `rclone` and `mc` among them.
+`require_signed_payload` is the first setting under which A6 cannot alter a body
+the gateway accepts, though it can still read it. `scrub` verifies with the read path's
+own checks and adds no mechanism. `v1.2.0` changed no guarantee. With `names.encrypt`
 off, a provider's `400` on a listing now reaches the client with the provider's own
 code and message ([ADR-027](adr/ADR-027-plaintext-listing-provider-errors.md)), so
 an active provider (A2) chooses that text -- as it already chooses what a listing
