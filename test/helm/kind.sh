@@ -13,6 +13,10 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 KIND_VERSION=v0.33.0
 HELM_IMAGE=alpine/helm:4.3.0
+# 2.37.13, not latest: 2.38.0 made the CRT transfer client the default, and it
+# signs every request UNSIGNED-PAYLOAD, which the gateway refuses unless
+# allow_unsigned_payload is set (#114). Pinned by digest, like the Dockerfiles.
+AWS_CLI_IMAGE=amazon/aws-cli:2.37.13@sha256:d32864c20087d486f5988c3e70817d67a73f584a47535cada9ad97e0ea1e5196
 CLUSTER=blindbucket-chart
 NODE=$CLUSTER-control-plane
 IMAGE=blindbucket:chart-test
@@ -148,7 +152,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: aws
-      image: amazon/aws-cli:latest
+      image: $AWS_CLI_IMAGE
       command: [sh, -c]
       args:
         - |
