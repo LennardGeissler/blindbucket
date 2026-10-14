@@ -31,6 +31,10 @@ version 1 would keep being readable.
 - **The supply chain is pinned further.** Both Dockerfiles pin their base images by digest, and the Python the tests install (`cryptography`, `boto3`) is pinned by hash from `requirements.txt` files that Dependabot keeps current. The release workflow's write permissions moved from the whole workflow to the job that publishes, so the tests that run before it hold a read-only token.
 - **CodeQL analyses every change.** The Go, the Python and the workflows are analysed on every pull request and weekly, with findings in the Security tab. `osv-scanner.toml` records, with a reason, the one OSV advisory against `go.mod` that does not reach the code (GO-2026-5932, `x/crypto/openpgp`, which is not imported).
 
+### Fixed
+
+- **Objects stored with `Content-Encoding: gzip` read back again.** Since 0.1.0 a whole-object GET of such an object failed with `502 IntegrityCheckFailed (segment header)` and counted in `blindbucket_integrity_failures_total`, because Go's HTTP client gunzipped the ciphertext the provider returned under the stored header. Nothing was damaged: the objects read back once the gateway is upgraded. Ranged reads and other encodings such as `br` were never affected (#110).
+
 ## [1.2.0] — 2026-10-10
 
 **Upgrade recommended.** Every release up to 1.1.0 was built with Go 1.24.0 and so

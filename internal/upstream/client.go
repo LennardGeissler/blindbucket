@@ -155,6 +155,12 @@ func defaultHTTPClient() *http.Client {
 			// Wait this long for the 100-continue before sending a body, so an
 			// auth or bucket error is seen before gigabytes are streamed.
 			ExpectContinueTimeout: 5 * time.Second,
+			// The provider's bytes are ciphertext and go to the decoder as
+			// they are. Left on, the transport asks for gzip on a whole-object
+			// GET and gunzips any response that says Content-Encoding: gzip --
+			// which an object stored with that header always does, because
+			// the header describes its plaintext (#110).
+			DisableCompression: true,
 		},
 		// No Client.Timeout: it would cut off long but healthy transfers.
 	}

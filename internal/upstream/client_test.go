@@ -1,9 +1,11 @@
 package upstream
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -324,6 +326,53 @@ func TestEmptyBodySendsContentLength(t *testing.T) {
 	}
 	if gotLength != 0 {
 		t.Errorf("ContentLength = %d, want 0", gotLength)
+	}
+}
+
+// TestStoredContentEncodingIsNotDecoded: an object stored with
+// Content-Encoding: gzip comes back with that header on every GET, because it
+// describes the plaintext. The body is ciphertext all the same, and it has to
+// reach the decoder byte for byte. Go's transport, left to itself, asks for gzip
+// on a whole-object GET and then gunzips whatever answers with that header --
+// which turns the ciphertext into an error and the read into a false integrity
+// failure (#110).
+func TestStoredContentEncodingIsNotDecoded(t *testing.T) {
+	t.Parallel()
+
+	ciphertext := []byte("not gzip: the segment header and the sealed chunks")
+	var gotAcceptEncoding string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAcceptEncoding = r.Header.Get("Accept-Encoding")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Length", fmt.Sprint(len(ciphertext)))
+		w.Header().Set("ETag", `"stored"`)
+		_, _ = w.Write(ciphertext)
+	}))
+	defer srv.Close()
+
+	out, err := testClient(t, srv.URL).GetObject(context.Background(), GetObjectInput{
+		Bucket: "bucket", Key: "page.html",
+	})
+	if err != nil {
+		t.Fatalf("GetObject: %v", err)
+	}
+	defer func() { _ = out.Body.Close() }()
+	body, err := io.ReadAll(out.Body)
+	if err != nil {
+		t.Fatalf("reading the body: %v", err)
+	}
+
+	if gotAcceptEncoding != "" {
+		t.Errorf("the request asked for Accept-Encoding %q; the provider's bytes must not be negotiated", gotAcceptEncoding)
+	}
+	if !bytes.Equal(body, ciphertext) {
+		t.Errorf("body = %q, want the stored bytes unchanged", body)
+	}
+	if got := out.Header.Get("Content-Encoding"); got != "gzip" {
+		t.Errorf("Content-Encoding = %q, want the stored gzip", got)
+	}
+	if out.ContentLength != int64(len(ciphertext)) {
+		t.Errorf("ContentLength = %d, want %d", out.ContentLength, len(ciphertext))
 	}
 }
 
