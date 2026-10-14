@@ -505,10 +505,10 @@ specification. Full detail and the exact commands are in
 
 | Client | Status | Needs |
 |---|---|---|
-| AWS CLI v2 | works — `cp`, `ls`, `rm`, `sync`, ranges, multipart | nothing |
+| AWS CLI v2 | works — `cp`, `ls`, `rm`, `sync`, ranges, multipart | nothing since 1.3; [2.38 against 1.2](docs/COMPATIBILITY.md#aws-cli-238-and-the-crt-transfer-client) |
 | boto3 | works — including paginators, delimiters and `upload_file` | nothing |
-| MinIO `mc` | works — `cp`, `ls`, `mirror`, `cat`, multipart | `allow_unsigned_payload` on the proxy, for multipart only |
-| rclone | works | `--ignore-checksum`, and `allow_unsigned_payload` on the proxy |
+| MinIO `mc` | works — `cp`, `ls`, `mirror`, `cat`, multipart | nothing since 1.3 (before: `allow_unsigned_payload`, for multipart) |
+| rclone | works | `--ignore-checksum` (before 1.3 also `allow_unsigned_payload`) |
 | s5cmd | works, `cp`, `ls`, `rm`, `mv`, `sync`, `pipe`, multipart | nothing |
 
 One call is deliberately not implemented: `ListMultipartUploads` returns 501. The

@@ -321,10 +321,13 @@ func TestVerifyClockSkew(t *testing.T) {
 func TestPayloadModes(t *testing.T) {
 	t.Parallel()
 
+	// require refuses every mode the signature does not cover, and only those:
+	// the three that sign the body pass under it, whatever allow says (ADR-029).
 	tests := []struct {
 		claimed string
 		want    PayloadMode
 		allow   bool
+		require bool
 		wantErr bool
 	}{
 		{claimed: strings.Repeat("a", 64), want: PayloadHashed},
@@ -334,15 +337,21 @@ func TestPayloadModes(t *testing.T) {
 		{claimed: StreamingUnsignedTrail, want: PayloadStreamingUnsignedTrailer},
 		{claimed: UnsignedPayload, allow: true, want: PayloadUnsigned},
 		{claimed: UnsignedPayload, allow: false, wantErr: true},
+		{claimed: strings.Repeat("a", 64), allow: true, require: true, want: PayloadHashed},
+		{claimed: StreamingSigned, allow: true, require: true, want: PayloadStreamingSigned},
+		{claimed: StreamingSignedTrailer, allow: true, require: true, want: PayloadStreamingSignedTrailer},
+		{claimed: StreamingUnsignedTrail, allow: true, require: true, wantErr: true},
+		{claimed: UnsignedPayload, allow: true, require: true, wantErr: true},
 		{claimed: "", wantErr: true},
 		{claimed: "not-a-hash", wantErr: true},
 		{claimed: strings.Repeat("z", 64), wantErr: true},
 	}
 
+	yesNo := map[bool]string{true: "yes", false: "no"}
 	for _, tc := range tests {
-		t.Run(tc.claimed+"/allow="+map[bool]string{true: "yes", false: "no"}[tc.allow], func(t *testing.T) {
+		t.Run(tc.claimed+"/allow="+yesNo[tc.allow]+"/require="+yesNo[tc.require], func(t *testing.T) {
 			t.Parallel()
-			v := &Verifier{allowUnsignedPayload: tc.allow}
+			v := &Verifier{allowUnsignedPayload: tc.allow, requireSignedPayload: tc.require}
 			r := &http.Request{Header: http.Header{}}
 			if tc.claimed != "" {
 				r.Header.Set("X-Amz-Content-Sha256", tc.claimed)

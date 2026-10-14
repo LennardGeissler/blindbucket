@@ -284,6 +284,38 @@ audit:
 	}
 }
 
+// TestUnsignedPayloadDefaults pins ADR-029: UNSIGNED-PAYLOAD is accepted unless
+// a configuration says otherwise, an explicit false still refuses it -- the
+// configurations written before 1.3 keep meaning what they meant -- and
+// signed payloads are required only when asked for.
+func TestUnsignedPayloadDefaults(t *testing.T) {
+	for name, tc := range map[string]struct {
+		server           string
+		allow, requireSP bool
+	}{
+		"absent":         {server: "", allow: true},
+		"explicit false": {server: "server: {allow_unsigned_payload: false}\n", allow: false},
+		"explicit true":  {server: "server: {allow_unsigned_payload: true}\n", allow: true},
+		"required":       {server: "server: {require_signed_payload: true}\n", allow: true, requireSP: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Load(write(t, minimal+tc.server))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Server.AllowUnsignedPayload != tc.allow {
+				t.Errorf("allow_unsigned_payload = %t, want %t", cfg.Server.AllowUnsignedPayload, tc.allow)
+			}
+			if cfg.Server.RequireSignedPayload != tc.requireSP {
+				t.Errorf("require_signed_payload = %t, want %t", cfg.Server.RequireSignedPayload, tc.requireSP)
+			}
+			if cfg.Server.Listen != "127.0.0.1:9000" || !cfg.Server.Presign.Enabled {
+				t.Errorf("setting a payload key lost the other server defaults: %+v", cfg.Server)
+			}
+		})
+	}
+}
+
 // TestAuditFailClosedCanBeTurnedOff checks that an explicit false survives the
 // default above, which a plain bool with a non-zero default would otherwise eat.
 func TestAuditFailClosedCanBeTurnedOff(t *testing.T) {

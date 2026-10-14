@@ -271,7 +271,6 @@ func TestServeWarnsAboutWhatItCannotProtect(t *testing.T) {
 		stop := startServe(t, fmt.Sprintf(`
 server:
   listen: "0.0.0.0:%s"
-  allow_unsigned_payload: true
   presign: { enabled: true }
 admin:
   listen: %q
@@ -301,7 +300,7 @@ clients:
 	}
 	for _, want := range []string{
 		"plaintext beyond loopback without TLS",
-		"UNSIGNED-PAYLOAD is enabled",
+		"set server.require_signed_payload",
 		"presigned URLs may name a window of up to",
 		"audit.fail_closed is off",
 	} {

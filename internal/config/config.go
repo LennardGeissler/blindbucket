@@ -158,11 +158,20 @@ type Server struct {
 	// "s3.internal.example" set, bucket.s3.internal.example addresses that
 	// bucket. Empty accepts path-style only.
 	BaseDomain string `yaml:"base_domain"`
-	// AllowUnsignedPayload permits UNSIGNED-PAYLOAD from clients. Off by
-	// default: without it the request body is covered by the signature, and
-	// turning it on only makes sense behind TLS or in a sidecar, where the hop
-	// between client and proxy is already trusted.
+	// AllowUnsignedPayload accepts UNSIGNED-PAYLOAD from clients. On by
+	// default (ADR-029): AWS CLI 2.38 and later send it on every GET and on
+	// multipart control requests, and the bodies that carry data reach the
+	// gateway unsigned anyway, as STREAMING-UNSIGNED-PAYLOAD-TRAILER, which no
+	// setting here has ever refused. An explicit false still refuses
+	// UNSIGNED-PAYLOAD and nothing else.
 	AllowUnsignedPayload bool `yaml:"allow_unsigned_payload"`
+	// RequireSignedPayload refuses every request whose body the signature does
+	// not cover -- UNSIGNED-PAYLOAD and STREAMING-UNSIGNED-PAYLOAD-TRAILER
+	// alike -- whatever allow_unsigned_payload says. For a deployment where
+	// the hop between client and gateway is plaintext and not trusted; the
+	// clients then have to sign their bodies, which the AWS CLI does only over
+	// HTTP and with preferred_transfer_client = classic.
+	RequireSignedPayload bool `yaml:"require_signed_payload"`
 
 	Presign Presign `yaml:"presign"`
 }
@@ -399,10 +408,14 @@ func Load(path string) (*Config, error) {
 		// it, so this is also what makes an explicit "fail_closed: false"
 		// distinguishable from an absent one.
 		Audit: Audit{FailClosed: true},
-		// On by default, for ADR-019's reasons. Here rather than after the
-		// decode, so that an explicit "enabled: false" is distinguishable from
-		// an absent one.
-		Server: Server{Listen: "127.0.0.1:9000", Presign: Presign{Enabled: true}},
+		// Presigned URLs are on by default for ADR-019's reasons, unsigned
+		// payloads for ADR-029's. Here rather than after the decode, so that an
+		// explicit false is distinguishable from an absent key.
+		Server: Server{
+			Listen:               "127.0.0.1:9000",
+			Presign:              Presign{Enabled: true},
+			AllowUnsignedPayload: true,
+		},
 	}
 	// KnownFields makes a typo in a key an error rather than a silently ignored
 	// setting -- which for something like path_style would mean every request

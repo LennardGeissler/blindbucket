@@ -16,16 +16,19 @@ const (
 	// PayloadHashed means x-amz-content-sha256 carries the SHA-256 of the whole
 	// body, which is checked as the body streams through.
 	PayloadHashed PayloadMode = iota
-	// PayloadUnsigned means the body is not covered by the signature. Accepted
-	// only when configured, because without TLS it leaves the body unprotected
-	// between client and proxy.
+	// PayloadUnsigned means the body is not covered by the signature; between
+	// client and proxy only TLS protects it. AWS CLI 2.38 sends it on every
+	// GET and on multipart control requests. Refused when the configuration
+	// says so (ADR-029).
 	PayloadUnsigned
 	// PayloadStreamingSigned is aws-chunked with a signature per chunk.
 	PayloadStreamingSigned
 	// PayloadStreamingSignedTrailer adds a checksum trailer to the above.
 	PayloadStreamingSignedTrailer
 	// PayloadStreamingUnsignedTrailer is aws-chunked with only a checksum
-	// trailer, which is what current AWS SDKs send by default.
+	// trailer, which is what current AWS SDKs send by default over HTTPS. The
+	// checksum is not keyed, so the body is as unsigned as above; only
+	// RequireSignedPayload refuses it.
 	PayloadStreamingUnsignedTrailer
 )
 
@@ -67,13 +70,18 @@ type Result struct {
 // Config configures a Verifier.
 type Config struct {
 	Clients []Client
-	// AllowUnsignedPayload permits UNSIGNED-PAYLOAD. It is off by default:
-	// without it the body between client and proxy is protected by the
-	// signature, and turning it on is only reasonable behind TLS or in a
-	// sidecar, where the hop is already trusted.
+	// AllowUnsignedPayload permits UNSIGNED-PAYLOAD. The configuration turns
+	// it on unless told otherwise (ADR-029): refusing it alone never covered a
+	// body, because STREAMING-UNSIGNED-PAYLOAD-TRAILER carries data unsigned
+	// whatever this says.
 	AllowUnsignedPayload bool
-	// AllowPresign accepts signatures that arrive in the query string. Unlike
-	// the switch above it defaults to on, because it removes a refusal of
+	// RequireSignedPayload refuses both modes in which the signature does not
+	// cover the body, and overrides AllowUnsignedPayload. It is what keeps a
+	// client's bytes from being altered on an untrusted plaintext hop: there,
+	// only the signature can tell (ADR-029).
+	RequireSignedPayload bool
+	// AllowPresign accepts signatures that arrive in the query string. It
+	// defaults to on, because it removes a refusal of
 	// something every S3 client expects rather than weakening a hop -- a
 	// presigned URL can do nothing the credential that signed it could not
 	// already do. What it does change is that a credential holder can now
@@ -89,6 +97,7 @@ type Config struct {
 type Verifier struct {
 	registry             *Registry
 	allowUnsignedPayload bool
+	requireSignedPayload bool
 	allowPresign         bool
 	maxPresignExpiry     time.Duration
 	// now is overridable so skew handling can be tested without sleeping.
@@ -112,6 +121,7 @@ func NewVerifier(cfg Config) (*Verifier, error) {
 	return &Verifier{
 		registry:             registry,
 		allowUnsignedPayload: cfg.AllowUnsignedPayload,
+		requireSignedPayload: cfg.RequireSignedPayload,
 		allowPresign:         cfg.AllowPresign,
 		maxPresignExpiry:     maxExpiry,
 		now:                  time.Now,
@@ -224,6 +234,10 @@ func (v *Verifier) payloadMode(r *http.Request) (PayloadMode, string, error) {
 
 	switch claimed {
 	case UnsignedPayload:
+		if v.requireSignedPayload {
+			return 0, "", fmt.Errorf("%w: UNSIGNED-PAYLOAD is refused on this listener, "+
+				"which requires signed payloads", ErrUnsupportedPayload)
+		}
 		if !v.allowUnsignedPayload {
 			return 0, "", fmt.Errorf("%w: UNSIGNED-PAYLOAD is not enabled on this listener",
 				ErrUnsupportedPayload)
@@ -234,6 +248,10 @@ func (v *Verifier) payloadMode(r *http.Request) (PayloadMode, string, error) {
 	case StreamingSignedTrailer:
 		return PayloadStreamingSignedTrailer, claimed, nil
 	case StreamingUnsignedTrail:
+		if v.requireSignedPayload {
+			return 0, "", fmt.Errorf("%w: STREAMING-UNSIGNED-PAYLOAD-TRAILER is refused on this "+
+				"listener, which requires signed payloads", ErrUnsupportedPayload)
+		}
 		return PayloadStreamingUnsignedTrailer, claimed, nil
 	}
 

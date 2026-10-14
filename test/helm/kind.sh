@@ -13,10 +13,11 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 KIND_VERSION=v0.33.0
 HELM_IMAGE=alpine/helm:4.3.0
-# 2.37.13, not latest: 2.38.0 made the CRT transfer client the default, and it
-# signs every request UNSIGNED-PAYLOAD, which the gateway refuses unless
-# allow_unsigned_payload is set (#114). Pinned by digest, like the Dockerfiles.
-AWS_CLI_IMAGE=amazon/aws-cli:2.37.13@sha256:d32864c20087d486f5988c3e70817d67a73f584a47535cada9ad97e0ea1e5196
+# Pinned by digest, like the Dockerfiles. 2.38.0 is the first release whose
+# default transfer client sends UNSIGNED-PAYLOAD on every GET and multipart
+# control request; the gateway accepts it by default since 1.3 (ADR-029), and
+# this test is where a chart deployment shows it.
+AWS_CLI_IMAGE=amazon/aws-cli:2.38.0@sha256:ed3233c28ad56d6a66e9e7623a495ab2d7eb08d425f8eea0fdbdfacb12de2ba8
 CLUSTER=blindbucket-chart
 NODE=$CLUSTER-control-plane
 IMAGE=blindbucket:chart-test

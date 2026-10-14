@@ -16,6 +16,7 @@ keys:
 clients:
   - { name: backup-job, existingSecret: backup-job-s3, buckets: [backups] }
   - { name: reports, existingSecret: reports-s3, buckets: ["*"] }
+server: { requireSignedPayload: true }
 names: { encrypt: true }
 networkPolicy:
   enabled: true

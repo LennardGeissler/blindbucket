@@ -18,6 +18,9 @@ data:
       presign:
         enabled: {{ .Values.server.presign.enabled }}
         max_expiry: {{ .Values.server.presign.maxExpiry | quote }}
+      {{- if .Values.server.requireSignedPayload }}
+      require_signed_payload: true
+      {{- end }}
 
     admin:
       listen: "0.0.0.0:9100"

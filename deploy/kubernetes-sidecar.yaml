@@ -39,9 +39,8 @@ data:
       # containers in this pod can reach it.
       listen: "127.0.0.1:9000"
       # The application and the gateway share a network namespace, so the body
-      # between them never leaves the pod. That is the one deployment where
-      # accepting UNSIGNED-PAYLOAD is a reasonable trade rather than a hole.
-      allow_unsigned_payload: true
+      # between them never leaves the pod, and unsigned bodies -- accepted by
+      # default (ADR-029) -- need no require_signed_payload here.
 
     admin:
       listen: "127.0.0.1:9100"

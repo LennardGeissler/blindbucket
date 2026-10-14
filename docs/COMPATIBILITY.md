@@ -45,8 +45,8 @@ not measured yet.
 |---|---|---|---|---|
 | AWS CLI v2 | 2.36.43 | **Works** | every commit, in CI | none |
 | boto3 | 1.43.92 | **Works** | every commit, in CI | none |
-| MinIO client (`mc`) | RELEASE.2025-08-13 | **Works** | 2026-09-28, after `v1.0.0` | `allow_unsigned_payload: true` on the proxy, for multipart only |
-| rclone | 1.75.1 | **Works with settings** | `v0.2.0` | `allow_unsigned_payload: true` on the proxy; `--ignore-checksum`; `--size-only` for `check` |
+| MinIO client (`mc`) | RELEASE.2025-08-13 | **Works** | 2026-09-28, after `v1.0.0` | none since 1.3; before, `allow_unsigned_payload: true` for multipart |
+| rclone | 1.75.1 | **Works with settings** | `v0.2.0` | `--ignore-checksum`; `--size-only` for `check`; before 1.3 also `allow_unsigned_payload: true` |
 | s5cmd | 2.3.0 | **Works** | 2026-10-03, main `8cdb03a` | none, `--endpoint-url` only |
 
 **HTTP and HTTPS are different code paths.** A client chooses how to frame the
@@ -59,7 +59,7 @@ reached the gateway -- and the decoder rejected it
 
 | Client | Version tested | Status | Last measured | Required settings |
 |---|---|---|---|---|
-| AWS CLI v2 over HTTPS | 2.37.4 | **Works** | every commit, in CI (`test/helm/kind.sh`) | none |
+| AWS CLI v2 over HTTPS | 2.38.0 | **Works** | every commit, in CI (`test/helm/kind.sh`) | none since 1.3; with 1.2 and earlier see [AWS CLI 2.38](#aws-cli-238-and-the-crt-transfer-client) |
 
 Multipart included since M4: each client was run with a file over its own
 threshold, so the parts, the manifest and the size arithmetic are all exercised by
@@ -97,6 +97,38 @@ export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_DEFAULT_REGION=us-eas
 The CLI's default checksum is CRC64NVME, which is verified against the plaintext
 at the gateway and echoed back. That the echoed value matches what the CLI
 computed is itself a check on the CRC-64/NVME implementation.
+
+### AWS CLI 2.38 and the CRT transfer client
+
+AWS CLI 2.38.0 (2026-10-13) makes the CRT-based transfer client the default for
+`aws s3` commands on every host ([aws/aws-cli#10751](https://github.com/aws/aws-cli/pull/10751)).
+It signs differently from the classic client, and a gateway at 1.2 or earlier
+refuses part of what it sends: every `GetObject` and every multipart upload fail
+with *"UNSIGNED-PAYLOAD is not enabled on this listener"*, over HTTPS and over
+HTTP alike. Since 1.3 the gateway accepts it by default ([ADR-029](adr/ADR-029-unsigned-payloads-accepted-by-default.md)).
+
+Measured on 2026-10-14 against MinIO ([#114](https://github.com/LennardGeissler/blindbucket/issues/114)):
+`cp` of 1 MiB and 100 MiB both ways with identical SHA-256, `sync` both ways and
+`ls`, with what MinIO held checked to be ciphertext.
+
+| What the client sends | CRT (2.38 default) | classic, HTTPS | classic, HTTP |
+|---|---|---|---|
+| `PutObject`, `UploadPart` | `STREAMING-UNSIGNED-PAYLOAD-TRAILER` | `STREAMING-UNSIGNED-PAYLOAD-TRAILER` | SHA-256 of the body |
+| `CompleteMultipartUpload` | `UNSIGNED-PAYLOAD` | SHA-256 of the body | SHA-256 of the body |
+| `GetObject`, `CreateMultipartUpload` (no body) | `UNSIGNED-PAYLOAD` | hash of the empty body | hash of the empty body |
+
+| Gateway | CRT | classic |
+|---|---|---|
+| 1.3 and later, default | works | works |
+| 1.2 and earlier, default | `GetObject` and multipart refused | works |
+| `require_signed_payload: true` | refused | works over HTTP only |
+
+With a gateway at 1.2 or earlier, either set `allow_unsigned_payload: true`, or
+make the CLI use its previous transfer client:
+
+```sh
+aws configure set default.s3.preferred_transfer_client classic
+```
 
 ## boto3
 
@@ -141,7 +173,7 @@ mc alias set bb http://127.0.0.1:9000 <key> <secret> --api S3v4
 | `mc ls bb/bucket/prefix/` | works — plaintext sizes |
 | `mc mirror <dir> bb/bucket/p/` | works, nested |
 | `mc cat bb/bucket/key` | works |
-| `mc cp` of 64 MiB | works with `allow_unsigned_payload`, identical SHA-256 |
+| `mc cp` of 64 MiB | works — identical SHA-256; before 1.3 only with `allow_unsigned_payload` |
 
 `mc` sends `STREAMING-AWS4-HMAC-SHA256-PAYLOAD`: aws-chunked with a signature per
 chunk and **no trailer section at all**. That shape is what found the bug fixed
@@ -149,14 +181,12 @@ in `internal/auth/chunked.go` — the decoder expected a trailer block and rejec
 every `mc` upload until a real client was pointed at it.
 
 Its multipart path is different again: `mc` signs single-part bodies but sends
-`UNSIGNED-PAYLOAD` for a multipart upload, so a large `mc cp` fails with
-*"unsupported payload signing mode"* unless `allow_unsigned_payload: true` is set
-on the proxy. Re-measured on 2026-09-28 with the same `mc` release: a 1 MiB
-`mc cp` works without the setting, and a 64 MiB one is refused at
-`CreateMultipartUpload` before any part is sent; with the setting it completes
-with an identical SHA-256. The same caveat as for rclone applies — enable it only behind TLS
-or on loopback. Below the threshold `mc` still needs nothing, which is why the
-summary row names multipart specifically.
+`UNSIGNED-PAYLOAD` for a multipart upload. Measured on 2026-09-28 with the same
+`mc` release, against a gateway that still refused that by default: a 1 MiB
+`mc cp` worked, and a 64 MiB one was refused at `CreateMultipartUpload` before
+any part was sent; with `allow_unsigned_payload: true` it completed with an
+identical SHA-256. Since 1.3 that is the default (ADR-029). Under
+`require_signed_payload: true` a large `mc cp` is refused again.
 
 ## rclone
 
@@ -180,7 +210,7 @@ rclone check --size-only <dir> bb:bucket/prefix/
 
 | Requirement | Why |
 |---|---|
-| `allow_unsigned_payload: true` on the proxy | rclone cannot seek its upload body, so it cannot hash it to sign it, and it sends `UNSIGNED-PAYLOAD`. Setting `use_unsigned_payload = false` makes rclone fail with *"failed to seek body to start"* instead. Enable this only behind TLS or on loopback: without it the body between client and proxy is not covered by the signature. |
+| No `require_signed_payload` on the proxy (and before 1.3, `allow_unsigned_payload: true`) | rclone cannot seek its upload body, so it cannot hash it to sign it, and it sends `UNSIGNED-PAYLOAD`. Setting `use_unsigned_payload = false` makes rclone fail with *"failed to seek body to start"* instead. Between client and proxy the body is then protected by TLS, not by the signature (ADR-029). |
 | `--ignore-checksum` on copy and sync | rclone compares the ETag against the local MD5. The ETag is the MD5 of **ciphertext**, so they never match, and rclone reports *"corrupted on transfer"* for a perfectly good object. |
 | `--size-only` for `check` | Same reason. Sizes match exactly, because listings report plaintext sizes. |
 

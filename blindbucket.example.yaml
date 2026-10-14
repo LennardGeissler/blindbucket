@@ -12,6 +12,20 @@ server:
   #   cert_file: /etc/blindbucket/tls.crt
   #   key_file: /etc/blindbucket/tls.key
 
+  # Request bodies the client did not sign (ADR-029). Current AWS clients send
+  # object data as aws-chunked with only a CRC trailer, and AWS CLI 2.38 sends
+  # UNSIGNED-PAYLOAD on every GET and multipart control request; between client
+  # and gateway, TLS is what protects those bodies, as it is at S3 itself. Both
+  # are accepted by default. allow_unsigned_payload: false refuses
+  # UNSIGNED-PAYLOAD alone, which breaks the AWS CLI's default transfer client
+  # and protects nothing the trailer mode leaves open.
+  #
+  # Where the hop to this listener is plaintext and not trusted -- TLS ending at
+  # a load balancer in front of it, say -- require signed bodies instead. Then
+  # the clients have to sign them: the AWS CLI does so only over HTTP and with
+  # preferred_transfer_client = classic.
+  # require_signed_payload: true
+
   # Presigned URLs (ADR-019). A client signs a URL offline with credentials it
   # already holds, and whoever receives it can make that one request until it
   # expires -- no credential, no SDK. The gateway only ever verifies one; there

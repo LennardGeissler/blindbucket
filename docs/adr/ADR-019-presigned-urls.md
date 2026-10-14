@@ -103,10 +103,11 @@ checked; the whole API is not.
 `PUT` is deferred rather than refused permanently, and the distinction is in
 `COMPATIBILITY.md`. It is the one other real use — the browser upload — but it is
 its own decision: a presigned body is by construction `UNSIGNED-PAYLOAD`, which
-this gateway gates behind `server.allow_unsigned_payload` for
-[ADR-005](ADR-005-checksums.md)'s reasons, and a presigned upload deserves to be
-decided against those reasons rather than inheriting a switch that was set for a
-different question. **Presigned POST**, the form-and-policy mechanism browsers use
+this gateway then gated behind `server.allow_unsigned_payload`, and a presigned
+upload deserves to be decided on its own rather than inheriting a switch that
+was set for a different question. (Since
+[ADR-029](ADR-029-unsigned-payloads-accepted-by-default.md) that switch is on by
+default; the argument for deciding presigned uploads separately stands.) **Presigned POST**, the form-and-policy mechanism browsers use
 for uploads, is a different protocol from query-string SigV4 and is not in scope
 at all.
 

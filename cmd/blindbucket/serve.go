@@ -122,6 +122,7 @@ Flags:
 	verifier, err := auth.NewVerifier(auth.Config{
 		Clients:              clients,
 		AllowUnsignedPayload: cfg.Server.AllowUnsignedPayload,
+		RequireSignedPayload: cfg.Server.RequireSignedPayload,
 		AllowPresign:         cfg.Server.Presign.Enabled,
 		MaxPresignExpiry:     presignExpiry,
 	})
@@ -244,8 +245,12 @@ Flags:
 		log.Warn("this listener carries plaintext beyond loopback without TLS; " +
 			"clients and proxy must share a trust boundary")
 	}
-	if cfg.Server.AllowUnsignedPayload {
-		log.Warn("UNSIGNED-PAYLOAD is enabled; request bodies are not covered by the signature")
+	// Not a warning about allow_unsigned_payload itself, which is on by default
+	// (ADR-029): an unsigned body is only a risk on a hop nothing else
+	// protects, and this is the listener where that can be seen.
+	if cfg.ExposesPlaintextPublicly() && !cfg.Server.RequireSignedPayload {
+		log.Warn("request bodies may arrive unsigned, and on this listener nothing else " +
+			"protects them; set server.require_signed_payload unless the hop is trusted")
 	}
 	if cfg.Server.Presign.Enabled && presignExpiry == auth.MaxPresignExpiry {
 		log.Warn("presigned URLs may name a window of up to "+

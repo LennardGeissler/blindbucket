@@ -75,7 +75,7 @@ denotes an access architecture as defined in NIST SP 800-207, not an encryption 
 | A3 | Network attacker between proxy and provider | As A1/A2, on the wire | Yes — TLS reduces this to A1/A2 |
 | A4 | Unauthorised client | Sends requests to the proxy without valid credentials, or with credentials scoped to other buckets | Yes |
 | A5 | Attacker on the proxy host, or with access to the KEK or root key | Reads memory, configuration, keys | **No** |
-| A6 | Network attacker between client and proxy | Reads and modifies plaintext requests | Only insofar as TLS or sidecar deployment covers it |
+| A6 | Network attacker between client and proxy | Reads and modifies plaintext requests | Only insofar as TLS or sidecar deployment covers it; `require_signed_payload` stops modified bodies, not reading ([ADR-029](adr/ADR-029-unsigned-payloads-accepted-by-default.md)) |
 
 A5 is the fundamental boundary: the proxy holds keys and sees plaintext by design. It
 must reside in the same trust domain as the clients it serves.
