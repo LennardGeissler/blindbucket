@@ -105,6 +105,41 @@ type Audit struct {
 	// because the attack it guards against -- filling a disk to switch auditing
 	// off -- is cheap against a log that degrades quietly.
 	FailClosed bool `yaml:"fail_closed"`
+	// Export configures streaming audit records to an external SIEM over
+	// syslog (RFC 5424 over TLS) or OTLP logs. The export stream is not
+	// signed; verification runs on the file.
+	Export AuditExport `yaml:"export"`
+}
+
+// AuditExport configures exporting audit entries over syslog and/or OTLP.
+type AuditExport struct {
+	Syslog *SyslogExport `yaml:"syslog"`
+	OTLP   *OTLPExport   `yaml:"otlp"`
+}
+
+// Enabled reports whether any export destination is configured.
+func (e AuditExport) Enabled() bool {
+	return (e.Syslog != nil && e.Syslog.Endpoint != "") ||
+		(e.OTLP != nil && e.OTLP.Endpoint != "")
+}
+
+// SyslogExport configures exporting audit entries over syslog (RFC 5424 over TLS).
+type SyslogExport struct {
+	Endpoint           string `yaml:"endpoint"`
+	Network            string `yaml:"network"`
+	InsecureSkipVerify bool   `yaml:"insecure_skip_verify"`
+	CACert             string `yaml:"ca_cert"`
+	AppName            string `yaml:"app_name"`
+	Facility           int    `yaml:"facility"`
+	Severity           int    `yaml:"severity"`
+}
+
+// OTLPExport configures exporting audit entries over OTLP logs (HTTP/HTTPS).
+type OTLPExport struct {
+	Endpoint           string            `yaml:"endpoint"`
+	Headers            map[string]string `yaml:"headers"`
+	InsecureSkipVerify bool              `yaml:"insecure_skip_verify"`
+	CACert             string            `yaml:"ca_cert"`
 }
 
 // Enabled reports whether audit logging was asked for.
@@ -641,6 +676,9 @@ func (f Freshness) validate() error {
 
 func (a Audit) validate() error {
 	if !a.Enabled() {
+		if a.Export.Enabled() {
+			return fmt.Errorf("audit.export requires audit.log to be configured")
+		}
 		return nil
 	}
 	switch {
@@ -655,6 +693,26 @@ func (a Audit) validate() error {
 	}
 	if interval < 0 {
 		return fmt.Errorf("audit.checkpoint_interval must not be negative")
+	}
+	if a.Export.Syslog != nil {
+		if a.Export.Syslog.Endpoint == "" {
+			return fmt.Errorf("audit.export.syslog.endpoint is required when syslog export is configured")
+		}
+		if a.Export.Syslog.Facility < 0 || a.Export.Syslog.Facility > 23 {
+			return fmt.Errorf("audit.export.syslog.facility must be between 0 and 23")
+		}
+		if a.Export.Syslog.Severity < 0 || a.Export.Syslog.Severity > 7 {
+			return fmt.Errorf("audit.export.syslog.severity must be between 0 and 7")
+		}
+	}
+	if a.Export.OTLP != nil {
+		if a.Export.OTLP.Endpoint == "" {
+			return fmt.Errorf("audit.export.otlp.endpoint is required when otlp export is configured")
+		}
+		u, err := url.Parse(a.Export.OTLP.Endpoint)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+			return fmt.Errorf("audit.export.otlp.endpoint must be a valid http or https URL")
+		}
 	}
 	return nil
 }

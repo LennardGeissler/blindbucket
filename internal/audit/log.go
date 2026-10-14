@@ -79,6 +79,11 @@ type Config struct {
 	CheckpointInterval time.Duration
 	RotateBytes        int64
 
+	// Exporter, if set, receives copies of audit entries as they are written.
+	Exporter Exporter
+	// OnExportError is called if an export fails.
+	OnExportError func(err error)
+
 	// Now is the clock, overridable so that checkpoint intervals and rotation
 	// can be tested without sleeping.
 	Now func() time.Time
@@ -114,6 +119,8 @@ type Writer struct {
 	interval    time.Duration
 	rotateBytes int64
 	now         func() time.Time
+	exporter    Exporter
+	onExportErr func(err error)
 
 	done      chan struct{}
 	wg        sync.WaitGroup
@@ -153,6 +160,8 @@ func Open(cfg Config) (*Writer, error) {
 		interval:    orDefaultDuration(cfg.CheckpointInterval, DefaultCheckpointInterval),
 		rotateBytes: orDefaultInt64(cfg.RotateBytes, DefaultRotateBytes),
 		now:         cfg.Now,
+		exporter:    cfg.Exporter,
+		onExportErr: cfg.OnExportError,
 		done:        make(chan struct{}),
 	}
 	if w.now == nil {
@@ -284,10 +293,26 @@ func (w *Writer) Append(ev Event) error {
 		return err
 	}
 
+	entry, chain, err := w.appendFile(bucket, key, ev)
+	if err != nil {
+		return err
+	}
+
+	if w.exporter != nil {
+		if expErr := w.exporter.Export(chain, entry); expErr != nil {
+			if w.onExportErr != nil {
+				w.onExportErr(expErr)
+			}
+		}
+	}
+	return nil
+}
+
+func (w *Writer) appendFile(bucket, key string, ev Event) (*Entry, string, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.broken != nil {
-		return w.broken
+		return nil, "", w.broken
 	}
 
 	when := ev.Time
@@ -314,17 +339,17 @@ func (w *Writer) Append(ev Event) error {
 	}
 	hash, err := entry.chainHashOf(w.chain, w.hash)
 	if err != nil {
-		return w.fail(err)
+		return nil, "", w.fail(err)
 	}
 	entry.Hash = hash
 
 	line, err := marshalLine(Record{Type: TypeEntry, Entry: entry})
 	if err != nil {
-		return w.fail(err)
+		return nil, "", w.fail(err)
 	}
 	n, err := w.buf.Write(line)
 	if err != nil {
-		return w.fail(err)
+		return nil, "", w.fail(err)
 	}
 
 	w.seq, w.hash, w.dirty = entry.Seq, hash, true
@@ -332,9 +357,11 @@ func (w *Writer) Append(ev Event) error {
 	w.sinceC++
 
 	if w.every > 0 && w.sinceC >= w.every {
-		return w.checkpointLocked()
+		if err := w.checkpointLocked(); err != nil {
+			return nil, "", err
+		}
 	}
-	return nil
+	return entry, w.chain, nil
 }
 
 // Checkpoint signs the chain where it stands and flushes it to disk.
@@ -490,10 +517,6 @@ func (w *Writer) Close() error {
 		w.wg.Wait()
 
 		w.mu.Lock()
-		defer w.mu.Unlock()
-		// The final checkpoint is what signs everything written since the last
-		// one. Without it a clean shutdown would leave the tail of the log
-		// chained but unsigned, which is the one case it costs nothing to avoid.
 		if w.broken == nil && w.dirty {
 			w.closeErr = w.checkpointLocked()
 		}
@@ -502,6 +525,14 @@ func (w *Writer) Close() error {
 		}
 		if err := w.file.Close(); err != nil && w.closeErr == nil {
 			w.closeErr = err
+		}
+		exporter := w.exporter
+		w.mu.Unlock()
+
+		if exporter != nil {
+			if err := exporter.Close(); err != nil && w.closeErr == nil {
+				w.closeErr = err
+			}
 		}
 	})
 	return w.closeErr

@@ -133,7 +133,7 @@ Flags:
 		return err
 	}
 
-	auditLog, err := openAuditLog(cfg, ring, log)
+	auditLog, err := openAuditLog(cfg, ring, log, metrics)
 	if err != nil {
 		return err
 	}
@@ -321,7 +321,9 @@ func listenError(setting, addr string, err error) error {
 // mean a gateway that silently starts signing with a key nobody has recorded,
 // and a log nobody can verify -- so a keyring without one is a startup error
 // naming the command that fixes it (ADR-016).
-func openAuditLog(cfg *config.Config, ring *keys.Keyring, log *slog.Logger) (*audit.Writer, error) {
+func openAuditLog(
+	cfg *config.Config, ring *keys.Keyring, log *slog.Logger, metrics *obs.Metrics,
+) (*audit.Writer, error) {
 	if !cfg.Audit.Enabled() {
 		return nil, nil
 	}
@@ -345,6 +347,10 @@ func openAuditLog(cfg *config.Config, ring *keys.Keyring, log *slog.Logger) (*au
 	if err != nil {
 		return nil, err
 	}
+	exporter, err := openAuditExporters(cfg.Audit.Export, log, metrics)
+	if err != nil {
+		return nil, err
+	}
 	writer, err := audit.Open(audit.Config{
 		Path:               cfg.Audit.Log,
 		Chain:              cfg.Audit.Chain,
@@ -353,6 +359,10 @@ func openAuditLog(cfg *config.Config, ring *keys.Keyring, log *slog.Logger) (*au
 		CheckpointEvery:    cfg.Audit.CheckpointEvery,
 		CheckpointInterval: interval,
 		RotateBytes:        cfg.Audit.RotateBytes,
+		Exporter:           exporter,
+		OnExportError: func(err error) {
+			log.Error("audit export failed", "err", err)
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("audit.log %s: %w", cfg.Audit.Log, err)
@@ -366,8 +376,65 @@ func openAuditLog(cfg *config.Config, ring *keys.Keyring, log *slog.Logger) (*au
 		"path", cfg.Audit.Log,
 		"chain", writer.Chain(),
 		"fail_closed", cfg.Audit.FailClosed,
-		"public_key", base64.StdEncoding.EncodeToString(pub))
+		"public_key", base64.StdEncoding.EncodeToString(pub),
+		"export", cfg.Audit.Export.Enabled())
 	return writer, nil
+}
+
+func openAuditExporters(cfg config.AuditExport, log *slog.Logger, metrics *obs.Metrics) (audit.Exporter, error) {
+	var exporters []audit.Exporter
+	if cfg.Syslog != nil && cfg.Syslog.Endpoint != "" {
+		syslogExp, err := audit.NewSyslogExporter(audit.SyslogConfig{
+			Endpoint:           cfg.Syslog.Endpoint,
+			Network:            cfg.Syslog.Network,
+			InsecureSkipVerify: cfg.Syslog.InsecureSkipVerify,
+			CACert:             cfg.Syslog.CACert,
+			AppName:            cfg.Syslog.AppName,
+			Facility:           cfg.Syslog.Facility,
+			Severity:           cfg.Syslog.Severity,
+		})
+		if err != nil {
+			return nil, err
+		}
+		asyncSyslog := audit.NewAsyncExporter(syslogExp, "syslog", 2048, func(dest string, err error) {
+			if metrics != nil {
+				metrics.AuditExportFailure(dest)
+			}
+			if log != nil {
+				log.Error("could not export audit record", "destination", dest, "err", err)
+			}
+		})
+		exporters = append(exporters, asyncSyslog)
+	}
+
+	if cfg.OTLP != nil && cfg.OTLP.Endpoint != "" {
+		otlpExp, err := audit.NewOTLPExporter(audit.OTLPConfig{
+			Endpoint:           cfg.OTLP.Endpoint,
+			Headers:            cfg.OTLP.Headers,
+			InsecureSkipVerify: cfg.OTLP.InsecureSkipVerify,
+			CACert:             cfg.OTLP.CACert,
+		})
+		if err != nil {
+			return nil, err
+		}
+		asyncOTLP := audit.NewAsyncExporter(otlpExp, "otlp", 2048, func(dest string, err error) {
+			if metrics != nil {
+				metrics.AuditExportFailure(dest)
+			}
+			if log != nil {
+				log.Error("could not export audit record", "destination", dest, "err", err)
+			}
+		})
+		exporters = append(exporters, asyncOTLP)
+	}
+
+	if len(exporters) == 0 {
+		return nil, nil
+	}
+	if len(exporters) == 1 {
+		return exporters[0], nil
+	}
+	return audit.MultiExporter(exporters), nil
 }
 
 // openNameEncrypter builds the object-name encrypter, or nil when names are to

@@ -666,6 +666,32 @@ $ blindbucket audit verify --keyring keyring.json --print audit.log
 
 </details>
 
+<details>
+<summary><b>Exporting audit entries to a SIEM (Syslog & OTLP)</b></summary>
+
+Organisations collecting audit events in a SIEM can export entries as they are written,
+over syslog (RFC 5424, over TLS) or OpenTelemetry logs (OTLP/HTTP), in addition to the file:
+
+```yaml
+audit:
+  log: /var/lib/blindbucket/audit.log
+  export:
+    syslog:
+      endpoint: "siem.example.com:6514"
+    otlp:
+      endpoint: "https://collector.example.com:4318/v1/logs"
+```
+
+Each exported entry carries what the file entry carries, including its position in the
+chain (`seq`), so an exported stream can be matched and compared with the file.
+
+**The export is not signed**, and verification still runs on the file with `blindbucket audit verify`.
+The file stays the record that verifies; the export is an unbuffered copy for search and alerting.
+An export that fails does not block requests and does not stop the file from being written; it is
+counted in `blindbucket_audit_export_failures_total` and logged.
+
+</details>
+
 **Two things it does not do**, stated here rather than in a footnote.
 
 Entries written after the last checkpoint are chained but *not* signed. Whoever

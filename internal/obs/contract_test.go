@@ -35,6 +35,7 @@ var metricContract = map[string]struct {
 	"blindbucket_checksum_mismatches_total":             {dto.MetricType_COUNTER, "algorithm"},
 	"blindbucket_audit_failures_total":                  {dto.MetricType_COUNTER, ""},
 	"blindbucket_audit_broken":                          {dto.MetricType_GAUGE, ""},
+	"blindbucket_audit_export_failures_total":           {dto.MetricType_COUNTER, "destination"},
 	"blindbucket_keyring_keys":                          {dto.MetricType_GAUGE, ""},
 	"blindbucket_keyring_key_created_timestamp_seconds": {dto.MetricType_GAUGE, "active,kid"},
 }

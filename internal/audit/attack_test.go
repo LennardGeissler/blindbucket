@@ -283,6 +283,7 @@ func TestTruncationPastTheLastCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	t.Cleanup(func() { _ = w.file.Close() })
 	for i := range 6 {
 		if err := w.Append(event("PutObject", "b", "object"+string(rune('a'+i)))); err != nil {
 			t.Fatalf("Append: %v", err)

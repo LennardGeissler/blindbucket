@@ -35,6 +35,16 @@
 // over what the encrypted bucket does not. Determinism has the cost it always
 // has: equality is visible, and a guessed name can be confirmed.
 //
+// # Exporting to SIEM
+//
+// Audit entries can be exported as they are written, over syslog (RFC 5424 over
+// TLS) or OTLP logs, in addition to the file.
+//
+// The export stream is not signed, and verification still runs on the file with
+// blindbucket audit verify. The file stays the record that verifies; the export
+// is a copy for search and alerting. An export that fails does not block requests
+// and does not stop the file from being written.
+//
 // # Concurrency
 //
 // A Writer is safe for concurrent use. Appends are serialised, because a chain
