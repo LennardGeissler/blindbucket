@@ -59,15 +59,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Every package with a fuzz target. auth, audit and names were added
+        # after this list was written and fuzzed for 30 seconds a commit, never
+        # longer; `make fuzz` finds targets by itself, this list does not.
         package:
           - ./internal/crypto/stream
           - ./internal/crypto/keys
           - ./internal/crypto/envelope
+          - ./internal/crypto/names
+          - ./internal/auth
+          - ./internal/audit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Current Go, for the reason in ci.yml's fuzz job (golang/go#75804).
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: stable
       - name: Fuzz every target in ${{ matrix.package }}
         run: |
           for target in $(go test -list 'Fuzz.*' ${{ matrix.package }} | grep '^Fuzz'); do
@@ -79,7 +86,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-corpus-${{ strategy.job-index }}
-          path: testdata/fuzz/
+          # Go writes a failing input next to the package it fuzzed, not at the
+          # root, where this used to look and would have found nothing.
+          path: internal/**/testdata/fuzz/
 
   memory:
     name: 10 GiB memory proof

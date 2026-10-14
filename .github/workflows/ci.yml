@@ -125,9 +125,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Current Go, not go.mod's floor. Before 1.27 the fuzzing coordinator
+      # could fail a target that ran its full -fuzztime with "context deadline
+      # exceeded" and no failing input -- a race in internal/fuzz
+      # (golang/go#75804), fixed in 1.27.0 and not backported to 1.26. On the
+      # floor this job failed at random (#109). Fuzzing looks for bugs in this
+      # code, not for what the floor compiles; "Test (Go 1.26)" covers that.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: stable
       # Short runs on every push; the nightly workflow runs them for 15 minutes
       # each. Seed corpora under testdata/ are exercised by `go test` regardless.
       - run: make fuzz FUZZTIME=30s
