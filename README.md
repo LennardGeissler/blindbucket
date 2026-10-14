@@ -693,10 +693,28 @@ the gateway already costs per request.
 | — | `inspect`: what a file or a stored segment claims about itself, without a key, with `--json` | **done** in 1.2 |
 | — | Releases built with current Go, checked by `govulncheck` with the Go that builds them, and attested (SLSA provenance) | **done** in 1.2 |
 | — | `scrub`: every stored object verified by the read path's own checks, without waiting for a read (ADR-028) | **done**, unreleased |
+| M11 | The first ten minutes: `blindbucket init` writes a working configuration, keyring and client credentials, `blindbucket doctor` checks configuration, provider and root-key source and names the fix, a Homebrew tap and ArtifactHub — measured by watching people who have never seen the project get to their first encrypted upload | next |
+| M12 | Works with software that cannot be changed: Nextcloud, Velero, GitLab, Loki and Mastodon storing through the gateway, each as a CI job and a guide, with what breaks written down | planned |
+| M13 | A dashboard on the admin listener: instance health, keyring and root-key source, the audit log verified — read-only, nothing on it changes state | planned |
+| M14 | What is refused today, decided again: presigned uploads and encrypted object tags, each an ADR first — where the answer stays no, the ADR says why | planned |
+| M15 | Several tenants on one gateway: keys per tenant, a tenant deleted by destroying its key, OIDC sign-in for the dashboard, the audit log exported | planned |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
 clients" actually means for anything over 8 MiB. M3.5 existed to get its coordination rules
 right before the code did — see below.
+
+**From M11 on, the roadmap turns to the people running the gateway.** M0 to M10 built it
+and measured it; what stands between it and someone using it is now mostly outside the
+cryptography: a configuration written by hand, errors that name the problem and not the
+fix, and no answer to "does it work with *my* software". The order is deliberate. M11
+comes first because every later milestone is tested by people who have to get the gateway
+running before they can test anything. M12 is where a transparent gateway is worth most:
+software that stores to S3, has no encryption of its own, and cannot be given one. M15
+comes last, once M12 has found operators to ask what several tenants actually need. None
+of it relaxes [ADR-021](docs/adr/ADR-021-what-1.0-promises.md), and none of it touches
+the [non-goals](docs/THREAT_MODEL.md#6-non-goals): IAM and bucket policies stay the
+provider's, and a milestone that would need the wire format goes through
+[FORMAT.md](docs/FORMAT.md) first, like any other change to it.
 
 **What is still missing.** Object tags are refused rather than
 stored, because the provider would hold them in plaintext
