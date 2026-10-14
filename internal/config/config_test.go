@@ -370,6 +370,78 @@ audit:
 	}
 }
 
+func TestAuditExportConfig(t *testing.T) {
+	t.Run("syslog and otlp parsed", func(t *testing.T) {
+		cfg, err := Load(write(t, minimal+`
+audit:
+  log: /var/lib/blindbucket/audit.log
+  export:
+    syslog:
+      endpoint: "localhost:6514"
+      insecure_skip_verify: true
+      app_name: "custom-bb"
+      facility: 13
+      severity: 6
+    otlp:
+      endpoint: "https://collector:4318/v1/logs"
+      headers:
+        Authorization: "Bearer test"
+      insecure_skip_verify: true
+`))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !cfg.Audit.Export.Enabled() {
+			t.Fatal("export not enabled")
+		}
+		if cfg.Audit.Export.Syslog == nil || cfg.Audit.Export.Syslog.Endpoint != "localhost:6514" {
+			t.Errorf("syslog endpoint = %v, want localhost:6514", cfg.Audit.Export.Syslog)
+		}
+		if cfg.Audit.Export.OTLP == nil || cfg.Audit.Export.OTLP.Endpoint != "https://collector:4318/v1/logs" {
+			t.Errorf("otlp endpoint = %v, want https://collector:4318/v1/logs", cfg.Audit.Export.OTLP)
+		}
+	})
+
+	t.Run("export rejected without audit.log", func(t *testing.T) {
+		_, err := Load(write(t, minimal+`
+audit:
+  export:
+    syslog:
+      endpoint: "localhost:6514"
+`))
+		if err == nil {
+			t.Error("export without audit.log was accepted")
+		}
+	})
+
+	t.Run("syslog rejects invalid facility", func(t *testing.T) {
+		_, err := Load(write(t, minimal+`
+audit:
+  log: /var/lib/blindbucket/audit.log
+  export:
+    syslog:
+      endpoint: "localhost:6514"
+      facility: 99
+`))
+		if err == nil {
+			t.Error("invalid facility was accepted")
+		}
+	})
+
+	t.Run("otlp rejects invalid endpoint URL", func(t *testing.T) {
+		_, err := Load(write(t, minimal+`
+audit:
+  log: /var/lib/blindbucket/audit.log
+  export:
+    otlp:
+      endpoint: "ftp://collector:4318/v1/logs"
+`))
+		if err == nil {
+			t.Error("non-http otlp endpoint was accepted")
+		}
+	})
+}
+
 // TestCredentialSourcesAreAccepted: a section names a source instead of
 // keys, for every source ADR-024 defines, and "static" with keys is the same
 // as no source at all.

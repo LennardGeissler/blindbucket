@@ -171,6 +171,25 @@ crypto:
 #   # with a record known to be incomplete. Defaults to true. Turning it off
 #   # means a full disk silently switches auditing off instead of paging you.
 #   fail_closed: true
+#   # Export audit entries as they are written, over syslog (RFC 5424 over TLS)
+#   # or OTLP logs, in addition to the file. The export stream is not signed, and
+#   # verification still runs on the file with `blindbucket audit verify`. An export
+#   # that fails does not block requests and does not stop the file from being written.
+#   export:
+#     syslog:
+#       endpoint: "siem.example.com:6514"
+#       # network: tcp
+#       # insecure_skip_verify: false
+#       # ca_cert: /etc/ssl/certs/syslog-ca.pem
+#       # app_name: blindbucket
+#       # facility: 13                   # 13 = log audit
+#       # severity: 6                   # 6 = informational
+#     otlp:
+#       endpoint: "https://collector.example.com:4318/v1/logs"
+#       # headers:
+#       #   Authorization: "Bearer <token>"
+#       # insecure_skip_verify: false
+#       # ca_cert: /etc/ssl/certs/otlp-ca.pem
 
 # Rollback detection (ADR-018). A storage provider serving an *older but genuine*
 # version of an object is the one attack the object format cannot catch by
