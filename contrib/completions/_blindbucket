@@ -1,0 +1,228 @@
+#compdef blindbucket
+#
+# zsh completion for blindbucket.
+#
+# Put this file, named _blindbucket, in a directory on $fpath before compinit
+# runs -- for example ~/.zsh/completions, with
+#   fpath=(~/.zsh/completions $fpath)
+#   autoload -U compinit && compinit
+# in ~/.zshrc. Homebrew's site-functions directory is on $fpath already.
+#
+# Hand-written, so a new flag does not appear here by itself. The test in
+# cmd/blindbucket/completions_test.go fails when the flags in a command's
+# branch below and the ones `blindbucket <command> -h` lists differ, which is
+# why each branch spells its flags out rather than sharing them.
+
+_blindbucket() {
+  local -a commands
+  commands=(
+    'init:write a configuration, a keyring and client credentials to start from'
+    'doctor:check a configuration, its keyring and the provider, and name what to fix'
+    'serve:run the S3 gateway'
+    'keygen:create a keyring, or add a key to an existing one'
+    'keys:list the keys in a keyring, or retire one'
+    'reseal:seal a keyring under another passphrase, Vault or KMS'
+    'gc:remove orphaned multipart manifests'
+    'rotate:re-wrap data keys under a new KEK'
+    'migrate-names:move objects stored in clear to their encrypted names'
+    "probe:measure the provider's conditional writes"
+    'scrub:verify every stored object without waiting for a read'
+    'audit:verify the audit log, or print the key that verifies it'
+    'encrypt:encrypt a stream into a blindbucket file'
+    'decrypt:decrypt a blindbucket file'
+    "inspect:show a file's format details without decrypting it"
+    'version:print the version and exit'
+    'help:list the commands'
+  )
+
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'blindbucket command' commands
+    return
+  fi
+
+  local cmd=$words[2]
+  # Drop "blindbucket", so that _arguments takes the command for its own name.
+  shift words
+  (( CURRENT-- ))
+
+  case $cmd in
+    keys|audit)
+      if (( CURRENT == 2 )); then
+        local -a subcommands
+        case $cmd in
+          keys) subcommands=(
+            'list:show the key-encryption keys in a keyring, and how old they are'
+            'remove:retire a key that nothing references any more') ;;
+          audit) subcommands=(
+            "verify:check a log's hash chain and checkpoint signatures"
+            'pubkey:print the public key a verifier needs') ;;
+        esac
+        _describe -t subcommands "blindbucket $cmd subcommand" subcommands
+        return
+      fi
+      cmd="$cmd $words[2]"
+      shift words
+      (( CURRENT-- ))
+      ;;
+  esac
+
+  case $cmd in
+    init)
+      _arguments \
+        '--bucket[the bucket the generated client may use]:bucket' \
+        '--credential-source[take AWS credentials from the platform instead of keys]:source:(env profile web_identity container imds chain)' \
+        '--dir[directory to write the three files into]:directory:_directories' \
+        '--encrypt-names[encrypt object names; only for a bucket with no objects yet]' \
+        "--endpoint[the provider's S3 endpoint]:URL" \
+        '--keys-provider[what seals the keyring]:provider:(file vault awskms)' \
+        "--kid[id of the keyring's first key-encryption key]:key id" \
+        '--kms-endpoint[override for an AWS-compatible KMS endpoint]:URL' \
+        '--kms-key-id[KMS key id, alias or ARN]:key' \
+        '--kms-region[KMS region]:region' \
+        '--non-interactive[never ask; a missing answer is an error]' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        '--path-style[name the bucket in the path rather than the host name]' \
+        "--region[the provider's region]:region" \
+        '--vault-address[Vault or OpenBao address]:URL' \
+        '--vault-key-name[the Transit key that seals the keyring]:key name' \
+        '--vault-mount[where the Transit engine is mounted]:mount'
+      ;;
+    doctor)
+      _arguments \
+        '--config[configuration file]:file:_files' \
+        '--json[emit the checks as JSON]' \
+        '--no-write[skip the one check that writes to the provider]' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        '*:bucket (s3\://bucket)'
+      ;;
+    serve)
+      _arguments \
+        '--config[configuration file]:file:_files' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        '-v[log at debug level]'
+      ;;
+    keygen)
+      _arguments \
+        '--activate[with --add, make the new key the active one]' \
+        '--add[add a key to an existing keyring instead of creating one]' \
+        '--add-audit-key[add an audit-log signing key to an existing keyring]' \
+        '--add-freshness-key[add a rollback-index key to an existing keyring]' \
+        '--add-name-key[add an object-name key to an existing keyring]' \
+        '--config[configuration file naming the root-key provider]:file:_files' \
+        '--kid[id of the key to create]:key id' \
+        '--out[keyring file to write]:file:_files' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files'
+      ;;
+    reseal)
+      _arguments \
+        '--config[configuration naming the source the keyring is sealed with now]:file:_files' \
+        '--dry-run[seal and unseal with the new source, write nothing]' \
+        '--keyring[keyring file to reseal]:file:_files' \
+        '--new-passphrase-file[read the new passphrase from this file]:file:_files' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        '--to-config[configuration naming the source to seal it with]:file:_files'
+      ;;
+    gc)
+      _arguments \
+        '--config[configuration file]:file:_files' \
+        '--dry-run[report what would be deleted, delete nothing]' \
+        '--json[emit the summary as JSON]' \
+        '--min-age[leave manifests younger than this alone]:duration' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        '-v[log at debug level]' \
+        ':target (s3\://bucket/prefix)'
+      ;;
+    rotate)
+      _arguments \
+        '--allow-unconditional[write without If-Match; see the warning it prints]' \
+        '--concurrency[objects to rotate at once]:number' \
+        '--config[configuration file]:file:_files' \
+        '--dry-run[report what would be rotated, change nothing]' \
+        '--json[emit the summary as JSON]' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        '--to-kid[key id to wrap under; defaults to the active key]:key id' \
+        '-v[log at debug level]' \
+        ':target (s3\://bucket/prefix)'
+      ;;
+    migrate-names)
+      _arguments \
+        '--allow-unconditional[publish without If-None-Match; see the warning it prints]' \
+        '--concurrency[objects to migrate at once]:number' \
+        '--config[configuration file]:file:_files' \
+        '--dry-run[report what would be migrated, change nothing]' \
+        '--json[emit the summary as JSON]' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        '-v[log at debug level]' \
+        ':target (s3\://bucket/prefix)'
+      ;;
+    probe)
+      _arguments \
+        '--config[configuration file]:file:_files' \
+        '--json[emit the result as JSON]' \
+        ':target (s3\://bucket)'
+      ;;
+    scrub)
+      _arguments \
+        '--concurrency[objects to verify at once]:number' \
+        '--config[configuration file]:file:_files' \
+        '--json[emit the result as JSON]' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        '-v[log at debug level, one line per object]' \
+        ':target (s3\://bucket/prefix)'
+      ;;
+    encrypt)
+      _arguments \
+        '--chunk-size-log2[chunk size as a power of two]:exponent' \
+        '-i[input file, or - for stdin]:file:_files' \
+        '--keyring[keyring file]:file:_files' \
+        '-o[output file, or - for stdout]:file:_files' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files'
+      ;;
+    decrypt)
+      _arguments \
+        '-i[input file, or - for stdin]:file:_files' \
+        '--keyring[keyring file]:file:_files' \
+        '-o[output file, or - for stdout]:file:_files' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files'
+      ;;
+    inspect)
+      _arguments \
+        '--json[emit the fields as JSON]' \
+        ':file:_files'
+      ;;
+    'keys list')
+      _arguments \
+        '--config[configuration file naming the root-key provider]:file:_files' \
+        '--json[emit the key list as JSON]' \
+        '--keyring[keyring file]:file:_files' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files'
+      ;;
+    'keys remove')
+      _arguments \
+        '--config[configuration file naming the root-key provider]:file:_files' \
+        '--force[confirm that no object is wrapped under the key any more]' \
+        '--keyring[keyring file]:file:_files' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        ':key id'
+      ;;
+    'audit verify')
+      _arguments \
+        '--config[configuration file naming the root-key provider]:file:_files' \
+        '--expect[require the chain to reach at least this checkpoint]:seq\:hash' \
+        '--keyring[keyring file: verifies, and decrypts the object names]:file:_files' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        '--print[print every entry]' \
+        '--public-key[base64 Ed25519 public key, or a file containing one]:key or file:_files' \
+        '*:audit log:_files'
+      ;;
+    'audit pubkey')
+      _arguments \
+        '--config[configuration file naming the root-key provider]:file:_files' \
+        '--keyring[keyring file]:file:_files' \
+        '--open[open the keyring and derive the key, instead of reading the recorded one]' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files'
+      ;;
+  esac
+}
+
+_blindbucket "$@"

@@ -217,6 +217,14 @@ jobs:
       # rather than make it stricter.
       - name: Start Vault and the KMS emulator
         run: test/services/keys.sh
+      # The completion tests ask each shell what it completes and skip a shell
+      # that is missing; the runner image has bash, but not zsh or fish.
+      - name: Install zsh and fish for the completion tests
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends zsh fish
+          zsh --version
+          fish --version
       # Every package, not only the ones that need a provider: this is where
       # coverage is measured, and without MinIO the proxy's tests skip.
       # -coverpkg counts a line in any package as covered by a test in any

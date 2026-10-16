@@ -212,6 +212,10 @@ docker pull ghcr.io/lennardgeissler/blindbucket:1.3.0
 go install github.com/LennardGeissler/blindbucket/cmd/blindbucket@latest
 ```
 
+Shell completions for bash, zsh and fish are in every release archive and in
+[contrib/completions/](contrib/completions/); the first lines of each file say
+where it goes.
+
 [deploy/helm/blindbucket](deploy/helm/blindbucket) is a Helm chart for the other
 shape, a shared gateway other pods reach over the network. It serves S3 over TLS
 only and refuses to render without a certificate, creates no Secrets, and is

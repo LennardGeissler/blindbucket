@@ -38,6 +38,9 @@ archives:
       - docs/FORMAT.md
       - docs/THREAT_MODEL.md
       - blindbucket.example.yaml
+      # Shell completions for bash, zsh and fish; each script's header says
+      # where it goes.
+      - contrib/completions/*
 
 checksum:
   name_template: checksums.txt
