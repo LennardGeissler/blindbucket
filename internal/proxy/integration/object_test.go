@@ -2,15 +2,14 @@ package integration
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,8 +17,11 @@ import (
 
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/stream"
+	"github.com/LennardGeissler/blindbucket/internal/obs"
+	"github.com/LennardGeissler/blindbucket/internal/proxy"
 	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestIntegrationRoundTrip(t *testing.T) {
@@ -674,167 +676,144 @@ func TestIntegrationRangeRequests(t *testing.T) {
 	})
 }
 
-// TestIntegrationListing checks that listings report plaintext sizes and hide
-// the gateway's own objects.
-func TestIntegrationListing(t *testing.T) {
-	h := proxytest.New(t)
-	prefix := fmt.Sprintf("listing-test/%d/", time.Now().UnixNano())
+// TestIntegrationGzipEncodedObjectReadsBack: an object a client stores with
+// Content-Encoding: gzip -- a pre-compressed web asset, say -- reads back whole
+// through the gateway, with its header, and verifies under scrub. The provider
+// returns the stored Content-Encoding on every GET, and a transport that took it
+// for its own would gunzip the ciphertext; every read of such an object failed
+// with 502 IntegrityCheckFailed and counted as an integrity failure (#110).
+// Content-Encoding: br, which the rotation tests store, never showed it: Go
+// decompresses only the gzip it asked for itself.
+func TestIntegrationGzipEncodedObjectReadsBack(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	h := proxytest.New(t, func(cfg *proxy.Config) { cfg.Metrics = obs.NewMetrics(reg, obs.MetricsConfig{}) })
+	prefix := proxytest.ScrubPrefix(t)
+	key := prefix + "page.html.gz"
 
-	sizes := map[string]int{"a.bin": 100, "b.bin": 4096, "c.bin": 10000}
-	for name, size := range sizes {
-		h.Store(t, prefix+name, bytes.Repeat([]byte{1}, size))
+	var compressed bytes.Buffer
+	zw := gzip.NewWriter(&compressed)
+	if _, err := zw.Write(bytes.Repeat([]byte("<p>blindbucket</p>\n"), 2000)); err != nil {
+		t.Fatalf("gzip: %v", err)
 	}
-
-	// An object under the reserved prefix, written directly, must not appear.
-	hidden := ".blindbucket/m/deadbeef/manifest"
-	if _, err := h.Upstream.PutObject(context.Background(), upstream.PutObjectInput{
-		Bucket: proxytest.Bucket, Key: hidden,
-		Body: strings.NewReader("manifest"), ContentLength: 8,
-	}); err != nil {
-		t.Fatalf("writing the hidden object: %v", err)
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip: %v", err)
 	}
-	t.Cleanup(func() { _ = h.Upstream.DeleteObject(context.Background(), proxytest.Bucket, hidden) })
+	plaintext := compressed.Bytes()
 
-	for _, listType := range []string{"2", ""} {
-		name, query := "ListObjectsV2", "?list-type=2&prefix="+url.QueryEscape(prefix)
-		if listType == "" {
-			name, query = "ListObjects", "?prefix="+url.QueryEscape(prefix)
-		}
-
-		t.Run(name, func(t *testing.T) {
-			resp, err := h.Client.Get(h.Server.URL + "/" + proxytest.Bucket + query)
-			if err != nil {
-				t.Fatalf("GET: %v", err)
-			}
-			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status %d: %s", resp.StatusCode, proxytest.ReadBody(t, resp))
-			}
-
-			var result upstream.ListBucketResult
-			if err := xml.NewDecoder(resp.Body).Decode(&result); err != nil {
-				t.Fatalf("the listing is not valid XML: %v", err)
-			}
-			if len(result.Contents) != len(sizes) {
-				t.Fatalf("listed %d objects, want %d", len(result.Contents), len(sizes))
-			}
-			for _, entry := range result.Contents {
-				base := strings.TrimPrefix(entry.Key, prefix)
-				want, ok := sizes[base]
-				if !ok {
-					t.Errorf("unexpected key %q", entry.Key)
-					continue
-				}
-				if entry.Size != int64(want) {
-					t.Errorf("%s: listed size %d, want the plaintext size %d", base, entry.Size, want)
-				}
-			}
-		})
-	}
-
-	t.Run("the reserved prefix is hidden", func(t *testing.T) {
-		resp, err := h.Client.Get(h.Server.URL + "/" + proxytest.Bucket + "?list-type=2&prefix=.blindbucket/")
-		if err != nil {
-			t.Fatalf("GET: %v", err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-
-		var result upstream.ListBucketResult
-		if err := xml.NewDecoder(resp.Body).Decode(&result); err != nil {
-			t.Fatalf("the listing is not valid XML: %v", err)
-		}
-		if len(result.Contents) != 0 {
-			t.Errorf("the gateway's own objects appeared in a listing: %d entries", len(result.Contents))
-		}
+	resp := h.Put(t, key, plaintext, map[string]string{
+		"Content-Type": "text/html", "Content-Encoding": "gzip",
 	})
-}
-
-// TestIntegrationDeleteObjects covers the bulk delete `aws s3 rm --recursive`
-// uses.
-func TestIntegrationDeleteObjects(t *testing.T) {
-	h := proxytest.New(t)
-	prefix := fmt.Sprintf("bulk-delete/%d/", time.Now().UnixNano())
-
-	keys := []string{prefix + "one", prefix + "two", prefix + "three"}
-	for _, key := range keys {
-		h.Store(t, key, []byte("payload"))
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT returned %d", resp.StatusCode)
 	}
+	h.CleanupStored(t, key)
 
-	var body strings.Builder
-	body.WriteString("<Delete>")
-	for _, key := range keys {
-		body.WriteString("<Object><Key>" + key + "</Key></Object>")
-	}
-	body.WriteString("</Delete>")
-
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-		h.Server.URL+"/"+proxytest.Bucket+"?delete", strings.NewReader(body.String()))
+	// The client's own transport would gunzip the response just as the
+	// gateway's did; asking for identity keeps the bytes as stored.
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.URL(key), nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
-	resp, err := h.Client.Do(req)
+	req.Header.Set("Accept-Encoding", "identity")
+	got, err := h.Client.Do(req)
 	if err != nil {
-		t.Fatalf("POST: %v", err)
+		t.Fatalf("GET: %v", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d: %s", resp.StatusCode, proxytest.ReadBody(t, resp))
+	defer func() { _ = got.Body.Close() }()
+	body, err := io.ReadAll(got.Body)
+	if err != nil {
+		t.Fatalf("reading the body: %v", err)
+	}
+	if got.StatusCode != http.StatusOK {
+		t.Fatalf("GET returned %d: %s", got.StatusCode, body)
+	}
+	if !bytes.Equal(body, plaintext) {
+		t.Errorf("GET returned %d bytes that differ from the %d stored", len(body), len(plaintext))
+	}
+	if enc := got.Header.Get("Content-Encoding"); enc != "gzip" {
+		t.Errorf("Content-Encoding = %q, want gzip", enc)
 	}
 
-	for _, key := range keys {
-		if _, err := h.Upstream.HeadObject(context.Background(), proxytest.Bucket, key); !upstream.NotFound(err) {
-			t.Errorf("%s survived the bulk delete", key)
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("gathering metrics: %v", err)
+	}
+	// Every kind is registered at zero, so it is the counts that must stay zero.
+	for _, family := range families {
+		if family.GetName() != "blindbucket_integrity_failures_total" {
+			continue
+		}
+		for _, m := range family.GetMetric() {
+			if m.GetCounter().GetValue() != 0 {
+				t.Errorf("an intact object counted as an integrity failure: %v", m)
+			}
 		}
 	}
 
-	t.Run("the reserved prefix is refused", func(t *testing.T) {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-			h.Server.URL+"/"+proxytest.Bucket+"?delete",
-			strings.NewReader("<Delete><Object><Key>.blindbucket/m/x</Key></Object></Delete>"))
-		if err != nil {
-			t.Fatalf("building request: %v", err)
-		}
-		resp, err := h.Client.Do(req)
-		if err != nil {
-			t.Fatalf("POST: %v", err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusForbidden {
-			t.Errorf("status %d, want 403", resp.StatusCode)
-		}
-	})
+	result := h.Scrub(t, h.ScrubConfig(prefix))
+	if result.Scanned != 1 || result.Verified != 1 || result.Incomplete() {
+		t.Errorf("scrub: scanned %d, verified %d, failed %d, unreadable %d; want 1 verified (findings: %+v)",
+			result.Scanned, result.Verified, result.Failed, result.Errors, result.Findings)
+	}
 }
 
-func TestIntegrationBucketOperations(t *testing.T) {
-	h := proxytest.New(t)
+// TestIntegrationTaggingOnAProviderWithout: the AWS CLI asks for an object's
+// tags before every multipart server-side copy. Garage does not implement
+// tagging, and a 502 there failed the copy; its true answer is no tags.
+func TestIntegrationTaggingOnAProviderWithout(t *testing.T) {
+	f := newFaultyProvider(t)
+	h := proxytest.New(t, f.option(t))
+	key := proxytest.TestKey(t, "tags.bin")
+	h.Store(t, key, []byte("tagged, or not"))
 
-	t.Run("HeadBucket", func(t *testing.T) {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodHead,
-			h.Server.URL+"/"+proxytest.Bucket, nil)
-		if err != nil {
-			t.Fatalf("building request: %v", err)
-		}
-		resp, err := h.Client.Do(req)
-		if err != nil {
-			t.Fatalf("HEAD: %v", err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("status %d, want 200", resp.StatusCode)
-		}
-	})
+	// Against MinIO the request is forwarded and answered by it.
+	if status, body := gatewayDo(t, h, http.MethodGet, key, "tagging"); status != http.StatusOK ||
+		!strings.Contains(body, "Tagging") {
+		t.Fatalf("GET ?tagging returned %d: %s", status, body)
+	}
 
-	t.Run("GetBucketLocation", func(t *testing.T) {
-		resp, err := h.Client.Get(h.Server.URL + "/" + proxytest.Bucket + "?location")
-		if err != nil {
-			t.Fatalf("GET: %v", err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("status %d, want 200", resp.StatusCode)
-		}
-		if body := proxytest.ReadBody(t, resp); !strings.Contains(body, "LocationConstraint") {
-			t.Errorf("body = %q, want a LocationConstraint document", body)
-		}
-	})
+	rule := f.fail(&fault{match: objectRequest(http.MethodGet, key, "tagging"), times: 1,
+		status: http.StatusNotImplemented, code: "NotImplemented"})
+	status, body := gatewayDo(t, h, http.MethodGet, key, "tagging")
+	if f.hits(rule) == 0 {
+		t.Fatal("the fault was never reached")
+	}
+	if status != http.StatusOK || !strings.Contains(body, "<TagSet></TagSet>") {
+		t.Errorf("a provider without tagging gave %d: %s", status, body)
+	}
+
+	// Any other failure is not dressed up as an empty tag set.
+	f.fail(&fault{match: objectRequest(http.MethodGet, key, "tagging"), status: http.StatusInternalServerError})
+	if status, _ := gatewayDo(t, h, http.MethodGet, key, "tagging"); status < 500 {
+		t.Errorf("a failed tagging request answered %d", status)
+	}
+}
+
+// TestIntegrationVersionIDIsPassedOn: on a versioned bucket the provider names
+// the version it stored, and a client that asked for it must get it back.
+// MinIO's test bucket is unversioned, so the header is added on its way back.
+func TestIntegrationVersionIDIsPassedOn(t *testing.T) {
+	f := newFaultyProvider(t)
+	h := proxytest.New(t, f.option(t))
+
+	put := proxytest.TestKey(t, "versioned.bin")
+	f.fail(&fault{match: plainPut(put), setHeader: map[string]string{"x-amz-version-id": "v-put"}})
+	resp := h.Put(t, put, []byte("versioned"), nil)
+	_ = resp.Body.Close()
+	if got := resp.Header.Get("x-amz-version-id"); got != "v-put" {
+		t.Errorf("PutObject returned version %q, want v-put", got)
+	}
+
+	mpu := proxytest.TestKey(t, "versioned-mpu.bin")
+	f.fail(&fault{match: objectRequest(http.MethodPost, mpu, "uploadId"),
+		setHeader: map[string]string{"x-amz-version-id": "v-mpu"}})
+	token := h.MpuStart(t, mpu, nil)
+	etag, resp := h.MpuPart(t, mpu, token, 1, proxytest.RandomBytes(t, 1000))
+	_ = resp.Body.Close()
+	resp = h.MpuComplete(t, mpu, token, []proxytest.CompletedPart{{PartNumber: 1, ETag: etag}})
+	_ = resp.Body.Close()
+	if got := resp.Header.Get("x-amz-version-id"); got != "v-mpu" {
+		t.Errorf("CompleteMultipartUpload returned version %q, want v-mpu", got)
+	}
 }

@@ -521,3 +521,52 @@ func TestIntegrationManifestIsNotReachableByClients(t *testing.T) {
 		t.Errorf("a manifest appeared in a listing: %s", body)
 	}
 }
+
+// TestListMultipartUploadsIsRefused pins the one call deliberately left out:
+// the upload ids this gateway hands out are sealed tokens, and the provider's
+// listing holds only its own ids, which no client could use.
+func TestIntegrationListMultipartUploadsIsRefused(t *testing.T) {
+	h := proxytest.New(t)
+	status, body := gatewayDo(t, h, http.MethodGet, "", "uploads")
+	if status != http.StatusNotImplemented || !strings.Contains(body, "NotImplemented") {
+		t.Errorf("returned %d: %s", status, body)
+	}
+}
+
+// TestIntegrationEndedUploads: every call on an upload that no longer exists
+// says NoSuchUpload, which is what a client retrying the whole upload acts on.
+func TestIntegrationEndedUploads(t *testing.T) {
+	h := proxytest.New(t)
+	key := proxytest.TestKey(t, "ended.bin")
+	token := h.MpuStart(t, key, nil)
+	etag, resp := h.MpuPart(t, key, token, 1, proxytest.RandomBytes(t, 1000))
+	_ = resp.Body.Close()
+
+	// While it is open, ListParts reports the part in plaintext size.
+	status, body := gatewayDo(t, h, http.MethodGet, key, "uploadId="+proxytest.URLQueryEscape(token))
+	if status != http.StatusOK || !strings.Contains(body, "<Size>1000</Size>") {
+		t.Errorf("ListParts on an open upload returned %d: %s", status, body)
+	}
+
+	if status, body := gatewayDo(t, h, http.MethodDelete, key, "uploadId="+proxytest.URLQueryEscape(token)); status != http.StatusNoContent {
+		t.Fatalf("abort returned %d: %s", status, body)
+	}
+
+	for name, call := range map[string]func() (int, string){
+		"ListParts": func() (int, string) {
+			return gatewayDo(t, h, http.MethodGet, key, "uploadId="+proxytest.URLQueryEscape(token))
+		},
+		"completion": func() (int, string) {
+			resp := h.MpuComplete(t, key, token, []proxytest.CompletedPart{{PartNumber: 1, ETag: etag}})
+			defer func() { _ = resp.Body.Close() }()
+			return resp.StatusCode, proxytest.ReadBody(t, resp)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, body := call()
+			if status != http.StatusNotFound || !strings.Contains(body, "NoSuchUpload") {
+				t.Errorf("returned %d: %s", status, body)
+			}
+		})
+	}
+}
