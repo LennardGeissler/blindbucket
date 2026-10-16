@@ -442,6 +442,14 @@ jobs:
             sleep 1
           done
 
+      # What a new user runs next: doctor, on the configuration init wrote,
+      # against the provider the clients below use. Any failed check fails the
+      # job, warnings do not.
+      - name: Doctor on the configuration init wrote
+        env:
+          BLINDBUCKET_PASSPHRASE: ci-passphrase-not-a-secret
+        run: ./bin/blindbucket doctor --config blindbucket.yaml
+
       # Multipart is where statelessness has to hold: parts of one upload are
       # served by whichever instance the balancer picks, and nothing is shared
       # between them but the keyring. A second instance behind a round-robin is

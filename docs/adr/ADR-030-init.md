@@ -58,7 +58,8 @@ into the keyring closed: a passphrase next to the keyring would be one.
    only for Vault and KMS. Whether the endpoint answers, the credentials work
    and conditional writes hold is what `doctor` checks
    ([#120](https://github.com/LennardGeissler/blindbucket/issues/120)); until it
-   exists, the summary points at `probe`.
+   existed, the summary pointed at `probe`, and since ADR-031 it points at
+   `doctor`.
 
 6. **It asks only what cannot be defaulted**: the provider, the bucket, the
    provider's credentials, the root-key source, and whether names are

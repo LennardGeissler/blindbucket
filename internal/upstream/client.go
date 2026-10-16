@@ -112,7 +112,7 @@ func New(cfg Config) (*Client, error) {
 
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = defaultHTTPClient()
+		httpClient = DefaultHTTPClient()
 	}
 	retries := cfg.MaxRetries
 	if retries == 0 {
@@ -135,10 +135,15 @@ func New(cfg Config) (*Client, error) {
 	}, nil
 }
 
-// defaultHTTPClient is tuned for many concurrent streams to one host, with
-// timeouts on everything except the body transfer itself: a large object may
-// legitimately take a long time, but a connection must not stall indefinitely.
-func defaultHTTPClient() *http.Client {
+// DefaultHTTPClient is the client New uses when Config.HTTPClient is nil. It is
+// tuned for many concurrent streams to one host, with timeouts on everything
+// except the body transfer itself: a large object may legitimately take a long
+// time, but a connection must not stall indefinitely.
+//
+// Exported so that a caller who needs to see the responses -- `doctor` reads
+// the provider's clock from them -- can wrap its transport rather than replace
+// these settings with weaker ones.
+func DefaultHTTPClient() *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,

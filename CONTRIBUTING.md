@@ -71,6 +71,7 @@ export UPSTREAM_ACCESS_KEY_ID=minioadmin UPSTREAM_SECRET_ACCESS_KEY=minioadmin
 ./bin/blindbucket init --non-interactive --kid dev \
   --endpoint http://localhost:9002 --bucket blindbucket-dev
 set -a; . ./blindbucket.env; set +a
+./bin/blindbucket doctor --config blindbucket.yaml   # every check, with the fix for any that fails
 ./bin/blindbucket serve --config blindbucket.yaml
 ```
 

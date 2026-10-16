@@ -133,7 +133,7 @@ func TestInitWritesWhatServeNeeds(t *testing.T) {
 		}
 	}
 
-	for _, want := range []string{client.AccessKeyID, client.SecretAccessKey, "blindbucket serve --config", "probe"} {
+	for _, want := range []string{client.AccessKeyID, client.SecretAccessKey, "blindbucket serve --config", "blindbucket doctor --config"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("the summary does not mention %q:\n%s", want, stdout)
 		}

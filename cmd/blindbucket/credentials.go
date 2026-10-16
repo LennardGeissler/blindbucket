@@ -26,15 +26,21 @@ func awsCredentials(source, region string) (*awscreds.Credentials, error) {
 func upstreamClient(
 	cfg *config.Config, observe func(string, time.Duration),
 ) (*upstream.Client, *awscreds.Credentials, error) {
+	return upstreamClientWith(cfg, upstream.Config{ObserveRequest: observe})
+}
+
+// upstreamClientWith is upstreamClient with the client's own settings --
+// transport, retries, observer -- taken from ucfg. Endpoint, region,
+// addressing and credentials always come from the configuration.
+func upstreamClientWith(
+	cfg *config.Config, ucfg upstream.Config,
+) (*upstream.Client, *awscreds.Credentials, error) {
 	u := cfg.Upstream
 	creds, err := awsCredentials(u.CredentialSource, u.Region)
 	if err != nil {
 		return nil, nil, fmt.Errorf("upstream credentials: %w", err)
 	}
-	ucfg := upstream.Config{
-		Endpoint: u.Endpoint, Region: u.Region, PathStyle: u.PathStyle,
-		ObserveRequest: observe,
-	}
+	ucfg.Endpoint, ucfg.Region, ucfg.PathStyle = u.Endpoint, u.Region, u.PathStyle
 	if creds != nil {
 		ucfg.Credentials = creds
 	} else {

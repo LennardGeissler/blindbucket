@@ -720,9 +720,10 @@ func printInitSummary(out io.Writer, paths map[string]string, a initAnswers) {
 	w("  export AWS_ENDPOINT_URL=http://127.0.0.1:9000\n")
 	w("  aws s3 cp <file> s3://%s/\n\n", a.bucket)
 
-	w("Before relying on key rotation, measure whether the provider enforces the\n" +
-		"conditional writes it depends on:\n")
-	w("  blindbucket probe --config %s s3://%s\n", conf, a.bucket)
+	w("To check all of it -- the keyring, the provider, the bucket, this host's clock,\n" +
+		"and the conditional writes key rotation relies on -- with the environment\n" +
+		"loaded as for serve:\n")
+	w("  blindbucket doctor --config %s\n", conf)
 	if a.unmeasured != "" {
 		w("\n%s has not been measured against the gateway yet; see docs/COMPATIBILITY.md,\n"+
 			"and please report what you find.\n", a.unmeasured)
