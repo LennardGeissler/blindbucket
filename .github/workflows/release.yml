@@ -87,12 +87,23 @@ jobs:
       - name: Release notes from CHANGELOG.md
         run: go run ./build/releasenotes "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
 
+      # The Homebrew cask is pushed to the tap over SSH with the tap's deploy
+      # key. goreleaser's default trusts whatever host key it is offered first,
+      # which on a fresh runner is every time; GitHub's own keys, fetched over
+      # HTTPS from its API, are required instead.
+      - name: GitHub's SSH host keys, for the push to the tap
+        run: gh api meta --jq '.ssh_keys[] | "github.com " + .' > "$RUNNER_TEMP/github_known_hosts"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           version: "~> v2"
           args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_KEY: ${{ secrets.HOMEBREW_TAP_KEY }}
+          TAP_KNOWN_HOSTS: ${{ runner.temp }}/github_known_hosts
 
       # Provenance: a statement, signed with a certificate Sigstore issues to
       # this workflow and logged publicly, that these bytes were built here from

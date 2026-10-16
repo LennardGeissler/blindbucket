@@ -1,0 +1,71 @@
+name: Homebrew tap
+
+# Moves a release's Homebrew cask onto the tap's main branch once the release
+# is published. goreleaser writes the cask when the tag is pushed, but the
+# release is a draft until then and its archives are not public, so it writes
+# to a branch of its own (blindbucket-<version>, see .goreleaser.yaml). Only
+# when the archives can be downloaded does the cask become what `brew install`
+# and `brew upgrade` see. Run by hand for a release whose cask is still on its
+# branch.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, such as v1.5.0"
+        required: true
+
+# Nothing in this repository is written to. The tap is reached with its own
+# deploy key, which can write to it and to nothing else.
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-tap
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish the cask
+    runs-on: ubuntu-24.04
+    # goreleaser does not write a cask for a prerelease.
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    steps:
+      - name: Fast-forward the tap's main branch to the release's cask
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          TAP_KEY: ${{ secrets.HOMEBREW_TAP_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            v[0-9]*) ;;
+            *) echo "::error::$TAG is not a release tag"; exit 1 ;;
+          esac
+          if [ -z "$TAP_KEY" ]; then
+            echo "::error::the HOMEBREW_TAP_KEY secret is not set"
+            exit 1
+          fi
+          branch="blindbucket-${TAG#v}"
+
+          key="$RUNNER_TEMP/tap_key"
+          install -m 600 /dev/null "$key"
+          printf '%s\n' "$TAP_KEY" > "$key"
+          # GitHub's host keys from its API over HTTPS, rather than trusting
+          # whatever key the first connection offers.
+          gh api meta --jq '.ssh_keys[] | "github.com " + .' > "$RUNNER_TEMP/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts -o StrictHostKeyChecking=yes -F /dev/null"
+
+          git clone --quiet git@github.com:LennardGeissler/homebrew-tap.git tap
+          cd tap
+          if ! git fetch --quiet origin "$branch"; then
+            echo "::error::the tap has no branch $branch: did goreleaser write the cask for $TAG?"
+            exit 1
+          fi
+          # Fast-forward only: main moving on in between is a reason to look,
+          # not to merge.
+          git merge --ff-only --quiet FETCH_HEAD
+          git push --quiet origin HEAD:main
+          git push --quiet origin --delete "$branch"
+          echo "Casks/blindbucket.rb for $TAG is on the tap's main branch." >> "$GITHUB_STEP_SUMMARY"

@@ -78,6 +78,66 @@ dockers_v2:
       org.opencontainers.image.source: "https://github.com/LennardGeissler/blindbucket"
       org.opencontainers.image.licenses: "Apache-2.0"
 
+# The Homebrew cask: brew install --cask lennardgeissler/tap/blindbucket, on
+# macOS and Linux. It installs the released archive's binary -- the archive
+# the provenance attestation is for -- and the shell completions beside it.
+#
+# Two things follow from the release being a draft until it is published. The
+# archives of a draft are not public, so a cask pointing at them would fail
+# every `brew upgrade` until then: it is pushed to a branch of its own, and
+# .github/workflows/tap.yml moves it onto the tap's main branch when the
+# release is published. And a prerelease never reaches it (skip_upload: auto).
+#
+# The binary is not signed or notarised by Apple. Homebrew quarantines a
+# cask's download, and Gatekeeper then refuses to run it: measured with 1.4.0,
+# `blindbucket version` printed nothing until the quarantine was gone. The
+# post-install step removes it from that one file, and the caveat says so and
+# how to check the archive instead. What protects the download is the cask's
+# SHA-256 and the release's attestation, not Apple.
+#
+# The step is Homebrew's declarative postflight_steps, which runs in the
+# staged directory; its legacy `postflight do` makes Homebrew 7 warn on every
+# command that loads the cask. goreleaser 2.18, which the release workflow
+# runs, can only write the legacy form from `hooks`, so the block goes in as
+# custom_block. Installed from a tap and audited with `brew audit --strict`:
+# no warning, no finding.
+homebrew_casks:
+  - name: blindbucket
+    homepage: https://github.com/LennardGeissler/blindbucket
+    description: "Transparent S3 encryption gateway: clients speak S3, the provider holds ciphertext"
+    binaries: [blindbucket]
+    completions:
+      bash: contrib/completions/blindbucket.bash
+      zsh: contrib/completions/_blindbucket
+      fish: contrib/completions/blindbucket.fish
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "blindbucket"], chdir: "."
+        end
+      end
+    # The attestation covers the archives in checksums.txt, not the binary
+    # inside one, so the caveat checks the archive Homebrew keeps in its cache.
+    caveats: |
+      blindbucket is not notarised by Apple; this cask removes macOS's quarantine
+      from its binary. To check that the archive it came from is the one the
+      release built:
+        gh attestation verify "$(brew --cache --cask lennardgeissler/tap/blindbucket)" --repo LennardGeissler/blindbucket
+    repository:
+      owner: LennardGeissler
+      name: homebrew-tap
+      branch: "blindbucket-{{ .Version }}"
+      git:
+        url: git@github.com:LennardGeissler/homebrew-tap.git
+        # The deploy key of the tap, which can write to it and to nothing
+        # else. Empty -- a snapshot, a fork -- skips the cask.
+        private_key: '{{ envOrDefault "HOMEBREW_TAP_KEY" "" }}'
+        # GitHub's host keys, which the release workflow fetches from its API,
+        # instead of the default of trusting the first key offered.
+        ssh_command: 'ssh -i {{ .KeyPath }} -o UserKnownHostsFile={{ envOrDefault "TAP_KNOWN_HOSTS" "/dev/null" }} -o StrictHostKeyChecking=yes -F /dev/null'
+    commit_msg_template: "blindbucket {{ .Tag }}"
+    skip_upload: auto
+
 release:
   draft: true
   prerelease: auto

@@ -16,6 +16,11 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Added
+
+- **A Homebrew cask, on macOS and Linux.** `brew install --cask lennardgeissler/tap/blindbucket` installs the binary from the release archive, the one the provenance attestation covers, and the completions for bash, zsh and fish. It is in the tap once a release is published, never while it is a draft, and never for a prerelease.
+- **The binary is not notarised by Apple, and the cask says so.** Homebrew quarantines a cask's download, which would stop Gatekeeper from running it, so the cask removes the quarantine from that one file. What protects the download is the cask's SHA-256 and the release's attestation, and the caveat it prints gives the command that checks the archive.
+
 ## [1.4.0] — 2026-10-16
 
 **A first run in three commands.** `blindbucket init` writes a configuration, a keyring
