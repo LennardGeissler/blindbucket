@@ -177,7 +177,7 @@ clients:
 	if err == nil {
 		t.Fatal("serve started with credentials STS refused")
 	}
-	for _, want := range []string{"upstream credentials", "web identity", "AccessDenied"} {
+	for _, want := range []string{"upstream.credential_source", "web identity", "AccessDenied"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal does not say %q: %v", want, err)
 		}

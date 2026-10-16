@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"flag"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/LennardGeissler/blindbucket/internal/audit"
@@ -96,7 +98,8 @@ Flags:
 		// rather than failing the first request.
 		got, err := upstreamCreds.Retrieve(ctx)
 		if err != nil {
-			return fmt.Errorf("upstream credentials: %w", err)
+			return fmt.Errorf("upstream.credential_source %q gives no credentials on this host: %w "+
+				"(ADR-024 says what each source needs)", cfg.Upstream.CredentialSource, err)
 		}
 		attrs := []any{"source", upstreamCreds.Source(), "access_key_id", got.AccessKeyID}
 		if got.CanExpire {
@@ -201,9 +204,21 @@ Flags:
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
 
+	// The certificate is loaded before anything listens, so that a missing or
+	// mismatched file stops the start rather than surfacing from ServeTLS after
+	// the gateway has logged that it is listening.
+	if cfg.Server.TLS.Enabled() {
+		pair, err := tls.LoadX509KeyPair(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
+		if err != nil {
+			return fmt.Errorf("server.tls: %w; cert_file and key_file must be a readable PEM "+
+				"certificate and its private key", err)
+		}
+		srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS12}
+	}
+
 	listener, err := net.Listen("tcp", cfg.Server.Listen)
 	if err != nil {
-		return err
+		return listenError("server.listen", cfg.Server.Listen, err)
 	}
 
 	// Metrics, health and profiles live on their own address. An empty
@@ -219,7 +234,7 @@ Flags:
 			Logger:      log,
 		})
 		if err := admin.Start(); err != nil {
-			return err
+			return listenError("admin.listen", cfg.Admin.Listen, err)
 		}
 		defer func() {
 			shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -267,7 +282,7 @@ Flags:
 	serveErr := make(chan error, 1)
 	go func() {
 		if cfg.Server.TLS.Enabled() {
-			serveErr <- srv.ServeTLS(listener, cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
+			serveErr <- srv.ServeTLS(listener, "", "")
 			return
 		}
 		serveErr <- srv.Serve(listener)
@@ -288,6 +303,16 @@ Flags:
 		}
 		return nil
 	}
+}
+
+// listenError names the setting whose address could not be bound, and what
+// to do when the address is taken.
+func listenError(setting, addr string, err error) error {
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return fmt.Errorf("%s %s: %w; another process listens there -- stop it, or choose "+
+			"another address", setting, addr, err)
+	}
+	return fmt.Errorf("%s %s: %w", setting, addr, err)
 }
 
 // openAuditLog starts the audit log, if one was configured.
@@ -330,7 +355,7 @@ func openAuditLog(cfg *config.Config, ring *keys.Keyring, log *slog.Logger) (*au
 		RotateBytes:        cfg.Audit.RotateBytes,
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("audit.log %s: %w", cfg.Audit.Log, err)
 	}
 
 	pub, err := key.Public()
@@ -421,7 +446,7 @@ func openFreshnessIndex(
 		Logger:             log,
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("freshness.index %s: %w", cfg.Freshness.Index, err)
 	}
 	stats := index.Stats()
 	log.Info("rollback detection is on",

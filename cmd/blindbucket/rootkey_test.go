@@ -73,3 +73,24 @@ func TestOpenKeyringRefusesAMismatchedSource(t *testing.T) {
 		}
 	})
 }
+
+// TestUnsealFixNamesTheSettings pins the settings named when a root-key
+// service will not unseal: the service's own error says what it refused, and
+// this says where that is configured.
+func TestUnsealFixNamesTheSettings(t *testing.T) {
+	for provider, want := range map[string][]string{
+		"vault":  {"keys.vault.address", "keys.vault.token", "keys.vault.mount", `"blindbucket"`},
+		"awskms": {"keys.awskms.region", "kms:Decrypt", "alias/bb"},
+	} {
+		fix := unsealFix(config.Keys{
+			Provider: provider,
+			Vault:    config.VaultKeys{KeyName: "blindbucket"},
+			AWSKMS:   config.AWSKMSKeys{KeyID: "alias/bb"},
+		})
+		for _, w := range want {
+			if !strings.Contains(fix, w) {
+				t.Errorf("%s: %q does not name %q", provider, fix, w)
+			}
+		}
+	}
+}

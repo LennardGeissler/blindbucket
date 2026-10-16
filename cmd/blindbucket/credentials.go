@@ -38,7 +38,7 @@ func upstreamClientWith(
 	u := cfg.Upstream
 	creds, err := awsCredentials(u.CredentialSource, u.Region)
 	if err != nil {
-		return nil, nil, fmt.Errorf("upstream credentials: %w", err)
+		return nil, nil, fmt.Errorf("upstream.credential_source %q: %w", u.CredentialSource, err)
 	}
 	ucfg.Endpoint, ucfg.Region, ucfg.PathStyle = u.Endpoint, u.Region, u.PathStyle
 	if creds != nil {

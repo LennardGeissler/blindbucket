@@ -2,9 +2,11 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"regexp"
 	"slices"
@@ -396,8 +398,11 @@ var envRef = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
 func Load(path string) (*Config, error) {
 	//nolint:gosec // the path is a command-line argument; reading it is the point.
 	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("config: %w; pass --config, or write one with `blindbucket init`", err)
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("config: %w", err)
 	}
 
 	cfg := &Config{
@@ -423,7 +428,8 @@ func Load(path string) (*Config, error) {
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(cfg); err != nil {
-		return nil, fmt.Errorf("config: %s: %w", path, err)
+		return nil, fmt.Errorf("config: %s: %w; blindbucket.example.yaml lists every setting, "+
+			"with its type", path, err)
 	}
 
 	// Credentials are only ever referenced, never written in the file.
@@ -465,7 +471,9 @@ func expandEnv(name string, field *string) error {
 	}
 	value, ok := os.LookupEnv(match[1])
 	if !ok {
-		return fmt.Errorf("config: %s references $%s, which is not set", name, match[1])
+		return fmt.Errorf("config: %s references $%s, which is not set; set it, or load the file "+
+			"that holds it -- for a configuration `blindbucket init` wrote: "+
+			"set -a; . ./blindbucket.env; set +a", name, match[1])
 	}
 	*field = value
 	return nil
@@ -512,7 +520,7 @@ func (k Keys) validate() error {
 		case k.Vault.KeyName == "":
 			return fmt.Errorf("keys.vault.key_name is required for provider \"vault\"")
 		}
-		return nil
+		return validateURL("keys.vault.address", k.Vault.Address)
 	case "awskms":
 		switch {
 		case k.AWSKMS.Region == "":
@@ -533,6 +541,8 @@ func (c *Config) validate() error {
 		return fmt.Errorf("server.listen must not be empty")
 	case c.Upstream.Endpoint == "":
 		return fmt.Errorf("upstream.endpoint is required")
+	case validateURL("upstream.endpoint", c.Upstream.Endpoint) != nil:
+		return validateURL("upstream.endpoint", c.Upstream.Endpoint)
 	case c.Upstream.Region == "":
 		return fmt.Errorf("upstream.region is required")
 	case len(c.Clients) == 0:
@@ -548,19 +558,28 @@ func (c *Config) validate() error {
 	if err := c.Keys.validate(); err != nil {
 		return err
 	}
+	keyOwner := map[string]int{}
 	for i, client := range c.Clients {
 		switch {
 		case client.Name == "":
-			return fmt.Errorf("clients[%d] has no name", i)
+			return fmt.Errorf("clients[%d].name is empty", i)
 		case client.AccessKeyID == "":
-			return fmt.Errorf("client %q has no access_key_id", client.Name)
+			return fmt.Errorf("clients[%d].access_key_id is empty (client %q)", i, client.Name)
 		case client.SecretAccessKey == "":
-			return fmt.Errorf("client %q has no secret_access_key", client.Name)
+			return fmt.Errorf("clients[%d].secret_access_key is empty (client %q)", i, client.Name)
 		case len(client.Buckets) == 0:
 			// An empty list would deny everything silently, which looks like a
 			// broken proxy rather than a configuration mistake.
-			return fmt.Errorf("client %q lists no buckets (use \"*\" for all)", client.Name)
+			return fmt.Errorf("clients[%d].buckets is empty (client %q); list the buckets "+
+				"it may use, or \"*\" for all", i, client.Name)
 		}
+		// Caught here as well as in internal/auth, because only here is the
+		// configuration's own path to the key known.
+		if first, ok := keyOwner[client.AccessKeyID]; ok {
+			return fmt.Errorf("clients[%d].access_key_id is also clients[%d]'s; each client "+
+				"needs a key of its own", i, first)
+		}
+		keyOwner[client.AccessKeyID] = i
 	}
 	if err := stream.ValidateLog2ChunkSize(c.Crypto.Log2ChunkSize); err != nil {
 		return fmt.Errorf("crypto.log2_chunk_size: %w", err)
@@ -575,6 +594,17 @@ func (c *Config) validate() error {
 		return err
 	}
 	return c.Freshness.validate()
+}
+
+// validateURL checks that a setting holds an http or https URL with a host:
+// a bare host:port parses as a URL whose scheme is the host, and fails much
+// later with a message about the scheme.
+func validateURL(setting, value string) error {
+	u, err := url.Parse(value)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("%s %q must be a URL starting with http:// or https://", setting, value)
+	}
+	return nil
 }
 
 func (p Presign) validate() error {

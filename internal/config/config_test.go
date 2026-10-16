@@ -398,6 +398,30 @@ func TestCredentialSourcesAreAccepted(t *testing.T) {
 // TestValidationNamesTheProblem complements TestValidation, which only requires
 // a refusal: here each case must be refused for its own reason, so a check that
 // stopped working cannot hide behind another one that fires first.
+// TestLoadNamesTheFix pins the hints in the two errors a first run meets most:
+// no file where --config points, and a variable the file references but the
+// environment does not hold.
+func TestLoadNamesTheFix(t *testing.T) {
+	_, err := Load(filepath.Join(t.TempDir(), "blindbucket.yaml"))
+	if err == nil || !strings.Contains(err.Error(), "blindbucket init") {
+		t.Errorf("a missing file: %v, want a pointer to blindbucket init", err)
+	}
+
+	t.Setenv("BLINDBUCKET_TEST_UNSET", "")
+	if err := os.Unsetenv("BLINDBUCKET_TEST_UNSET"); err != nil {
+		t.Fatalf("unsetenv: %v", err)
+	}
+	_, err = Load(write(t, `upstream: {endpoint: "http://x", region: r, access_key_id: "${BLINDBUCKET_TEST_UNSET}", secret_access_key: b}
+clients: [{name: c, access_key_id: k, secret_access_key: s, buckets: ["*"]}]
+keys: {keyring: k}
+`))
+	for _, want := range []string{"upstream.access_key_id", "$BLINDBUCKET_TEST_UNSET", "blindbucket.env"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("an unset variable: %v, want %q in it", err, want)
+		}
+	}
+}
+
 func TestValidationNamesTheProblem(t *testing.T) {
 	const (
 		upstreamOK = `upstream: {endpoint: "http://x", region: r, access_key_id: a, secret_access_key: b}`
@@ -412,9 +436,25 @@ func TestValidationNamesTheProblem(t *testing.T) {
 		"no region": {doc(`upstream: {endpoint: "http://x", region: "", access_key_id: a, secret_access_key: b}`,
 			clientsOK, keysOK), "upstream.region is required"},
 		"a client without an access key": {doc(upstreamOK,
-			`clients: [{name: c, secret_access_key: s, buckets: ["*"]}]`, keysOK), `client "c" has no access_key_id`},
+			`clients: [{name: c, secret_access_key: s, buckets: ["*"]}]`, keysOK), `clients[0].access_key_id is empty`},
 		"a client without a secret": {doc(upstreamOK,
-			`clients: [{name: c, access_key_id: k, buckets: ["*"]}]`, keysOK), `client "c" has no secret_access_key`},
+			`clients: [{name: c, access_key_id: k, buckets: ["*"]}]`, keysOK), `clients[0].secret_access_key is empty`},
+		"a client without a name": {doc(upstreamOK,
+			`clients: [{access_key_id: k, secret_access_key: s, buckets: ["*"]}]`, keysOK), `clients[0].name is empty`},
+		"a client without buckets": {doc(upstreamOK,
+			`clients: [{name: c, access_key_id: k, secret_access_key: s}]`, keysOK), `clients[0].buckets is empty`},
+		"two clients with one key": {doc(upstreamOK, `clients: [`+
+			`{name: c, access_key_id: k, secret_access_key: s, buckets: ["*"]}, `+
+			`{name: d, access_key_id: k, secret_access_key: t, buckets: ["*"]}]`, keysOK),
+			`clients[1].access_key_id is also clients[0]'s`},
+		"an endpoint without a scheme": {doc(`upstream: {endpoint: "localhost:9002", region: r, `+
+			`access_key_id: a, secret_access_key: b}`, clientsOK, keysOK),
+			`upstream.endpoint "localhost:9002" must be a URL starting with http:// or https://`},
+		"a vault address without a scheme": {doc(upstreamOK, clientsOK,
+			`keys: {provider: vault, keyring: k, vault: {address: "vault:8200", token: t, key_name: n}}`),
+			`keys.vault.address "vault:8200" must be a URL`},
+		"a key that does not exist": {doc(upstreamOK, clientsOK, keysOK, `server: {lisen: ":9000"}`),
+			"blindbucket.example.yaml lists every setting"},
 		"an unknown key provider": {doc(upstreamOK, clientsOK, `keys: {provider: hsm, keyring: k}`),
 			`keys.provider "hsm" is not one of`},
 		"vault without a token": {doc(upstreamOK, clientsOK,

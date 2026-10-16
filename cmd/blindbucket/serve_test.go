@@ -310,6 +310,10 @@ clients:
 	}
 }
 
+// TestServeStartupFailures pins, for each way serve can fail before it
+// listens, both the symptom and the setting or command the error names: the
+// operator should be able to fix it from the error line alone (#121), and a
+// renamed setting should not leave a stale hint behind.
 func TestServeStartupFailures(t *testing.T) {
 	keyring := setupKeyring(t, "2026-09")
 	provider, _ := stubProvider(t)
@@ -326,6 +330,12 @@ func TestServeStartupFailures(t *testing.T) {
 	if err := os.WriteFile(notADir, nil, 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
+	notAKeyring := filepath.Join(t.TempDir(), "keyring.json")
+	if err := os.WriteFile(notAKeyring, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	noNameKey := setupKeyring(t, "2026-09")
+	stripKeys(t, noNameKey, "name_key")
 
 	base := func(listen, extra string) string {
 		return fmt.Sprintf(`
@@ -342,34 +352,85 @@ clients:
   - { name: t, access_key_id: T, secret_access_key: s, buckets: ["*"] }
 %s`, listen, provider.URL, keyring, extra)
 	}
+	ok := func(extra string) string { return base(freeAddr(t), extra) }
+	swap := func(config, old, replacement string) string {
+		if !strings.Contains(config, old) {
+			t.Fatalf("the configuration holds no %q", old)
+		}
+		return strings.Replace(config, old, replacement, 1)
+	}
 
 	for name, tc := range map[string]struct {
 		config string
-		want   string
+		env    map[string]string
+		want   []string
 	}{
-		"the S3 port is taken": {base(busy.Addr().String(), ""), "address already in use"},
-		"the keyring is missing": {strings.Replace(base(freeAddr(t), ""), keyring,
-			filepath.Join(t.TempDir(), "missing.json"), 1), "no such file"},
-		"the audit log cannot be created": {base(freeAddr(t),
-			fmt.Sprintf("audit: { log: %q }", filepath.Join(notADir, "audit.log"))), "not a directory"},
+		"the S3 port is taken": {config: base(busy.Addr().String(), ""),
+			want: []string{"server.listen", "address already in use", "another process"}},
+		"the admin port is taken": {config: swap(ok(""), `admin: { listen: "" }`,
+			fmt.Sprintf("admin: { listen: %q }", busy.Addr().String())),
+			want: []string{"admin.listen", "address already in use"}},
+		"the keyring is missing": {config: swap(ok(""), keyring, filepath.Join(t.TempDir(), "missing.json")),
+			want: []string{"keys.keyring", "no such file", "blindbucket keygen --out"}},
+		"the keyring is not a keyring": {config: swap(ok(""), keyring, notAKeyring),
+			want: []string{"keys.keyring", "not a keyring"}},
+		"the passphrase is wrong": {config: ok(""), env: map[string]string{passphraseEnv: "not it"},
+			want: []string{"wrong passphrase", "$" + passphraseEnv, "keys.passphrase_file"}},
+		"the passphrase file is missing": {config: swap(ok(""), "provider: file,",
+			`provider: file, passphrase_file: "/nonexistent/passphrase",`),
+			want: []string{"keys.passphrase_file", "/nonexistent/passphrase"}},
+		"names need a key the keyring lacks": {config: swap(ok("names: { encrypt: true }"), keyring, noNameKey),
+			want: []string{"names.encrypt", "--add-name-key"}},
+		"the audit log cannot be created": {config: ok(fmt.Sprintf("audit: { log: %q }",
+			filepath.Join(notADir, "audit.log"))), want: []string{"audit.log", "not a directory"}},
+		"the freshness index cannot be created": {config: ok(fmt.Sprintf("freshness: { index: %q }",
+			filepath.Join(notADir, "fresh.idx"))), want: []string{"freshness.index", "not a directory"}},
+		"the TLS certificate is missing": {config: swap(ok(""), "server: { listen: ",
+			`server: { tls: { cert_file: /nonexistent/tls.crt, key_file: /nonexistent/tls.key }, listen: `),
+			want: []string{"server.tls", "cert_file and key_file"}},
+		"the endpoint has no scheme": {config: swap(ok(""), provider.URL, strings.TrimPrefix(provider.URL, "http://")),
+			want: []string{"upstream.endpoint", "http://"}},
+		"a referenced variable is not set": {config: swap(ok(""), "secret_access_key: upstream-secret",
+			"secret_access_key: ${BLINDBUCKET_TEST_NOT_SET}"), env: map[string]string{"BLINDBUCKET_TEST_NOT_SET": ""},
+			want: []string{"upstream.secret_access_key", "$BLINDBUCKET_TEST_NOT_SET", "blindbucket.env"}},
+		"a setting is misspelt": {config: ok("lisen: 1"),
+			want: []string{"lisen", "blindbucket.example.yaml"}},
+		"the credential source gives nothing": {config: swap(ok(""),
+			"access_key_id: upstream-id\n  secret_access_key: upstream-secret", "credential_source: web_identity"),
+			env:  map[string]string{"AWS_WEB_IDENTITY_TOKEN_FILE": "", "AWS_ROLE_ARN": ""},
+			want: []string{"upstream.credential_source", "web_identity"}},
 	} {
 		t.Run(name, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+				if v == "" {
+					_ = os.Unsetenv(k)
+				}
+			}
 			cfgPath := filepath.Join(t.TempDir(), "blindbucket.yaml")
 			if err := os.WriteFile(cfgPath, []byte(tc.config), 0o600); err != nil {
 				t.Fatalf("write: %v", err)
 			}
+			// A case that starts by mistake must not hang the run.
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer cancel()
 			var err error
-			captureStderr(t, func() { err = run(t.Context(), []string{"serve", "--config", cfgPath}) })
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("got %v, want an error mentioning %q", err, tc.want)
+			captureStderr(t, func() { err = run(ctx, []string{"serve", "--config", cfgPath}) })
+			if err == nil {
+				t.Fatal("serve started")
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the error does not name %q:\n%v", want, err)
+				}
 			}
 		})
 	}
 
 	t.Run("no configuration file", func(t *testing.T) {
 		err := run(t.Context(), []string{"serve", "--config", filepath.Join(t.TempDir(), "absent.yaml")})
-		if err == nil {
-			t.Error("serve started without a configuration file")
+		if err == nil || !strings.Contains(err.Error(), "blindbucket init") {
+			t.Errorf("got %v, want a pointer to blindbucket init", err)
 		}
 	})
 }

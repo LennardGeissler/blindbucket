@@ -25,6 +25,12 @@ version 1 would keep being readable.
 - **Nothing is overwritten, and nothing that opens the keyring is stored beside it.** If any of the three files exists, `init` writes none of them. The passphrase, a Vault token and KMS keys stay out of `blindbucket.env`; the summary names what `serve` still needs from the environment. The keyring is written last, so a failed seal removes the other two files and never a keyring.
 - **`init --non-interactive` for scripts.** It never asks: a missing answer is an error naming the flag or variable that supplies it, and secrets come from the environment, never from flags. The CI job that runs the AWS CLI and boto3 now starts its gateways from the configuration it writes.
 
+### Changed
+
+- **Every startup error names what fixes it.** A keyring that is missing, unreadable or not a keyring, a wrong or missing passphrase, a Vault or KMS that will not unseal, a credential source that gives nothing, a port already taken, an audit log or rollback index that cannot be created, and an unset variable now name the setting, command or environment variable to change, not only the symptom. The original error stays in the message.
+- **Some mistakes are caught when the configuration loads, with the setting's path.** An `upstream.endpoint` or `keys.vault.address` without `http://` or `https://`, two clients with the same access key, and a client without a name, key or buckets are reported as `clients[1].access_key_id` and the like. Each of these failed before as well, later and less clearly; no configuration that started before is refused now.
+- **A TLS certificate that does not load stops `serve` before it listens.** Before, a missing or mismatched `server.tls` file surfaced only after the gateway had logged that it was listening.
+
 ## [1.3.0] — 2026-10-14
 
 **Upgrade recommended** where clients use AWS CLI 2.38 or later, or store objects with

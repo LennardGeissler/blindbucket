@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -35,7 +36,7 @@ func newRootKeySource(cfg config.Keys) (rootkey.Source, error) {
 		}
 		creds, err := awsCredentials(cfg.AWSKMS.CredentialSource, cfg.AWSKMS.Region)
 		if err != nil {
-			return nil, fmt.Errorf("kms credentials: %w", err)
+			return nil, fmt.Errorf("keys.awskms.credential_source %q: %w", cfg.AWSKMS.CredentialSource, err)
 		}
 		if creds != nil {
 			kcfg.Credentials = creds
@@ -72,7 +73,7 @@ func openKeyringFile(
 	//nolint:gosec // the path comes from the operator's own configuration.
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, keyringReadError(path, err)
 	}
 	ring, err := unlockKeyring(ctx, path, data, cfg, pass)
 	if err != nil {
@@ -87,7 +88,7 @@ func unlockKeyring(
 ) (*keys.Keyring, error) {
 	ref, err := keys.ReadRootKeyRef(data)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s is not a keyring this build can read (keys.keyring): %w", path, err)
 	}
 
 	if ref.Source == keys.SourcePassphrase {
@@ -100,7 +101,12 @@ func unlockKeyring(
 			return nil, err
 		}
 		defer clear(phrase)
-		return keys.LoadKeyring(data, phrase)
+		ring, err := keys.LoadKeyring(data, phrase)
+		if errors.Is(err, keys.ErrUnwrap) {
+			return nil, fmt.Errorf("%s: %w; check the passphrase -- $%s, keys.passphrase_file "+
+				"or --passphrase-file", path, err, passphraseEnv)
+		}
+		return ring, err
 	}
 
 	source, err := newRootKeySource(cfg)
@@ -115,10 +121,35 @@ func unlockKeyring(
 
 	root, err := source.RootKey(ctx, ref)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s could not be unsealed: %w; %s", path, err, unsealFix(cfg))
 	}
 	defer clear(root)
 	return keys.LoadKeyringWithRootKey(data, root)
+}
+
+// keyringReadError says what to do about a keyring file that cannot be read.
+func keyringReadError(path string, err error) error {
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("the keyring (keys.keyring): %w; `blindbucket init` "+
+			"or `blindbucket keygen --out %s` creates one", err, path)
+	}
+	return fmt.Errorf("the keyring %s (keys.keyring): %w; the user this runs as must be able "+
+		"to read it", path, err)
+}
+
+// unsealFix names what to check when a root-key service would not unseal a
+// keyring: the service's own error says what it refused, not where that is
+// configured.
+func unsealFix(cfg config.Keys) string {
+	switch cfg.Provider {
+	case "vault":
+		return fmt.Sprintf("check keys.vault.address and keys.vault.token, and that the token "+
+			"may decrypt with the Transit key %q under keys.vault.mount", cfg.Vault.KeyName)
+	case "awskms":
+		return fmt.Sprintf("check keys.awskms.region and its credentials, and that they may "+
+			"kms:Decrypt with %s", cfg.AWSKMS.KeyID)
+	}
+	return "check the keys section"
 }
 
 // warnIfExposed reports a key file that more than its owner can read.

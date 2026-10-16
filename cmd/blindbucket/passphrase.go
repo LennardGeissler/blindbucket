@@ -78,7 +78,8 @@ func (p *passphraseFlags) read(prompt string, confirm bool) ([]byte, error) {
 		warnIfExposed("passphrase file", p.file)
 		data, err := os.ReadFile(p.file)
 		if err != nil {
-			return nil, fmt.Errorf("reading the passphrase file: %w", err)
+			return nil, fmt.Errorf("reading the passphrase file %s (keys.passphrase_file or "+
+				"--passphrase-file): %w", p.file, err)
 		}
 		pass := bytes.TrimRight(data, "\r\n")
 		if len(pass) == 0 {
@@ -99,7 +100,8 @@ func (p *passphraseFlags) read(prompt string, confirm bool) ([]byte, error) {
 			return nil, errors.New("no new passphrase available: pass --new-passphrase-file, " +
 				"or run on a terminal")
 		}
-		return nil, fmt.Errorf("no passphrase available: set $%s, pass --passphrase-file, or run on a terminal", passphraseEnv)
+		return nil, fmt.Errorf("no passphrase available: set $%s, keys.passphrase_file or "+
+			"--passphrase-file, or run on a terminal", passphraseEnv)
 	}
 
 	fmt.Fprint(os.Stderr, prompt)
