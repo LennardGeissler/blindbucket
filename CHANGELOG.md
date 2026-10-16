@@ -19,6 +19,7 @@ version 1 would keep being readable.
 ### Added
 
 - **A Homebrew cask, on macOS and Linux.** `brew install --cask lennardgeissler/tap/blindbucket` installs the binary from the release archive, the one the provenance attestation covers, and the completions for bash, zsh and fish. It is in the tap once a release is published, never while it is a draft, and never for a prerelease.
+- **The Helm chart describes itself for Artifact Hub.** Chart 0.1.6 carries the image it deploys, a category and links to the documentation, the threat model and the format specification, which `ah lint` accepts, and names its maintainer for `helm show chart`. `make chart` fails when the image named there is not the one `appVersion` deploys.
 - **The binary is not notarised by Apple, and the cask says so.** Homebrew quarantines a cask's download, which would stop Gatekeeper from running it, so the cask removes the quarantine from that one file. What protects the download is the cask's SHA-256 and the release's attestation, and the caveat it prints gives the command that checks the archive.
 
 ## [1.4.0] — 2026-10-16

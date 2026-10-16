@@ -138,6 +138,12 @@ HELM = docker run --rm -v "$(CURDIR)/deploy/helm:/charts" -w /charts $(HELM_IMAG
 .PHONY: chart
 chart: ## Lint, render and validate the Helm chart.
 	cmp deploy/prometheus/alerts.yaml $(CHART)/files/alerts.yaml
+	@# Artifact Hub's image is the one appVersion deploys, so that a release
+	@# that moves appVersion cannot leave the annotation behind.
+	@app=$$(awk '$$1 == "appVersion:" { gsub(/"/, "", $$2); print $$2; exit }' $(CHART)/Chart.yaml); \
+		grep -q "image: ghcr.io/lennardgeissler/blindbucket:$$app$$" $(CHART)/Chart.yaml \
+		|| { echo "artifacthub.io/images does not name the image of appVersion $$app"; exit 1; }
+	@echo "Artifact Hub's image matches appVersion: ok"
 	$(HELM) lint blindbucket -f blindbucket/ci/full-values.yaml
 	@mkdir -p bin
 	$(HELM) template bb blindbucket -f blindbucket/ci/full-values.yaml > bin/chart.yaml
