@@ -7,7 +7,7 @@
 #
 # This exists because "tampering is detected" is the kind of claim a reader should
 # be able to check in ten seconds rather than take on trust. The same attack is a
-# test (internal/proxy integration tests rewrite stored objects and require an
+# test (internal/proxy/integration rewrites stored objects and requires an
 # error rather than plaintext); this is the hand-operated version, for the demo.
 #
 # Usage:

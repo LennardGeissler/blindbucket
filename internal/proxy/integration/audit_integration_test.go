@@ -1,4 +1,4 @@
-package proxy
+package integration
 
 import (
 	"bytes"
@@ -11,6 +11,8 @@ import (
 	"github.com/LennardGeissler/blindbucket/internal/audit"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
+	"github.com/LennardGeissler/blindbucket/internal/proxy"
+	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
 )
 
 // TestAuditLogRecordsWhatWasServed drives real traffic through the gateway
@@ -25,7 +27,7 @@ func TestAuditLogRecordsWhatWasServed(t *testing.T) {
 	key := auditIntegrationKey(t)
 	writer := auditIntegrationWriter(t, key, path)
 
-	h := newHarness(t, func(cfg *Config) {
+	h := proxytest.New(t, func(cfg *proxy.Config) {
 		cfg.Audit = writer
 		cfg.AuditFailClosed = true
 	})
@@ -36,17 +38,17 @@ func TestAuditLogRecordsWhatWasServed(t *testing.T) {
 	}
 	const objectKey = "audit/2026/report.pdf"
 
-	if resp := h.put(t, objectKey, body, nil); resp.StatusCode != http.StatusOK {
+	if resp := h.Put(t, objectKey, body, nil); resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT: %d", resp.StatusCode)
 	} else {
 		_ = resp.Body.Close()
 	}
-	if resp := h.do(t, http.MethodGet, objectKey); resp.StatusCode != http.StatusOK {
+	if resp := h.Do(t, http.MethodGet, objectKey); resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET: %d", resp.StatusCode)
 	} else {
 		_ = resp.Body.Close()
 	}
-	if resp := h.do(t, http.MethodDelete, objectKey); resp.StatusCode != http.StatusNoContent {
+	if resp := h.Do(t, http.MethodDelete, objectKey); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("DELETE: %d", resp.StatusCode)
 	} else {
 		_ = resp.Body.Close()
@@ -54,11 +56,11 @@ func TestAuditLogRecordsWhatWasServed(t *testing.T) {
 
 	// An unsigned request, which must be recorded as a rejection rather than not
 	// at all.
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.url(objectKey), nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.URL(objectKey), nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
-	resp, err := h.unsigned.Do(req)
+	resp, err := h.Unsigned.Do(req)
 	if err != nil {
 		t.Fatalf("unsigned GET: %v", err)
 	}
@@ -136,8 +138,8 @@ func TestAuditLogRecordsWhatWasServed(t *testing.T) {
 	if entries[0].Bytes != int64(len(body)) {
 		t.Errorf("the PUT records %d bytes, want %d", entries[0].Bytes, len(body))
 	}
-	if entries[0].KID != h.keyring.ActiveKID() {
-		t.Errorf("the PUT records kid %q, want %q", entries[0].KID, h.keyring.ActiveKID())
+	if entries[0].KID != h.Keyring.ActiveKID() {
+		t.Errorf("the PUT records kid %q, want %q", entries[0].KID, h.Keyring.ActiveKID())
 	}
 	if entries[1].Bytes != int64(len(body)) {
 		t.Errorf("the GET records %d bytes, want %d", entries[1].Bytes, len(body))

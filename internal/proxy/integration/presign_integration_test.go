@@ -1,4 +1,4 @@
-package proxy
+package integration
 
 import (
 	"context"
@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LennardGeissler/blindbucket/internal/auth"
+	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
-
-	"github.com/LennardGeissler/blindbucket/internal/auth"
 )
 
 // A presigned URL is the one credential this gateway serves that arrives without
@@ -35,10 +35,10 @@ func withPresign(extra ...func(*auth.Config)) func(*auth.Config) {
 
 // presignURL signs a URL the way `aws s3 presign` does.
 func presignURL(
-	t *testing.T, h *harness, method, key string, expires time.Duration, signedAt time.Time,
+	t *testing.T, h *proxytest.Harness, method, key string, expires time.Duration, signedAt time.Time,
 ) string {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), method, h.url(key), nil)
+	req, err := http.NewRequestWithContext(t.Context(), method, h.URL(key), nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
@@ -49,7 +49,7 @@ func presignURL(
 	req.URL.RawQuery = query.Encode()
 
 	signer := v4.NewSigner(func(o *v4.SignerOptions) { o.DisableURIPathEscaping = true })
-	creds := aws.Credentials{AccessKeyID: clientAccessKey, SecretAccessKey: clientSecretKey}
+	creds := aws.Credentials{AccessKeyID: proxytest.ClientAccessKey, SecretAccessKey: proxytest.ClientSecretKey}
 	signed, _, err := signer.PresignHTTP(context.Background(), creds, req,
 		auth.UnsignedPayload, "s3", "us-east-1", signedAt.UTC())
 	if err != nil {
@@ -59,13 +59,13 @@ func presignURL(
 }
 
 // fetch follows a presigned URL with nothing but an HTTP client.
-func fetch(t *testing.T, h *harness, method, signed string) *http.Response {
+func fetch(t *testing.T, h *proxytest.Harness, method, signed string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), method, signed, nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
-	resp, err := h.unsigned.Do(req)
+	resp, err := h.Unsigned.Do(req)
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, signed, err)
 	}
@@ -74,15 +74,15 @@ func fetch(t *testing.T, h *harness, method, signed string) *http.Response {
 
 // TestPresignedGetServesTheObject is the feature: a link, and nothing else.
 func TestPresignedGetServesTheObject(t *testing.T) {
-	h := newHarness(t, withPresign())
-	key := testKey(t, "obj")
+	h := proxytest.New(t, withPresign())
+	key := proxytest.TestKey(t, "obj")
 	body := "handed to somebody who holds no credential at all"
-	h.store(t, key, []byte(body))
+	h.Store(t, key, []byte(body))
 
 	resp := fetch(t, h, http.MethodGet, presignURL(t, h, http.MethodGet, key, time.Hour, time.Now()))
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET returned %d: %s", resp.StatusCode, readBody(t, resp))
+		t.Fatalf("GET returned %d: %s", resp.StatusCode, proxytest.ReadBody(t, resp))
 	}
 	got, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -97,15 +97,15 @@ func TestPresignedGetServesTheObject(t *testing.T) {
 // read path, so everything it does -- the manifest, the salts, the chunk tags --
 // happens for a presigned request too.
 func TestPresignedGetDecryptsAMultipartObject(t *testing.T) {
-	h := newHarness(t, withPresign())
-	key := testKey(t, "obj")
-	parts := h.storeParts(t, key, 5*1024*1024, 1024)
+	h := proxytest.New(t, withPresign())
+	key := proxytest.TestKey(t, "obj")
+	parts := h.StoreParts(t, key, 5*1024*1024, 1024)
 	want := len(parts[0]) + len(parts[1])
 
 	resp := fetch(t, h, http.MethodGet, presignURL(t, h, http.MethodGet, key, time.Hour, time.Now()))
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET returned %d: %s", resp.StatusCode, readBody(t, resp))
+		t.Fatalf("GET returned %d: %s", resp.StatusCode, proxytest.ReadBody(t, resp))
 	}
 	got, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -117,9 +117,9 @@ func TestPresignedGetDecryptsAMultipartObject(t *testing.T) {
 }
 
 func TestPresignedHeadIsServed(t *testing.T) {
-	h := newHarness(t, withPresign())
-	key := testKey(t, "obj")
-	h.store(t, key, []byte("0123456789"))
+	h := proxytest.New(t, withPresign())
+	key := proxytest.TestKey(t, "obj")
+	h.Store(t, key, []byte("0123456789"))
 
 	resp := fetch(t, h, http.MethodHead, presignURL(t, h, http.MethodHead, key, time.Hour, time.Now()))
 	defer func() { _ = resp.Body.Close() }()
@@ -135,9 +135,9 @@ func TestPresignedHeadIsServed(t *testing.T) {
 // asymmetry behind it: a link preview that issues a GET is a GET, while one that
 // issues a DELETE is data loss with no attacker in the story.
 func TestPresignedWritesAreRefused(t *testing.T) {
-	h := newHarness(t, withPresign())
-	key := testKey(t, "obj")
-	h.store(t, key, []byte("must survive every presigned URL below"))
+	h := proxytest.New(t, withPresign())
+	key := proxytest.TestKey(t, "obj")
+	h.Store(t, key, []byte("must survive every presigned URL below"))
 
 	for _, method := range []string{http.MethodPut, http.MethodDelete} {
 		t.Run(method, func(t *testing.T) {
@@ -150,15 +150,15 @@ func TestPresignedWritesAreRefused(t *testing.T) {
 	}
 
 	// And the object is still there and still readable.
-	if got := h.getOK(t, key); got != "must survive every presigned URL below" {
+	if got := getOK(t, h, key); got != "must survive every presigned URL below" {
 		t.Errorf("the object changed: %q", got)
 	}
 }
 
 func TestPresignedURLExpires(t *testing.T) {
-	h := newHarness(t, withPresign())
-	key := testKey(t, "obj")
-	h.store(t, key, []byte("only briefly available"))
+	h := proxytest.New(t, withPresign())
+	key := proxytest.TestKey(t, "obj")
+	h.Store(t, key, []byte("only briefly available"))
 
 	signed := presignURL(t, h, http.MethodGet, key, time.Hour, time.Now().Add(-2*time.Hour))
 	resp := fetch(t, h, http.MethodGet, signed)
@@ -171,9 +171,9 @@ func TestPresignedURLExpires(t *testing.T) {
 // TestPresignedURLCannotBeExtended. Every parameter but the signature is covered,
 // so the holder of a short-lived link cannot make it a long-lived one.
 func TestPresignedURLCannotBeExtended(t *testing.T) {
-	h := newHarness(t, withPresign())
-	key := testKey(t, "obj")
-	h.store(t, key, []byte("briefly available, and not for longer"))
+	h := proxytest.New(t, withPresign())
+	key := proxytest.TestKey(t, "obj")
+	h.Store(t, key, []byte("briefly available, and not for longer"))
 
 	signed := presignURL(t, h, http.MethodGet, key, time.Minute, time.Now())
 	u, err := url.Parse(signed)
@@ -194,17 +194,17 @@ func TestPresignedURLCannotBeExtended(t *testing.T) {
 // TestPresignedURLCannotBePointedAtAnotherObject is the property that makes a
 // link safe to hand out: it names one object, and the name is signed.
 func TestPresignedURLCannotBePointedAtAnotherObject(t *testing.T) {
-	h := newHarness(t, withPresign())
-	mine, theirs := testKey(t, "mine"), testKey(t, "theirs")
-	h.store(t, mine, []byte("the object the link is for"))
-	h.store(t, theirs, []byte("the object it is not for"))
+	h := proxytest.New(t, withPresign())
+	mine, theirs := proxytest.TestKey(t, "mine"), proxytest.TestKey(t, "theirs")
+	h.Store(t, mine, []byte("the object the link is for"))
+	h.Store(t, theirs, []byte("the object it is not for"))
 
 	signed := presignURL(t, h, http.MethodGet, mine, time.Hour, time.Now())
 	u, err := url.Parse(signed)
 	if err != nil {
 		t.Fatalf("parsing the signed URL: %v", err)
 	}
-	u.Path = "/" + testBucket + "/" + theirs
+	u.Path = "/" + proxytest.Bucket + "/" + theirs
 
 	resp := fetch(t, h, http.MethodGet, u.String())
 	defer func() { _ = resp.Body.Close() }()
@@ -215,9 +215,9 @@ func TestPresignedURLCannotBePointedAtAnotherObject(t *testing.T) {
 
 // TestPresignedURLIsRefusedWhenDisabled.
 func TestPresignedURLIsRefusedWhenDisabled(t *testing.T) {
-	h := newHarness(t) // no withPresign
-	key := testKey(t, "obj")
-	h.store(t, key, []byte("not reachable by link on this listener"))
+	h := proxytest.New(t) // no withPresign
+	key := proxytest.TestKey(t, "obj")
+	h.Store(t, key, []byte("not reachable by link on this listener"))
 
 	resp := fetch(t, h, http.MethodGet, presignURL(t, h, http.MethodGet, key, time.Hour, time.Now()))
 	defer func() { _ = resp.Body.Close() }()
@@ -228,9 +228,9 @@ func TestPresignedURLIsRefusedWhenDisabled(t *testing.T) {
 
 // TestPresignedExpiryCapIsEnforced.
 func TestPresignedExpiryCapIsEnforced(t *testing.T) {
-	h := newHarness(t, withPresign(func(c *auth.Config) { c.MaxPresignExpiry = time.Hour }))
-	key := testKey(t, "obj")
-	h.store(t, key, []byte("reachable only by a short-lived link"))
+	h := proxytest.New(t, withPresign(func(c *auth.Config) { c.MaxPresignExpiry = time.Hour }))
+	key := proxytest.TestKey(t, "obj")
+	h.Store(t, key, []byte("reachable only by a short-lived link"))
 
 	short := fetch(t, h, http.MethodGet,
 		presignURL(t, h, http.MethodGet, key, 30*time.Minute, time.Now()))
@@ -253,18 +253,18 @@ func TestPresignedExpiryCapIsEnforced(t *testing.T) {
 // THREAT_MODEL §4 states: the plaintext key is right there in the URL, which is
 // the one thing name encryption otherwise keeps out of sight.
 func TestPresignedGetUnderNameEncryption(t *testing.T) {
-	nameOption, enc := withEncryptedNames(t)
-	h := newHarness(t, nameOption, withPresign())
-	key := testKey(t, "photos/holiday.jpg")
+	nameOption, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, nameOption, withPresign())
+	key := proxytest.TestKey(t, "photos/holiday.jpg")
 	body := "stored under a name the provider cannot read"
-	h.store(t, key, []byte(body))
+	h.Store(t, key, []byte(body))
 
 	stored, err := enc.EncryptKey(key)
 	if err != nil {
 		t.Fatalf("EncryptKey: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = h.upstream.DeleteObject(context.Background(), testBucket, stored)
+		_ = h.Upstream.DeleteObject(context.Background(), proxytest.Bucket, stored)
 	})
 
 	signed := presignURL(t, h, http.MethodGet, key, time.Hour, time.Now())
@@ -276,7 +276,7 @@ func TestPresignedGetUnderNameEncryption(t *testing.T) {
 	resp := fetch(t, h, http.MethodGet, signed)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET returned %d: %s", resp.StatusCode, readBody(t, resp))
+		t.Fatalf("GET returned %d: %s", resp.StatusCode, proxytest.ReadBody(t, resp))
 	}
 	got, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -291,15 +291,15 @@ func TestPresignedGetUnderNameEncryption(t *testing.T) {
 // ordinary read once authenticated, so everything else applies to it unchanged.
 // This is that claim for the newest of those things.
 func TestPresignedGetIsRollbackChecked(t *testing.T) {
-	h := newHarness(t, withFreshness(t), withPresign())
-	key := testKey(t, "obj")
+	h := proxytest.New(t, proxytest.WithFreshness(t), withPresign())
+	key := proxytest.TestKey(t, "obj")
 
-	h.store(t, key, []byte("the first version"))
-	first := h.snapshot(t, key)
-	h.store(t, key, []byte("the current version"))
-	_ = h.getOK(t, key)
+	h.Store(t, key, []byte("the first version"))
+	first := snapshot(t, h, key)
+	h.Store(t, key, []byte("the current version"))
+	_ = getOK(t, h, key)
 
-	h.restore(t, key, first)
+	restore(t, h, key, first)
 
 	resp := fetch(t, h, http.MethodGet, presignURL(t, h, http.MethodGet, key, time.Hour, time.Now()))
 	defer func() { _ = resp.Body.Close() }()
@@ -307,7 +307,7 @@ func TestPresignedGetIsRollbackChecked(t *testing.T) {
 		t.Fatalf("a presigned read of a rolled-back object returned %d, want 502",
 			resp.StatusCode)
 	}
-	if body := readBody(t, resp); !strings.Contains(body, "RollbackDetected") {
+	if body := proxytest.ReadBody(t, resp); !strings.Contains(body, "RollbackDetected") {
 		t.Errorf("answered %q, want RollbackDetected", body)
 	}
 }

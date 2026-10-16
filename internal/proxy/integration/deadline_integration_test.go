@@ -1,4 +1,4 @@
-package proxy
+package integration
 
 import (
 	"bytes"
@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/LennardGeissler/blindbucket/internal/proxy"
+	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
 )
 
 // Deadlines are renewed as bytes move rather than set once as a global
@@ -16,8 +19,8 @@ import (
 
 // withStall shortens the stall timeout so a test does not have to wait out the
 // real one.
-func withStall(d time.Duration) func(*Config) {
-	return func(c *Config) { c.StallTimeout = d }
+func withStall(d time.Duration) func(*proxy.Config) {
+	return func(c *proxy.Config) { c.StallTimeout = d }
 }
 
 // withSendBuffer fixes the send buffer of every connection the gateway accepts.
@@ -58,18 +61,18 @@ func (l sendBufferListener) Accept() (net.Conn, error) {
 func TestIntegrationStalledDownloadIsDropped(t *testing.T) {
 	const stall = 2 * time.Second
 	const buffer = 64 << 10
-	h := newHarness(t, withStall(stall), withSendBuffer(buffer))
-	key := testKey(t, "stalled.bin")
+	h := proxytest.New(t, withStall(stall), withSendBuffer(buffer))
+	key := proxytest.TestKey(t, "stalled.bin")
 
 	// Larger than the buffers, so the server's writes block once the client
 	// stops reading. A small object would be handed to the kernel whole and the
 	// stall would never be observable.
-	h.store(t, key, randomBytes(t, 8<<20))
+	h.Store(t, key, proxytest.RandomBytes(t, 8<<20))
 
-	client := &http.Client{Transport: &signingTransport{base: &http.Transport{
+	client := &http.Client{Transport: &proxytest.SigningTransport{Base: &http.Transport{
 		DialContext: (&net.Dialer{Control: receiveBuffer(buffer)}).DialContext,
 	}}}
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.url(key), nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.URL(key), nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
@@ -108,13 +111,13 @@ func TestIntegrationStalledDownloadIsDropped(t *testing.T) {
 // takes several times the stall timeout to finish and must still succeed.
 func TestIntegrationSlowButProgressingDownloadSurvives(t *testing.T) {
 	const stall = 500 * time.Millisecond
-	h := newHarness(t, withStall(stall))
-	key := testKey(t, "slow.bin")
+	h := proxytest.New(t, withStall(stall))
+	key := proxytest.TestKey(t, "slow.bin")
 
-	payload := randomBytes(t, 512<<10)
-	h.store(t, key, payload)
+	payload := proxytest.RandomBytes(t, 512<<10)
+	h.Store(t, key, payload)
 
-	resp := h.do(t, http.MethodGet, key)
+	resp := h.Do(t, http.MethodGet, key)
 	defer func() { _ = resp.Body.Close() }()
 
 	// Read in small pieces with a pause between them. Each pause is shorter

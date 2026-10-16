@@ -1,4 +1,4 @@
-package proxy
+package integration
 
 import (
 	"context"
@@ -9,23 +9,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
 // postDelete sends a DeleteObjects body and returns the status and response.
-func (h *harness) postDelete(t *testing.T, body string) (int, string) {
+func postDelete(t *testing.T, h *proxytest.Harness, body string) (int, string) {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-		h.proxy.URL+"/"+testBucket+"?delete", strings.NewReader(body))
+		h.Server.URL+"/"+proxytest.Bucket+"?delete", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
-	resp, err := h.client.Do(req)
+	resp, err := h.Client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	return resp.StatusCode, readBody(t, resp)
+	return resp.StatusCode, proxytest.ReadBody(t, resp)
 }
 
 func deleteBody(keys ...string) string {
@@ -43,8 +44,8 @@ func deleteBody(keys ...string) string {
 // back in the client's names -- or a client matching the Deleted list against
 // what it asked for would believe nothing was deleted.
 func TestIntegrationDeleteObjectsUnderEncryptedNames(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 	prefix := fmt.Sprintf("bulk-delete-names/%d/", time.Now().UnixNano())
 	keys := []string{prefix + "one", prefix + "two"}
 	for _, key := range keys {
@@ -52,15 +53,15 @@ func TestIntegrationDeleteObjectsUnderEncryptedNames(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EncryptKey: %v", err)
 		}
-		h.cleanupStored(t, stored)
-		resp := h.put(t, key, []byte("payload"), nil)
+		h.CleanupStored(t, stored)
+		resp := h.Put(t, key, []byte("payload"), nil)
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("PUT %s: %d", key, resp.StatusCode)
 		}
 	}
 
-	status, body := h.postDelete(t, deleteBody(keys...))
+	status, body := postDelete(t, h, deleteBody(keys...))
 	if status != http.StatusOK {
 		t.Fatalf("status %d: %s", status, body)
 	}
@@ -77,21 +78,21 @@ func TestIntegrationDeleteObjectsUnderEncryptedNames(t *testing.T) {
 			t.Errorf("%s is not reported deleted under its own name; the answer was:\n%s", key, body)
 		}
 		stored, _ := enc.EncryptKey(key)
-		if _, err := h.upstream.HeadObject(context.Background(), testBucket, stored); !upstream.NotFound(err) {
+		if _, err := h.Upstream.HeadObject(context.Background(), proxytest.Bucket, stored); !upstream.NotFound(err) {
 			t.Errorf("%s survived the bulk delete", key)
 		}
 	}
 }
 
 func TestIntegrationDeleteObjectsRefusesMalformedBodies(t *testing.T) {
-	h := newHarness(t)
+	h := proxytest.New(t)
 	for name, body := range map[string]string{
 		"not XML":            "this is not a delete request",
 		"no objects in it":   "<Delete><Quiet>true</Quiet></Delete>",
 		"an unclosed object": "<Delete><Object><Key>a</Key>",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if status, resp := h.postDelete(t, body); status != http.StatusBadRequest {
+			if status, resp := postDelete(t, h, body); status != http.StatusBadRequest {
 				t.Errorf("status %d, want 400: %s", status, resp)
 			}
 		})

@@ -1,315 +1,42 @@
-package proxy
+package integration
 
 import (
 	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
-	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
-
-	"github.com/LennardGeissler/blindbucket/internal/auth"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/stream"
-	"github.com/LennardGeissler/blindbucket/internal/manifest"
-	"github.com/LennardGeissler/blindbucket/internal/testprovider"
+	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
-// These tests need a real S3-compatible provider, because the interesting
-// failures are the ones a fake would paper over: what a provider stores, what it
-// returns, and what happens when the stored bytes are changed behind the
-// proxy's back.
-//
-//	docker compose up -d
-//	BLINDBUCKET_TEST_S3_ENDPOINT=http://localhost:9002 go test ./internal/proxy
-//
-// Any other provider works the same way; internal/testprovider lists the
-// variables that describe it.
-var testBucket = testprovider.Bucket()
-
-const (
-	clientAccessKey = "BBTESTACCESSKEY"
-	clientSecretKey = "bb-test-secret-key-not-a-real-one"
-)
-
-// signingTransport signs every request the way a real S3 client does.
-//
-// It uses the AWS SDK's signer rather than this project's own code: the proxy
-// must accept what real clients produce, and a test that signed with the
-// verifier's own helpers would only prove the two agree with each other.
-type signingTransport struct{ base http.RoundTripper }
-
-func (s *signingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	var body []byte
-	if req.Body != nil {
-		read, err := io.ReadAll(req.Body)
-		_ = req.Body.Close()
-		if err != nil {
-			return nil, err
-		}
-		body = read
-		if len(body) == 0 {
-			// A non-nil Body with ContentLength 0 makes net/http switch to
-			// chunked encoding, which is a different request entirely.
-			req.Body = http.NoBody
-		} else {
-			req.Body = io.NopCloser(bytes.NewReader(body))
-		}
-		req.ContentLength = int64(len(body))
-	}
-
-	sum := sha256.Sum256(body)
-	hash := hex.EncodeToString(sum[:])
-	req.Header.Set("X-Amz-Content-Sha256", hash)
-
-	signer := v4.NewSigner(func(o *v4.SignerOptions) { o.DisableURIPathEscaping = true })
-	creds := aws.Credentials{AccessKeyID: clientAccessKey, SecretAccessKey: clientSecretKey}
-	if err := signer.SignHTTP(req.Context(), creds, req, hash, "s3", "us-east-1", time.Now().UTC()); err != nil {
-		return nil, err
-	}
-	return s.base.RoundTrip(req)
-}
-
-type harness struct {
-	proxy    *httptest.Server
-	upstream *upstream.Client
-	keyring  *keys.Keyring
-	// gateway is the Proxy behind the server, so that a test can install the
-	// coordination hooks of hooks.go and replay a model counterexample.
-	gateway *Proxy
-	client  *http.Client
-	// unsigned sends requests without a signature, to check that the gateway
-	// refuses them. It has to be captured before the signing transport is
-	// installed: httptest.Server.Client returns the same client every time, so
-	// asking for it later would hand back the signing one.
-	unsigned *http.Client
-}
-
-// upstreamConfig describes the provider under test to an upstream client, so
-// that a test building a client of its own -- one that counts requests, say --
-// talks to the same provider as the harness.
-func upstreamConfig(t *testing.T) upstream.Config {
-	t.Helper()
-	p := testprovider.Require(t)
-	return upstream.Config{
-		Endpoint: p.Endpoint, Region: p.Region, PathStyle: p.PathStyle,
-		AccessKeyID: p.AccessKey, SecretAccessKey: p.SecretKey, SessionToken: p.SessionToken,
-	}
-}
-
-// newHarness builds a gateway against a real provider.
-//
-// An option adjusts either the proxy configuration or the verifier's, for tests
-// that need something other than the defaults -- a short stall timeout, say,
-// where waiting out the real one would take a minute, or presigned URLs, which
-// are configured on the verifier and not on the proxy. Anything else is a
-// mistake rather than a no-op, so the default case fails the test instead of
-// ignoring it.
-func newHarness(t *testing.T, options ...any) *harness {
-	t.Helper()
-	client, err := upstream.New(upstreamConfig(t))
-	if err != nil {
-		t.Fatalf("upstream.New: %v", err)
-	}
-
-	ring := keys.NewKeyring()
-	if err := ring.Generate("test-key"); err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-
-	authCfg := auth.Config{Clients: []auth.Client{{
-		Name: "integration", AccessKeyID: clientAccessKey,
-		SecretAccessKey: clientSecretKey, Buckets: []string{testBucket},
-	}}}
-	for _, option := range options {
-		if adjust, ok := option.(func(*auth.Config)); ok {
-			adjust(&authCfg)
-		}
-	}
-	verifier, err := auth.NewVerifier(authCfg)
-	if err != nil {
-		t.Fatalf("auth.NewVerifier: %v", err)
-	}
-
-	cfg := Config{
-		Upstream: client, Keys: ring, Verifier: verifier,
-		Log2ChunkSize: stream.MinLog2ChunkSize,
-		// Discard: these tests deliberately provoke errors, and the log noise
-		// would drown the failures that matter.
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	}
-	for _, option := range options {
-		switch adjust := option.(type) {
-		case func(*Config):
-			adjust(&cfg)
-		case func(*auth.Config):
-			// Applied above, before the verifier was built.
-		case func(net.Listener) net.Listener:
-			// Applied below, once the server exists.
-		default:
-			t.Fatalf("newHarness: %T is not a harness option", adjust)
-		}
-	}
-	p, err := New(cfg)
-	if err != nil {
-		t.Fatalf("proxy.New: %v", err)
-	}
-
-	srv := httptest.NewUnstartedServer(p)
-	for _, option := range options {
-		if wrap, ok := option.(func(net.Listener) net.Listener); ok {
-			srv.Listener = wrap(srv.Listener)
-		}
-	}
-	srv.Start()
-	t.Cleanup(srv.Close)
-
-	signing := srv.Client()
-	plain := &http.Client{Transport: signing.Transport}
-	signing.Transport = &signingTransport{base: plain.Transport}
-	return &harness{
-		proxy: srv, upstream: client, keyring: ring, gateway: p,
-		client: signing, unsigned: plain,
-	}
-}
-
-func (h *harness) url(key string) string {
-	return h.proxy.URL + "/" + testBucket + "/" + key
-}
-
-func (h *harness) put(t *testing.T, key string, body []byte, headers map[string]string) *http.Response {
-	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, h.url(key), bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("building request: %v", err)
-	}
-	req.ContentLength = int64(len(body))
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := h.client.Do(req)
-	if err != nil {
-		t.Fatalf("PUT: %v", err)
-	}
-	return resp
-}
-
-func (h *harness) do(t *testing.T, method, key string) *http.Response {
-	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), method, h.url(key), nil)
-	if err != nil {
-		t.Fatalf("building request: %v", err)
-	}
-	resp, err := h.client.Do(req)
-	if err != nil {
-		t.Fatalf("%s: %v", method, err)
-	}
-	return resp
-}
-
-// store uploads through the proxy and registers cleanup.
-func (h *harness) store(t *testing.T, key string, body []byte) {
-	t.Helper()
-	resp := h.put(t, key, body, nil)
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("PUT returned %d: %s", resp.StatusCode, readBody(t, resp))
-	}
-	t.Cleanup(func() {
-		_ = h.upstream.DeleteObject(context.Background(), testBucket, key)
-	})
-}
-
-// rewriteUpstream replaces an object's stored bytes while keeping its metadata,
-// which is how an actively hostile provider would behave.
-func (h *harness) rewriteUpstream(t *testing.T, key string, mutate func([]byte) []byte) {
-	t.Helper()
-	ctx := context.Background()
-
-	get, err := h.upstream.GetObject(ctx, upstream.GetObjectInput{Bucket: testBucket, Key: key})
-	if err != nil {
-		t.Fatalf("reading the stored object: %v", err)
-	}
-	stored, err := io.ReadAll(get.Body)
-	_ = get.Body.Close()
-	if err != nil {
-		t.Fatalf("reading the stored object: %v", err)
-	}
-
-	modified := mutate(stored)
-	if _, err := h.upstream.PutObject(ctx, upstream.PutObjectInput{
-		Bucket: testBucket, Key: key,
-		Body: bytes.NewReader(modified), ContentLength: int64(len(modified)),
-		Metadata: get.Metadata,
-	}); err != nil {
-		t.Fatalf("writing the modified object: %v", err)
-	}
-}
-
-func readBody(t *testing.T, resp *http.Response) string {
-	t.Helper()
-	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	return string(b)
-}
-
-// cleanupStored removes a stored object when the test ends, together with any
-// manifest it has. A test that stores under an encrypted name needs it: the
-// stored key is not under the run's prefix, so the sweep in TestMain cannot
-// find the object, and a manifest lives under a hash of the key, so deleting
-// the object alone would orphan it.
-func (h *harness) cleanupStored(t *testing.T, stored string) {
-	t.Helper()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		_ = h.upstream.DeleteObject(ctx, testBucket, stored)
-		page, err := h.upstream.ListObjects(ctx, testBucket,
-			url.Values{"list-type": {"2"}, "prefix": {manifest.PrefixFor(stored)}})
-		if err != nil {
-			return
-		}
-		for _, entry := range page.Contents {
-			_ = h.upstream.DeleteObject(ctx, testBucket, entry.Key)
-		}
-	})
-}
-
-func testKey(t *testing.T, suffix string) string {
-	t.Helper()
-	return fmt.Sprintf("%sproxy-test/%s/%d/%s", testprovider.RunPrefix(),
-		strings.ReplaceAll(t.Name(), "/", "_"), time.Now().UnixNano(), suffix)
-}
-
 func TestIntegrationRoundTrip(t *testing.T) {
-	h := newHarness(t)
+	h := proxytest.New(t)
 
 	for _, size := range []int{0, 1, 4095, 4096, 4097, 100_000} {
 		t.Run(strconv.Itoa(size), func(t *testing.T) {
-			key := testKey(t, "object.bin")
+			key := proxytest.TestKey(t, "object.bin")
 			payload := make([]byte, size)
 			if _, err := rand.Read(payload); err != nil {
 				t.Fatalf("rand: %v", err)
 			}
-			h.store(t, key, payload)
+			h.Store(t, key, payload)
 
 			// What the provider holds must be the blindbucket format, at the
 			// size the arithmetic predicts -- never the plaintext.
-			info, err := h.upstream.HeadObject(context.Background(), testBucket, key)
+			info, err := h.Upstream.HeadObject(context.Background(), proxytest.Bucket, key)
 			if err != nil {
 				t.Fatalf("HeadObject upstream: %v", err)
 			}
@@ -322,7 +49,7 @@ func TestIntegrationRoundTrip(t *testing.T) {
 			}
 
 			// HEAD through the proxy reports the plaintext size.
-			head := h.do(t, http.MethodHead, key)
+			head := h.Do(t, http.MethodHead, key)
 			_ = head.Body.Close()
 			if head.ContentLength != int64(size) {
 				t.Errorf("HEAD reports %d bytes, want %d", head.ContentLength, size)
@@ -332,7 +59,7 @@ func TestIntegrationRoundTrip(t *testing.T) {
 			}
 
 			// GET returns the original bytes.
-			get := h.do(t, http.MethodGet, key)
+			get := h.Do(t, http.MethodGet, key)
 			defer func() { _ = get.Body.Close() }()
 			if get.ContentLength != int64(size) {
 				t.Errorf("GET declares %d bytes, want %d", get.ContentLength, size)
@@ -349,13 +76,13 @@ func TestIntegrationRoundTrip(t *testing.T) {
 }
 
 func TestIntegrationCiphertextIsOpaque(t *testing.T) {
-	h := newHarness(t)
-	key := testKey(t, "secret.txt")
+	h := proxytest.New(t)
+	key := proxytest.TestKey(t, "secret.txt")
 	secret := bytes.Repeat([]byte("TOP SECRET PAYLOAD "), 500)
-	h.store(t, key, secret)
+	h.Store(t, key, secret)
 
-	get, err := h.upstream.GetObject(context.Background(), upstream.GetObjectInput{
-		Bucket: testBucket, Key: key,
+	get, err := h.Upstream.GetObject(context.Background(), upstream.GetObjectInput{
+		Bucket: proxytest.Bucket, Key: key,
 	})
 	if err != nil {
 		t.Fatalf("GetObject upstream: %v", err)
@@ -381,11 +108,11 @@ func TestIntegrationCiphertextIsOpaque(t *testing.T) {
 }
 
 func TestIntegrationMetadataHandling(t *testing.T) {
-	h := newHarness(t)
+	h := proxytest.New(t)
 
 	t.Run("client metadata survives, gateway metadata is hidden", func(t *testing.T) {
-		key := testKey(t, "meta.bin")
-		resp := h.put(t, key, []byte("payload"), map[string]string{
+		key := proxytest.TestKey(t, "meta.bin")
+		resp := h.Put(t, key, []byte("payload"), map[string]string{
 			"Content-Type":      "text/plain",
 			"X-Amz-Meta-Origin": "integration-test",
 			"Cache-Control":     "max-age=60",
@@ -394,9 +121,9 @@ func TestIntegrationMetadataHandling(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("PUT returned %d", resp.StatusCode)
 		}
-		t.Cleanup(func() { _ = h.upstream.DeleteObject(context.Background(), testBucket, key) })
+		t.Cleanup(func() { _ = h.Upstream.DeleteObject(context.Background(), proxytest.Bucket, key) })
 
-		head := h.do(t, http.MethodHead, key)
+		head := h.Do(t, http.MethodHead, key)
 		_ = head.Body.Close()
 		if got := head.Header.Get("X-Amz-Meta-Origin"); got != "integration-test" {
 			t.Errorf("client metadata = %q, want it preserved", got)
@@ -415,8 +142,8 @@ func TestIntegrationMetadataHandling(t *testing.T) {
 	})
 
 	t.Run("clients may not write the reserved prefix", func(t *testing.T) {
-		key := testKey(t, "forged.bin")
-		resp := h.put(t, key, []byte("payload"), map[string]string{
+		key := proxytest.TestKey(t, "forged.bin")
+		resp := h.Put(t, key, []byte("payload"), map[string]string{
 			"X-Amz-Meta-Bb-Dek": "forged",
 		})
 		defer func() { _ = resp.Body.Close() }()
@@ -429,22 +156,22 @@ func TestIntegrationMetadataHandling(t *testing.T) {
 // TestIntegrationTamperedObject is the heart of it: an actively hostile
 // provider must never produce plaintext.
 func TestIntegrationTamperedObject(t *testing.T) {
-	h := newHarness(t)
+	h := proxytest.New(t)
 	const chunk = 1 << stream.MinLog2ChunkSize
 
 	t.Run("tampering in a later chunk aborts the response", func(t *testing.T) {
-		key := testKey(t, "late.bin")
+		key := proxytest.TestKey(t, "late.bin")
 		payload := bytes.Repeat([]byte{0xAB}, 5*chunk)
-		h.store(t, key, payload)
+		h.Store(t, key, payload)
 
 		// Corrupt the third chunk, which the client only reaches after the
 		// status line is already on the wire.
-		h.rewriteUpstream(t, key, func(b []byte) []byte {
+		h.RewriteUpstream(t, key, func(b []byte) []byte {
 			b[stream.HeaderSize+2*(chunk+stream.TagSize)+9] ^= 0x01
 			return b
 		})
 
-		get := h.do(t, http.MethodGet, key)
+		get := h.Do(t, http.MethodGet, key)
 		defer func() { _ = get.Body.Close() }()
 		if get.StatusCode != http.StatusOK {
 			t.Fatalf("status %d: the failure is expected mid-body, not before it", get.StatusCode)
@@ -465,33 +192,33 @@ func TestIntegrationTamperedObject(t *testing.T) {
 	})
 
 	t.Run("tampering in the first chunk yields a clean error", func(t *testing.T) {
-		key := testKey(t, "early.bin")
-		h.store(t, key, bytes.Repeat([]byte{0xCD}, 3*chunk))
+		key := proxytest.TestKey(t, "early.bin")
+		h.Store(t, key, bytes.Repeat([]byte{0xCD}, 3*chunk))
 
-		h.rewriteUpstream(t, key, func(b []byte) []byte {
+		h.RewriteUpstream(t, key, func(b []byte) []byte {
 			b[stream.HeaderSize+5] ^= 0x01
 			return b
 		})
 
-		get := h.do(t, http.MethodGet, key)
+		get := h.Do(t, http.MethodGet, key)
 		defer func() { _ = get.Body.Close() }()
 		if get.StatusCode != http.StatusBadGateway {
 			t.Errorf("status %d, want 502 with an S3 error document", get.StatusCode)
 		}
-		if body := readBody(t, get); !strings.Contains(body, "IntegrityCheckFailed") {
+		if body := proxytest.ReadBody(t, get); !strings.Contains(body, "IntegrityCheckFailed") {
 			t.Errorf("body = %q, want an IntegrityCheckFailed error", body)
 		}
 	})
 
 	t.Run("truncation is detected", func(t *testing.T) {
-		key := testKey(t, "truncated.bin")
-		h.store(t, key, bytes.Repeat([]byte{0xEF}, 3*chunk))
+		key := proxytest.TestKey(t, "truncated.bin")
+		h.Store(t, key, bytes.Repeat([]byte{0xEF}, 3*chunk))
 
-		h.rewriteUpstream(t, key, func(b []byte) []byte {
+		h.RewriteUpstream(t, key, func(b []byte) []byte {
 			return b[:stream.HeaderSize+2*(chunk+stream.TagSize)]
 		})
 
-		get := h.do(t, http.MethodGet, key)
+		get := h.Do(t, http.MethodGet, key)
 		defer func() { _ = get.Body.Close() }()
 		// A truncated object has an impossible ciphertext length, so this is
 		// caught before any byte is served.
@@ -507,12 +234,12 @@ func TestIntegrationTamperedObject(t *testing.T) {
 	})
 
 	t.Run("swapping two objects' bodies is detected", func(t *testing.T) {
-		keyA, keyB := testKey(t, "a.bin"), testKey(t, "b.bin")
-		h.store(t, keyA, bytes.Repeat([]byte{1}, 2*chunk))
-		h.store(t, keyB, bytes.Repeat([]byte{2}, 2*chunk))
+		keyA, keyB := proxytest.TestKey(t, "a.bin"), proxytest.TestKey(t, "b.bin")
+		h.Store(t, keyA, bytes.Repeat([]byte{1}, 2*chunk))
+		h.Store(t, keyB, bytes.Repeat([]byte{2}, 2*chunk))
 
 		ctx := context.Background()
-		get, err := h.upstream.GetObject(ctx, upstream.GetObjectInput{Bucket: testBucket, Key: keyB})
+		get, err := h.Upstream.GetObject(ctx, upstream.GetObjectInput{Bucket: proxytest.Bucket, Key: keyB})
 		if err != nil {
 			t.Fatalf("reading B: %v", err)
 		}
@@ -524,9 +251,9 @@ func TestIntegrationTamperedObject(t *testing.T) {
 
 		// B's body under A's key and metadata: the data key is bound to the key
 		// name, so A's key cannot open B's segment.
-		h.rewriteUpstream(t, keyA, func([]byte) []byte { return bodyB })
+		h.RewriteUpstream(t, keyA, func([]byte) []byte { return bodyB })
 
-		resp := h.do(t, http.MethodGet, keyA)
+		resp := h.Do(t, http.MethodGet, keyA)
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == http.StatusOK {
 			body, err := io.ReadAll(resp.Body)
@@ -541,11 +268,11 @@ func TestIntegrationTamperedObject(t *testing.T) {
 	})
 
 	t.Run("a forged wrapped key is rejected", func(t *testing.T) {
-		key := testKey(t, "forged-dek.bin")
-		h.store(t, key, bytes.Repeat([]byte{3}, chunk))
+		key := proxytest.TestKey(t, "forged-dek.bin")
+		h.Store(t, key, bytes.Repeat([]byte{3}, chunk))
 
 		ctx := context.Background()
-		get, err := h.upstream.GetObject(ctx, upstream.GetObjectInput{Bucket: testBucket, Key: key})
+		get, err := h.Upstream.GetObject(ctx, upstream.GetObjectInput{Bucket: proxytest.Bucket, Key: key})
 		if err != nil {
 			t.Fatalf("reading: %v", err)
 		}
@@ -562,15 +289,15 @@ func TestIntegrationTamperedObject(t *testing.T) {
 				metadata[name] = forged
 			}
 		}
-		if _, err := h.upstream.PutObject(ctx, upstream.PutObjectInput{
-			Bucket: testBucket, Key: key,
+		if _, err := h.Upstream.PutObject(ctx, upstream.PutObjectInput{
+			Bucket: proxytest.Bucket, Key: key,
 			Body: bytes.NewReader(stored), ContentLength: int64(len(stored)),
 			Metadata: metadata,
 		}); err != nil {
 			t.Fatalf("writing the forged object: %v", err)
 		}
 
-		resp := h.do(t, http.MethodGet, key)
+		resp := h.Do(t, http.MethodGet, key)
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusBadGateway {
 			t.Errorf("status %d, want 502", resp.StatusCode)
@@ -581,20 +308,20 @@ func TestIntegrationTamperedObject(t *testing.T) {
 // TestIntegrationForeignObject covers a bucket that also holds objects this
 // gateway did not write.
 func TestIntegrationForeignObject(t *testing.T) {
-	h := newHarness(t)
-	key := testKey(t, "foreign.txt")
+	h := proxytest.New(t)
+	key := proxytest.TestKey(t, "foreign.txt")
 
-	if _, err := h.upstream.PutObject(context.Background(), upstream.PutObjectInput{
-		Bucket: testBucket, Key: key,
+	if _, err := h.Upstream.PutObject(context.Background(), upstream.PutObjectInput{
+		Bucket: proxytest.Bucket, Key: key,
 		Body: strings.NewReader("written without the gateway"), ContentLength: 27,
 	}); err != nil {
 		t.Fatalf("PutObject upstream: %v", err)
 	}
-	t.Cleanup(func() { _ = h.upstream.DeleteObject(context.Background(), testBucket, key) })
+	t.Cleanup(func() { _ = h.Upstream.DeleteObject(context.Background(), proxytest.Bucket, key) })
 
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
-		resp := h.do(t, method, key)
-		body := readBody(t, resp)
+		resp := h.Do(t, method, key)
+		body := proxytest.ReadBody(t, resp)
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusBadGateway {
 			t.Errorf("%s returned %d, want 502 -- an unencrypted object must not be served silently",
@@ -607,23 +334,23 @@ func TestIntegrationForeignObject(t *testing.T) {
 }
 
 func TestIntegrationDeleteAndMissing(t *testing.T) {
-	h := newHarness(t)
-	key := testKey(t, "transient.bin")
+	h := proxytest.New(t)
+	key := proxytest.TestKey(t, "transient.bin")
 
-	resp := h.put(t, key, []byte("payload"), nil)
+	resp := h.Put(t, key, []byte("payload"), nil)
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT returned %d", resp.StatusCode)
 	}
 
-	del := h.do(t, http.MethodDelete, key)
+	del := h.Do(t, http.MethodDelete, key)
 	_ = del.Body.Close()
 	if del.StatusCode != http.StatusNoContent {
 		t.Errorf("DELETE returned %d, want 204", del.StatusCode)
 	}
 
-	get := h.do(t, http.MethodGet, key)
-	body := readBody(t, get)
+	get := h.Do(t, http.MethodGet, key)
+	body := proxytest.ReadBody(t, get)
 	_ = get.Body.Close()
 	if get.StatusCode != http.StatusNotFound {
 		t.Errorf("GET after DELETE returned %d, want 404", get.StatusCode)
@@ -636,13 +363,13 @@ func TestIntegrationDeleteAndMissing(t *testing.T) {
 // TestIntegrationRefusesUnsupported checks that nothing this build cannot do is
 // quietly accepted.
 func TestIntegrationRefusesUnsupported(t *testing.T) {
-	h := newHarness(t)
-	key := testKey(t, "unsupported.bin")
-	h.store(t, key, bytes.Repeat([]byte{7}, 1000))
+	h := proxytest.New(t)
+	key := proxytest.TestKey(t, "unsupported.bin")
+	h.Store(t, key, bytes.Repeat([]byte{7}, 1000))
 
 	t.Run("object sub-resources", func(t *testing.T) {
 		for _, suffix := range []string{"?acl", "?attributes", "?versionId=null"} {
-			resp, err := h.client.Get(h.url(key) + suffix)
+			resp, err := h.Client.Get(h.URL(key) + suffix)
 			if err != nil {
 				t.Fatalf("GET: %v", err)
 			}
@@ -658,7 +385,7 @@ func TestIntegrationRefusesUnsupported(t *testing.T) {
 	// breaks every large copy. Writing is refused: the provider would store the
 	// tag in plaintext (ADR-012).
 	t.Run("tagging is readable and not writable", func(t *testing.T) {
-		resp, err := h.client.Get(h.url(key) + "?tagging")
+		resp, err := h.Client.Get(h.URL(key) + "?tagging")
 		if err != nil {
 			t.Fatalf("GET: %v", err)
 		}
@@ -668,11 +395,11 @@ func TestIntegrationRefusesUnsupported(t *testing.T) {
 		}
 
 		for _, method := range []string{http.MethodPut, http.MethodDelete} {
-			req, err := http.NewRequestWithContext(t.Context(), method, h.url(key)+"?tagging", nil)
+			req, err := http.NewRequestWithContext(t.Context(), method, h.URL(key)+"?tagging", nil)
 			if err != nil {
 				t.Fatalf("building request: %v", err)
 			}
-			resp, err := h.client.Do(req)
+			resp, err := h.Client.Do(req)
 			if err != nil {
 				t.Fatalf("%s: %v", method, err)
 			}
@@ -683,7 +410,7 @@ func TestIntegrationRefusesUnsupported(t *testing.T) {
 		}
 
 		// And the header form on an ordinary upload.
-		put := h.put(t, testKey(t, "tagged.bin"), []byte("tagged"),
+		put := h.Put(t, proxytest.TestKey(t, "tagged.bin"), []byte("tagged"),
 			map[string]string{"X-Amz-Tagging": "team=platform"})
 		_ = put.Body.Close()
 		if put.StatusCode != http.StatusNotImplemented {
@@ -697,7 +424,7 @@ func TestIntegrationRefusesUnsupported(t *testing.T) {
 	// plain-object path, which would have stored one part as the whole object.
 	t.Run("malformed multipart requests", func(t *testing.T) {
 		for _, suffix := range []string{"?partNumber=1", "?uploadId="} {
-			resp, err := h.client.Get(h.url(key) + suffix)
+			resp, err := h.Client.Get(h.URL(key) + suffix)
 			if err != nil {
 				t.Fatalf("GET: %v", err)
 			}
@@ -710,7 +437,7 @@ func TestIntegrationRefusesUnsupported(t *testing.T) {
 
 	t.Run("bucket sub-resources", func(t *testing.T) {
 		for _, suffix := range []string{"?versioning", "?policy", "?lifecycle"} {
-			resp, err := h.client.Get(h.proxy.URL + "/" + testBucket + suffix)
+			resp, err := h.Client.Get(h.Server.URL + "/" + proxytest.Bucket + suffix)
 			if err != nil {
 				t.Fatalf("GET: %v", err)
 			}
@@ -722,7 +449,7 @@ func TestIntegrationRefusesUnsupported(t *testing.T) {
 	})
 
 	t.Run("the reserved prefix", func(t *testing.T) {
-		resp, err := h.client.Get(h.proxy.URL + "/" + testBucket + "/.blindbucket/m/anything")
+		resp, err := h.Client.Get(h.Server.URL + "/" + proxytest.Bucket + "/.blindbucket/m/anything")
 		if err != nil {
 			t.Fatalf("GET: %v", err)
 		}
@@ -733,7 +460,7 @@ func TestIntegrationRefusesUnsupported(t *testing.T) {
 	})
 
 	t.Run("server-side encryption headers", func(t *testing.T) {
-		resp := h.put(t, testKey(t, "sse.bin"), []byte("payload"),
+		resp := h.Put(t, proxytest.TestKey(t, "sse.bin"), []byte("payload"),
 			map[string]string{"X-Amz-Server-Side-Encryption": "AES256"})
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusNotImplemented {
@@ -745,23 +472,23 @@ func TestIntegrationRefusesUnsupported(t *testing.T) {
 // TestIntegrationAbortedUploadStoresNothing checks that a client which stops
 // mid-body leaves no object: the final chunk is only written on a clean close.
 func TestIntegrationAbortedUploadStoresNothing(t *testing.T) {
-	h := newHarness(t)
-	key := testKey(t, "aborted.bin")
+	h := proxytest.New(t)
+	key := proxytest.TestKey(t, "aborted.bin")
 
 	// Declare more bytes than the body will produce.
 	body := io.MultiReader(bytes.NewReader(bytes.Repeat([]byte{9}, 1000)), errReader{})
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, h.url(key), body)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, h.URL(key), body)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
 	req.ContentLength = 100000
 
-	resp, err := h.client.Do(req)
+	resp, err := h.Client.Do(req)
 	if err == nil {
 		_ = resp.Body.Close()
 	}
 
-	if _, err := h.upstream.HeadObject(context.Background(), testBucket, key); !upstream.NotFound(err) {
+	if _, err := h.Upstream.HeadObject(context.Background(), proxytest.Bucket, key); !upstream.NotFound(err) {
 		t.Errorf("an aborted upload left an object behind (err = %v)", err)
 	}
 }
@@ -775,14 +502,14 @@ func (errReader) Read([]byte) (int, error) { return 0, errors.New("client went a
 // TestIntegrationAuthentication checks that the gateway is closed to anyone
 // without a credential, and scoped for those who have one.
 func TestIntegrationAuthentication(t *testing.T) {
-	h := newHarness(t)
-	key := testKey(t, "auth.bin")
-	h.store(t, key, []byte("payload"))
+	h := proxytest.New(t)
+	key := proxytest.TestKey(t, "auth.bin")
+	h.Store(t, key, []byte("payload"))
 
-	unsigned := h.unsigned
+	unsigned := h.Unsigned
 
 	t.Run("unsigned requests are refused", func(t *testing.T) {
-		resp, err := unsigned.Get(h.url(key))
+		resp, err := unsigned.Get(h.URL(key))
 		if err != nil {
 			t.Fatalf("GET: %v", err)
 		}
@@ -794,11 +521,11 @@ func TestIntegrationAuthentication(t *testing.T) {
 
 	t.Run("a bucket outside the credential's scope is refused", func(t *testing.T) {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
-			h.proxy.URL+"/some-other-bucket/key", nil)
+			h.Server.URL+"/some-other-bucket/key", nil)
 		if err != nil {
 			t.Fatalf("building request: %v", err)
 		}
-		resp, err := h.client.Do(req)
+		resp, err := h.Client.Do(req)
 		if err != nil {
 			t.Fatalf("GET: %v", err)
 		}
@@ -809,12 +536,12 @@ func TestIntegrationAuthentication(t *testing.T) {
 	})
 
 	t.Run("a forged signature is refused", func(t *testing.T) {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.url(key), nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.URL(key), nil)
 		if err != nil {
 			t.Fatalf("building request: %v", err)
 		}
 		req.Header.Set("Authorization",
-			"AWS4-HMAC-SHA256 Credential="+clientAccessKey+"/"+time.Now().UTC().Format("20060102")+
+			"AWS4-HMAC-SHA256 Credential="+proxytest.ClientAccessKey+"/"+time.Now().UTC().Format("20060102")+
 				"/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, "+
 				"Signature="+strings.Repeat("0", 64))
 		req.Header.Set("X-Amz-Date", time.Now().UTC().Format("20060102T150405Z"))
@@ -828,7 +555,7 @@ func TestIntegrationAuthentication(t *testing.T) {
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("status %d, want 403", resp.StatusCode)
 		}
-		if body := readBody(t, resp); !strings.Contains(body, "SignatureDoesNotMatch") {
+		if body := proxytest.ReadBody(t, resp); !strings.Contains(body, "SignatureDoesNotMatch") {
 			t.Errorf("body = %q, want SignatureDoesNotMatch", body)
 		}
 	})
@@ -837,15 +564,15 @@ func TestIntegrationAuthentication(t *testing.T) {
 // TestIntegrationRangeRequests covers the mapping from plaintext ranges onto
 // ciphertext chunks, end to end through a real provider.
 func TestIntegrationRangeRequests(t *testing.T) {
-	h := newHarness(t)
+	h := proxytest.New(t)
 	const chunk = 1 << stream.MinLog2ChunkSize
 
-	key := testKey(t, "ranged.bin")
+	key := proxytest.TestKey(t, "ranged.bin")
 	payload := make([]byte, 5*chunk+123)
 	for i := range payload {
 		payload[i] = byte(i*7 + 3)
 	}
-	h.store(t, key, payload)
+	h.Store(t, key, payload)
 	size := int64(len(payload))
 
 	tests := []struct {
@@ -866,20 +593,20 @@ func TestIntegrationRangeRequests(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.spec, func(t *testing.T) {
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.url(key), nil)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.URL(key), nil)
 			if err != nil {
 				t.Fatalf("building request: %v", err)
 			}
 			req.Header.Set("Range", tc.spec)
 
-			resp, err := h.client.Do(req)
+			resp, err := h.Client.Do(req)
 			if err != nil {
 				t.Fatalf("GET: %v", err)
 			}
 			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusPartialContent {
-				t.Fatalf("status %d, want 206: %s", resp.StatusCode, readBody(t, resp))
+				t.Fatalf("status %d, want 206: %s", resp.StatusCode, proxytest.ReadBody(t, resp))
 			}
 			want := fmt.Sprintf("bytes %d-%d/%d", tc.start, tc.end, size)
 			if got := resp.Header.Get("Content-Range"); got != want {
@@ -900,12 +627,12 @@ func TestIntegrationRangeRequests(t *testing.T) {
 		for _, spec := range []string{
 			fmt.Sprintf("bytes=%d-", size), "bytes=abc-def", "bytes=5-2", "items=0-10",
 		} {
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.url(key), nil)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.URL(key), nil)
 			if err != nil {
 				t.Fatalf("building request: %v", err)
 			}
 			req.Header.Set("Range", spec)
-			resp, err := h.client.Do(req)
+			resp, err := h.Client.Do(req)
 			if err != nil {
 				t.Fatalf("GET: %v", err)
 			}
@@ -917,19 +644,19 @@ func TestIntegrationRangeRequests(t *testing.T) {
 	})
 
 	t.Run("a tampered chunk inside a range is detected", func(t *testing.T) {
-		tampered := testKey(t, "range-tampered.bin")
-		h.store(t, tampered, payload)
-		h.rewriteUpstream(t, tampered, func(b []byte) []byte {
+		tampered := proxytest.TestKey(t, "range-tampered.bin")
+		h.Store(t, tampered, payload)
+		h.RewriteUpstream(t, tampered, func(b []byte) []byte {
 			b[stream.HeaderSize+2*(chunk+stream.TagSize)+11] ^= 0x01
 			return b
 		})
 
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.url(tampered), nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.URL(tampered), nil)
 		if err != nil {
 			t.Fatalf("building request: %v", err)
 		}
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", 2*chunk, 2*chunk+50))
-		resp, err := h.client.Do(req)
+		resp, err := h.Client.Do(req)
 		if err != nil {
 			t.Fatalf("GET: %v", err)
 		}
@@ -950,23 +677,23 @@ func TestIntegrationRangeRequests(t *testing.T) {
 // TestIntegrationListing checks that listings report plaintext sizes and hide
 // the gateway's own objects.
 func TestIntegrationListing(t *testing.T) {
-	h := newHarness(t)
+	h := proxytest.New(t)
 	prefix := fmt.Sprintf("listing-test/%d/", time.Now().UnixNano())
 
 	sizes := map[string]int{"a.bin": 100, "b.bin": 4096, "c.bin": 10000}
 	for name, size := range sizes {
-		h.store(t, prefix+name, bytes.Repeat([]byte{1}, size))
+		h.Store(t, prefix+name, bytes.Repeat([]byte{1}, size))
 	}
 
 	// An object under the reserved prefix, written directly, must not appear.
 	hidden := ".blindbucket/m/deadbeef/manifest"
-	if _, err := h.upstream.PutObject(context.Background(), upstream.PutObjectInput{
-		Bucket: testBucket, Key: hidden,
+	if _, err := h.Upstream.PutObject(context.Background(), upstream.PutObjectInput{
+		Bucket: proxytest.Bucket, Key: hidden,
 		Body: strings.NewReader("manifest"), ContentLength: 8,
 	}); err != nil {
 		t.Fatalf("writing the hidden object: %v", err)
 	}
-	t.Cleanup(func() { _ = h.upstream.DeleteObject(context.Background(), testBucket, hidden) })
+	t.Cleanup(func() { _ = h.Upstream.DeleteObject(context.Background(), proxytest.Bucket, hidden) })
 
 	for _, listType := range []string{"2", ""} {
 		name, query := "ListObjectsV2", "?list-type=2&prefix="+url.QueryEscape(prefix)
@@ -975,13 +702,13 @@ func TestIntegrationListing(t *testing.T) {
 		}
 
 		t.Run(name, func(t *testing.T) {
-			resp, err := h.client.Get(h.proxy.URL + "/" + testBucket + query)
+			resp, err := h.Client.Get(h.Server.URL + "/" + proxytest.Bucket + query)
 			if err != nil {
 				t.Fatalf("GET: %v", err)
 			}
 			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status %d: %s", resp.StatusCode, readBody(t, resp))
+				t.Fatalf("status %d: %s", resp.StatusCode, proxytest.ReadBody(t, resp))
 			}
 
 			var result upstream.ListBucketResult
@@ -1006,7 +733,7 @@ func TestIntegrationListing(t *testing.T) {
 	}
 
 	t.Run("the reserved prefix is hidden", func(t *testing.T) {
-		resp, err := h.client.Get(h.proxy.URL + "/" + testBucket + "?list-type=2&prefix=.blindbucket/")
+		resp, err := h.Client.Get(h.Server.URL + "/" + proxytest.Bucket + "?list-type=2&prefix=.blindbucket/")
 		if err != nil {
 			t.Fatalf("GET: %v", err)
 		}
@@ -1025,12 +752,12 @@ func TestIntegrationListing(t *testing.T) {
 // TestIntegrationDeleteObjects covers the bulk delete `aws s3 rm --recursive`
 // uses.
 func TestIntegrationDeleteObjects(t *testing.T) {
-	h := newHarness(t)
+	h := proxytest.New(t)
 	prefix := fmt.Sprintf("bulk-delete/%d/", time.Now().UnixNano())
 
 	keys := []string{prefix + "one", prefix + "two", prefix + "three"}
 	for _, key := range keys {
-		h.store(t, key, []byte("payload"))
+		h.Store(t, key, []byte("payload"))
 	}
 
 	var body strings.Builder
@@ -1041,33 +768,33 @@ func TestIntegrationDeleteObjects(t *testing.T) {
 	body.WriteString("</Delete>")
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-		h.proxy.URL+"/"+testBucket+"?delete", strings.NewReader(body.String()))
+		h.Server.URL+"/"+proxytest.Bucket+"?delete", strings.NewReader(body.String()))
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
-	resp, err := h.client.Do(req)
+	resp, err := h.Client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d: %s", resp.StatusCode, readBody(t, resp))
+		t.Fatalf("status %d: %s", resp.StatusCode, proxytest.ReadBody(t, resp))
 	}
 
 	for _, key := range keys {
-		if _, err := h.upstream.HeadObject(context.Background(), testBucket, key); !upstream.NotFound(err) {
+		if _, err := h.Upstream.HeadObject(context.Background(), proxytest.Bucket, key); !upstream.NotFound(err) {
 			t.Errorf("%s survived the bulk delete", key)
 		}
 	}
 
 	t.Run("the reserved prefix is refused", func(t *testing.T) {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-			h.proxy.URL+"/"+testBucket+"?delete",
+			h.Server.URL+"/"+proxytest.Bucket+"?delete",
 			strings.NewReader("<Delete><Object><Key>.blindbucket/m/x</Key></Object></Delete>"))
 		if err != nil {
 			t.Fatalf("building request: %v", err)
 		}
-		resp, err := h.client.Do(req)
+		resp, err := h.Client.Do(req)
 		if err != nil {
 			t.Fatalf("POST: %v", err)
 		}
@@ -1079,15 +806,15 @@ func TestIntegrationDeleteObjects(t *testing.T) {
 }
 
 func TestIntegrationBucketOperations(t *testing.T) {
-	h := newHarness(t)
+	h := proxytest.New(t)
 
 	t.Run("HeadBucket", func(t *testing.T) {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodHead,
-			h.proxy.URL+"/"+testBucket, nil)
+			h.Server.URL+"/"+proxytest.Bucket, nil)
 		if err != nil {
 			t.Fatalf("building request: %v", err)
 		}
-		resp, err := h.client.Do(req)
+		resp, err := h.Client.Do(req)
 		if err != nil {
 			t.Fatalf("HEAD: %v", err)
 		}
@@ -1098,7 +825,7 @@ func TestIntegrationBucketOperations(t *testing.T) {
 	})
 
 	t.Run("GetBucketLocation", func(t *testing.T) {
-		resp, err := h.client.Get(h.proxy.URL + "/" + testBucket + "?location")
+		resp, err := h.Client.Get(h.Server.URL + "/" + proxytest.Bucket + "?location")
 		if err != nil {
 			t.Fatalf("GET: %v", err)
 		}
@@ -1106,7 +833,7 @@ func TestIntegrationBucketOperations(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("status %d, want 200", resp.StatusCode)
 		}
-		if body := readBody(t, resp); !strings.Contains(body, "LocationConstraint") {
+		if body := proxytest.ReadBody(t, resp); !strings.Contains(body, "LocationConstraint") {
 			t.Errorf("body = %q, want a LocationConstraint document", body)
 		}
 	})

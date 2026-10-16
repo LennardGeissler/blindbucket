@@ -447,5 +447,5 @@ set -a; . ./blindbucket.env; set +a
 The Go integration tests cover the same ground without external clients:
 
 ```sh
-BLINDBUCKET_TEST_S3_ENDPOINT=http://localhost:9002 go test ./internal/proxy ./internal/upstream
+BLINDBUCKET_TEST_S3_ENDPOINT=http://localhost:9002 go test ./internal/proxy/... ./internal/upstream
 ```

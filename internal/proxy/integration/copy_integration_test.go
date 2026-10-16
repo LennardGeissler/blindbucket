@@ -1,4 +1,4 @@
-package proxy
+package integration
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/LennardGeissler/blindbucket/internal/objectmeta"
+	"github.com/LennardGeissler/blindbucket/internal/proxy"
+	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
@@ -25,18 +27,18 @@ func lookupMeta(md map[string]string, want string) string {
 }
 
 // copyTo issues a CopyObject from src to dst through the gateway.
-func (h *harness) copyTo(t *testing.T, src, dst string, headers map[string]string) *http.Response {
+func copyTo(t *testing.T, h *proxytest.Harness, src, dst string, headers map[string]string) *http.Response {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, h.url(dst), nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, h.URL(dst), nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
 	req.ContentLength = 0
-	req.Header.Set("X-Amz-Copy-Source", "/"+testBucket+"/"+src)
+	req.Header.Set("X-Amz-Copy-Source", "/"+proxytest.Bucket+"/"+src)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := h.client.Do(req)
+	resp, err := h.Client.Do(req)
 	if err != nil {
 		t.Fatalf("copy: %v", err)
 	}
@@ -45,22 +47,22 @@ func (h *harness) copyTo(t *testing.T, src, dst string, headers map[string]strin
 	// test that stored it.
 	if dst != src {
 		t.Cleanup(func() {
-			_ = h.upstream.DeleteObject(context.Background(), testBucket, dst)
+			_ = h.Upstream.DeleteObject(context.Background(), proxytest.Bucket, dst)
 		})
 	}
 	return resp
 }
 
 // copyOK copies and fails the test unless the gateway accepted it.
-func (h *harness) copyOK(t *testing.T, src, dst string, headers map[string]string) copyObjectResult {
+func copyOK(t *testing.T, h *proxytest.Harness, src, dst string, headers map[string]string) proxytest.CopyObjectResult {
 	t.Helper()
-	resp := h.copyTo(t, src, dst, headers)
+	resp := copyTo(t, h, src, dst, headers)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("copy returned %d: %s", resp.StatusCode, readBody(t, resp))
+		t.Fatalf("copy returned %d: %s", resp.StatusCode, proxytest.ReadBody(t, resp))
 	}
-	var out copyObjectResult
-	if err := xml.Unmarshal([]byte(readBody(t, resp)), &out); err != nil {
+	var out proxytest.CopyObjectResult
+	if err := xml.Unmarshal([]byte(proxytest.ReadBody(t, resp)), &out); err != nil {
 		t.Fatalf("parsing the copy result: %v", err)
 	}
 	if out.ETag == "" {
@@ -73,12 +75,12 @@ func (h *harness) copyOK(t *testing.T, src, dst string, headers map[string]strin
 //
 // It reads the whole body rather than using readBody, which caps at 4 KiB
 // because it exists for error documents.
-func (h *harness) getOK(t *testing.T, key string) string {
+func getOK(t *testing.T, h *proxytest.Harness, key string) string {
 	t.Helper()
-	resp := h.do(t, http.MethodGet, key)
+	resp := h.Do(t, http.MethodGet, key)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET %s returned %d: %s", key, resp.StatusCode, readBody(t, resp))
+		t.Fatalf("GET %s returned %d: %s", key, resp.StatusCode, proxytest.ReadBody(t, resp))
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -88,9 +90,9 @@ func (h *harness) getOK(t *testing.T, key string) string {
 }
 
 // storedMeta reads blindbucket's own metadata straight off the provider.
-func (h *harness) storedMeta(t *testing.T, key string) objectmeta.Meta {
+func storedMeta(t *testing.T, h *proxytest.Harness, key string) objectmeta.Meta {
 	t.Helper()
-	info, err := h.upstream.HeadObject(context.Background(), testBucket, key)
+	info, err := h.Upstream.HeadObject(context.Background(), proxytest.Bucket, key)
 	if err != nil {
 		t.Fatalf("HEAD %s upstream: %v", key, err)
 	}
@@ -104,18 +106,18 @@ func (h *harness) storedMeta(t *testing.T, key string) objectmeta.Meta {
 // TestIntegrationCopySinglePart is the operation's core claim: the copy reads
 // back as the original, and the original is untouched.
 func TestIntegrationCopySinglePart(t *testing.T) {
-	h := newHarness(t)
-	src, dst := testKey(t, "src.bin"), testKey(t, "dst.bin")
+	h := proxytest.New(t)
+	src, dst := proxytest.TestKey(t, "src.bin"), proxytest.TestKey(t, "dst.bin")
 
 	body := strings.Repeat("copy me, the provider never sees this. ", 500)
-	h.store(t, src, []byte(body))
+	h.Store(t, src, []byte(body))
 
-	h.copyOK(t, src, dst, nil)
+	copyOK(t, h, src, dst, nil)
 
-	if got := h.getOK(t, dst); got != body {
+	if got := getOK(t, h, dst); got != body {
 		t.Errorf("the copy differs from the source (%d vs %d bytes)", len(got), len(body))
 	}
-	if got := h.getOK(t, src); got != body {
+	if got := getOK(t, h, src); got != body {
 		t.Errorf("the source changed during the copy")
 	}
 }
@@ -129,14 +131,14 @@ func TestIntegrationCopySinglePart(t *testing.T) {
 // fail at the next read. Two checks: the destination's wrapped key is not the
 // source's, and pasting the source's back over it makes the object unreadable.
 func TestIntegrationCopyRewrapsTheDataKey(t *testing.T) {
-	h := newHarness(t)
-	src, dst := testKey(t, "src.bin"), testKey(t, "dst.bin")
+	h := proxytest.New(t)
+	src, dst := proxytest.TestKey(t, "src.bin"), proxytest.TestKey(t, "dst.bin")
 
 	body := strings.Repeat("rewrap me. ", 400)
-	h.store(t, src, []byte(body))
-	h.copyOK(t, src, dst, nil)
+	h.Store(t, src, []byte(body))
+	copyOK(t, h, src, dst, nil)
 
-	srcMeta, dstMeta := h.storedMeta(t, src), h.storedMeta(t, dst)
+	srcMeta, dstMeta := storedMeta(t, h, src), storedMeta(t, h, dst)
 	if string(srcMeta.WrappedDEK) == string(dstMeta.WrappedDEK) {
 		t.Fatal("the copy carries the source's wrapped key verbatim; it was not re-wrapped")
 	}
@@ -145,11 +147,11 @@ func TestIntegrationCopyRewrapsTheDataKey(t *testing.T) {
 	// Both are genuine keys this gateway wrote, and they unwrap to the same data
 	// key -- but each only under its own object's identity.
 	ctx := context.Background()
-	info, err := h.upstream.HeadObject(ctx, testBucket, dst)
+	info, err := h.Upstream.HeadObject(ctx, proxytest.Bucket, dst)
 	if err != nil {
 		t.Fatalf("HEAD upstream: %v", err)
 	}
-	get, err := h.upstream.GetObject(ctx, upstream.GetObjectInput{Bucket: testBucket, Key: dst})
+	get, err := h.Upstream.GetObject(ctx, upstream.GetObjectInput{Bucket: proxytest.Bucket, Key: dst})
 	if err != nil {
 		t.Fatalf("GET upstream: %v", err)
 	}
@@ -159,7 +161,7 @@ func TestIntegrationCopyRewrapsTheDataKey(t *testing.T) {
 		t.Fatalf("reading the stored object: %v", err)
 	}
 
-	srcInfo, err := h.upstream.HeadObject(ctx, testBucket, src)
+	srcInfo, err := h.Upstream.HeadObject(ctx, proxytest.Bucket, src)
 	if err != nil {
 		t.Fatalf("HEAD source upstream: %v", err)
 	}
@@ -170,15 +172,15 @@ func TestIntegrationCopyRewrapsTheDataKey(t *testing.T) {
 		}
 		swapped[name] = value
 	}
-	if _, err := h.upstream.PutObject(ctx, upstream.PutObjectInput{
-		Bucket: testBucket, Key: dst,
+	if _, err := h.Upstream.PutObject(ctx, upstream.PutObjectInput{
+		Bucket: proxytest.Bucket, Key: dst,
 		Body: strings.NewReader(string(stored)), ContentLength: int64(len(stored)),
 		Metadata: swapped,
 	}); err != nil {
 		t.Fatalf("writing the swapped object: %v", err)
 	}
 
-	resp := h.do(t, http.MethodGet, dst)
+	resp := h.Do(t, http.MethodGet, dst)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusOK {
 		t.Fatal("the gateway served an object whose wrapped key belongs to a different key; " +
@@ -192,20 +194,20 @@ func TestIntegrationCopyRewrapsTheDataKey(t *testing.T) {
 // under a new id (rule R1), and the size arithmetic reads the part count off the
 // ETag suffix, so a copy flattened into one part would report the wrong size.
 func TestIntegrationCopyMultipart(t *testing.T) {
-	h := newHarness(t)
-	src, dst := testKey(t, "src.bin"), testKey(t, "dst.bin")
+	h := proxytest.New(t)
+	src, dst := proxytest.TestKey(t, "src.bin"), proxytest.TestKey(t, "dst.bin")
 
 	parts := [][]byte{
-		randomBytes(t, testPart),
-		randomBytes(t, testPart),
-		randomBytes(t, 4321), // the last part need not be aligned
+		proxytest.RandomBytes(t, proxytest.TestPart),
+		proxytest.RandomBytes(t, proxytest.TestPart),
+		proxytest.RandomBytes(t, 4321), // the last part need not be aligned
 	}
-	whole := h.mpuStore(t, src, parts)
-	t.Cleanup(func() { _ = h.upstream.DeleteObject(context.Background(), testBucket, src) })
+	whole := h.MpuStore(t, src, parts)
+	t.Cleanup(func() { _ = h.Upstream.DeleteObject(context.Background(), proxytest.Bucket, src) })
 
-	h.copyOK(t, src, dst, nil)
+	copyOK(t, h, src, dst, nil)
 
-	srcMeta, dstMeta := h.storedMeta(t, src), h.storedMeta(t, dst)
+	srcMeta, dstMeta := storedMeta(t, h, src), storedMeta(t, h, dst)
 	if !dstMeta.Multipart {
 		t.Fatal("the copy of a multipart object is not multipart")
 	}
@@ -213,12 +215,12 @@ func TestIntegrationCopyMultipart(t *testing.T) {
 		t.Error("the copy reuses the source's manifest id; rule R1 says it mints a new one")
 	}
 
-	if got := h.getOK(t, dst); got != string(whole) {
+	if got := getOK(t, h, dst); got != string(whole) {
 		t.Errorf("the copy differs from the source (%d vs %d bytes)", len(got), len(whole))
 	}
 	// The listing reports plaintext sizes, which for a multipart object is
 	// recovered from the ETag suffix and the part count.
-	if size := h.list(t, dst); size != int64(len(whole)) {
+	if size := h.List(t, dst); size != int64(len(whole)) {
 		t.Errorf("the listing reports %d bytes for the copy, want %d", size, len(whole))
 	}
 }
@@ -226,24 +228,24 @@ func TestIntegrationCopyMultipart(t *testing.T) {
 // TestIntegrationCopyMovesNoData is the reason to do this inside the provider
 // at all: the bytes never travel through the gateway.
 func TestIntegrationCopyMovesNoData(t *testing.T) {
-	h := newHarness(t)
-	src, dst := testKey(t, "src.bin"), testKey(t, "dst.bin")
-
-	const size = 600_000
-	h.store(t, src, randomBytes(t, size))
-
-	counter := &countingTransport{base: http.DefaultTransport}
-	meteredCfg := upstreamConfig(t)
+	counter := &proxytest.CountingTransport{Base: http.DefaultTransport}
+	meteredCfg := proxytest.UpstreamConfig(t)
 	meteredCfg.HTTPClient = &http.Client{Transport: counter}
 	metered, err := upstream.New(meteredCfg)
 	if err != nil {
 		t.Fatalf("upstream.New: %v", err)
 	}
-	h.gateway.upstream = metered
+	h := proxytest.New(t, func(c *proxy.Config) { c.Upstream = metered })
+	src, dst := proxytest.TestKey(t, "src.bin"), proxytest.TestKey(t, "dst.bin")
 
-	h.copyOK(t, src, dst, nil)
+	const size = 600_000
+	h.Store(t, src, proxytest.RandomBytes(t, size))
 
-	moved := counter.bytes.Load()
+	// Only what the copy moves counts, not the upload before it.
+	counter.Bytes.Store(0)
+	copyOK(t, h, src, dst, nil)
+
+	moved := counter.Bytes.Load()
 	// Generous on purpose: the point is the order of magnitude. A copy that read
 	// and rewrote the body would move at least `size` bytes twice.
 	if moved > size/50 {
@@ -256,11 +258,11 @@ func TestIntegrationCopyMovesNoData(t *testing.T) {
 // TestIntegrationCopyMetadataDirective covers both directives, including the
 // self-copy that S3 clients use to rewrite metadata in place.
 func TestIntegrationCopyMetadataDirective(t *testing.T) {
-	h := newHarness(t)
-	src := testKey(t, "src.bin")
+	h := proxytest.New(t)
+	src := proxytest.TestKey(t, "src.bin")
 	body := []byte("metadata directives")
 
-	resp := h.put(t, src, body, map[string]string{
+	resp := h.Put(t, src, body, map[string]string{
 		"X-Amz-Meta-Origin": "the-source",
 		"Content-Type":      "text/plain",
 	})
@@ -268,13 +270,13 @@ func TestIntegrationCopyMetadataDirective(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT returned %d", resp.StatusCode)
 	}
-	t.Cleanup(func() { _ = h.upstream.DeleteObject(context.Background(), testBucket, src) })
+	t.Cleanup(func() { _ = h.Upstream.DeleteObject(context.Background(), proxytest.Bucket, src) })
 
 	t.Run("COPY keeps the source's metadata", func(t *testing.T) {
-		dst := testKey(t, "copied.bin")
-		h.copyOK(t, src, dst, nil)
+		dst := proxytest.TestKey(t, "copied.bin")
+		copyOK(t, h, src, dst, nil)
 
-		head := h.do(t, http.MethodHead, dst)
+		head := h.Do(t, http.MethodHead, dst)
 		defer func() { _ = head.Body.Close() }()
 		if got := head.Header.Get("x-amz-meta-origin"); got != "the-source" {
 			t.Errorf("user metadata is %q after a COPY, want %q", got, "the-source")
@@ -285,25 +287,25 @@ func TestIntegrationCopyMetadataDirective(t *testing.T) {
 	})
 
 	t.Run("REPLACE takes the request's metadata", func(t *testing.T) {
-		dst := testKey(t, "replaced.bin")
-		h.copyOK(t, src, dst, map[string]string{
+		dst := proxytest.TestKey(t, "replaced.bin")
+		copyOK(t, h, src, dst, map[string]string{
 			"X-Amz-Metadata-Directive": "REPLACE",
 			"X-Amz-Meta-Origin":        "the-request",
 			"Content-Type":             "application/octet-stream",
 		})
 
-		head := h.do(t, http.MethodHead, dst)
+		head := h.Do(t, http.MethodHead, dst)
 		defer func() { _ = head.Body.Close() }()
 		if got := head.Header.Get("x-amz-meta-origin"); got != "the-request" {
 			t.Errorf("user metadata is %q after a REPLACE, want %q", got, "the-request")
 		}
-		if got := h.getOK(t, dst); got != string(body) {
+		if got := getOK(t, h, dst); got != string(body) {
 			t.Error("REPLACE changed the object's content")
 		}
 	})
 
 	t.Run("a self-copy needs REPLACE", func(t *testing.T) {
-		resp := h.copyTo(t, src, src, nil)
+		resp := copyTo(t, h, src, src, nil)
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("a self-copy without REPLACE returned %d, want 400", resp.StatusCode)
@@ -311,23 +313,23 @@ func TestIntegrationCopyMetadataDirective(t *testing.T) {
 	})
 
 	t.Run("a self-copy with REPLACE rewrites metadata in place", func(t *testing.T) {
-		resp := h.copyTo(t, src, src, map[string]string{
+		resp := copyTo(t, h, src, src, map[string]string{
 			"X-Amz-Metadata-Directive": "REPLACE",
 			"X-Amz-Meta-Origin":        "rewritten",
 		})
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("a self-copy with REPLACE returned %d: %s", resp.StatusCode, readBody(t, resp))
+			t.Fatalf("a self-copy with REPLACE returned %d: %s", resp.StatusCode, proxytest.ReadBody(t, resp))
 		}
 
-		head := h.do(t, http.MethodHead, src)
+		head := h.Do(t, http.MethodHead, src)
 		defer func() { _ = head.Body.Close() }()
 		if got := head.Header.Get("x-amz-meta-origin"); got != "rewritten" {
 			t.Errorf("user metadata is %q after an in-place REPLACE, want %q", got, "rewritten")
 		}
 		// The object has to survive its own metadata being rewritten: the wrap
 		// is bound to bucket and key, neither of which a self-copy changes.
-		if got := h.getOK(t, src); got != string(body) {
+		if got := getOK(t, h, src); got != string(body) {
 			t.Error("an in-place metadata rewrite damaged the object")
 		}
 	})
@@ -335,11 +337,11 @@ func TestIntegrationCopyMetadataDirective(t *testing.T) {
 
 // TestIntegrationCopyConditions covers the x-amz-copy-source-if-* preconditions.
 func TestIntegrationCopyConditions(t *testing.T) {
-	h := newHarness(t)
-	src := testKey(t, "src.bin")
-	h.store(t, src, []byte("conditional"))
+	h := proxytest.New(t)
+	src := proxytest.TestKey(t, "src.bin")
+	h.Store(t, src, []byte("conditional"))
 
-	info, err := h.upstream.HeadObject(context.Background(), testBucket, src)
+	info, err := h.Upstream.HeadObject(context.Background(), proxytest.Bucket, src)
 	if err != nil {
 		t.Fatalf("HEAD upstream: %v", err)
 	}
@@ -363,10 +365,10 @@ func TestIntegrationCopyConditions(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			resp := h.copyTo(t, src, testKey(t, "dst.bin"), tc.header)
+			resp := copyTo(t, h, src, proxytest.TestKey(t, "dst.bin"), tc.header)
 			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != tc.want {
-				t.Errorf("returned %d, want %d: %s", resp.StatusCode, tc.want, readBody(t, resp))
+				t.Errorf("returned %d, want %d: %s", resp.StatusCode, tc.want, proxytest.ReadBody(t, resp))
 			}
 		})
 	}
@@ -374,9 +376,9 @@ func TestIntegrationCopyConditions(t *testing.T) {
 
 // TestIntegrationCopyRefusals covers the sources a copy must not accept.
 func TestIntegrationCopyRefusals(t *testing.T) {
-	h := newHarness(t)
-	src := testKey(t, "src.bin")
-	h.store(t, src, []byte("refusals"))
+	h := proxytest.New(t)
+	src := proxytest.TestKey(t, "src.bin")
+	h.Store(t, src, []byte("refusals"))
 
 	cases := []struct {
 		name   string
@@ -384,27 +386,27 @@ func TestIntegrationCopyRefusals(t *testing.T) {
 		want   int
 	}{
 		{"a bucket the credential does not have", "/other-bucket/some-key", http.StatusForbidden},
-		{"the reserved prefix", "/" + testBucket + "/.blindbucket/anything", http.StatusBadRequest},
+		{"the reserved prefix", "/" + proxytest.Bucket + "/.blindbucket/anything", http.StatusBadRequest},
 		{"a malformed source", "not-a-path", http.StatusBadRequest},
-		{"a versioned source", "/" + testBucket + "/" + src + "?versionId=abc", http.StatusNotImplemented},
-		{"a missing source", "/" + testBucket + "/does-not-exist", http.StatusNotFound},
+		{"a versioned source", "/" + proxytest.Bucket + "/" + src + "?versionId=abc", http.StatusNotImplemented},
+		{"a missing source", "/" + proxytest.Bucket + "/does-not-exist", http.StatusNotFound},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodPut,
-				h.url(testKey(t, "dst.bin")), nil)
+				h.URL(proxytest.TestKey(t, "dst.bin")), nil)
 			if err != nil {
 				t.Fatalf("building request: %v", err)
 			}
 			req.ContentLength = 0
 			req.Header.Set("X-Amz-Copy-Source", tc.source)
-			resp, err := h.client.Do(req)
+			resp, err := h.Client.Do(req)
 			if err != nil {
 				t.Fatalf("copy: %v", err)
 			}
 			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != tc.want {
-				t.Errorf("returned %d, want %d: %s", resp.StatusCode, tc.want, readBody(t, resp))
+				t.Errorf("returned %d, want %d: %s", resp.StatusCode, tc.want, proxytest.ReadBody(t, resp))
 			}
 		})
 	}
@@ -413,18 +415,18 @@ func TestIntegrationCopyRefusals(t *testing.T) {
 // TestIntegrationCopyRefusesForeignSource: an object this gateway did not write
 // has no wrapped key, so a copy of it would produce something unreadable.
 func TestIntegrationCopyRefusesForeignSource(t *testing.T) {
-	h := newHarness(t)
-	src := testKey(t, "foreign.bin")
+	h := proxytest.New(t)
+	src := proxytest.TestKey(t, "foreign.bin")
 
-	if _, err := h.upstream.PutObject(context.Background(), upstream.PutObjectInput{
-		Bucket: testBucket, Key: src,
+	if _, err := h.Upstream.PutObject(context.Background(), upstream.PutObjectInput{
+		Bucket: proxytest.Bucket, Key: src,
 		Body: strings.NewReader("not ours"), ContentLength: 8,
 	}); err != nil {
 		t.Fatalf("writing the foreign object: %v", err)
 	}
-	t.Cleanup(func() { _ = h.upstream.DeleteObject(context.Background(), testBucket, src) })
+	t.Cleanup(func() { _ = h.Upstream.DeleteObject(context.Background(), proxytest.Bucket, src) })
 
-	resp := h.copyTo(t, src, testKey(t, "dst.bin"), nil)
+	resp := copyTo(t, h, src, proxytest.TestKey(t, "dst.bin"), nil)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusOK {
 		t.Fatal("the gateway copied an object it did not write")
@@ -432,21 +434,21 @@ func TestIntegrationCopyRefusesForeignSource(t *testing.T) {
 }
 
 // mpuPartCopy fills one part of an open upload from a range of another object.
-func (h *harness) mpuPartCopy(
-	t *testing.T, key, token string, number int, srcKey, rangeSpec string,
+func mpuPartCopy(
+	t *testing.T, h *proxytest.Harness, key, token string, number int, srcKey, rangeSpec string,
 ) *http.Response {
 	t.Helper()
-	target := fmt.Sprintf("%s?partNumber=%d&uploadId=%s", h.url(key), number, urlQueryEscape(token))
+	target := fmt.Sprintf("%s?partNumber=%d&uploadId=%s", h.URL(key), number, proxytest.URLQueryEscape(token))
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, target, nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
 	req.ContentLength = 0
-	req.Header.Set("X-Amz-Copy-Source", "/"+testBucket+"/"+srcKey)
+	req.Header.Set("X-Amz-Copy-Source", "/"+proxytest.Bucket+"/"+srcKey)
 	if rangeSpec != "" {
 		req.Header.Set("X-Amz-Copy-Source-Range", rangeSpec)
 	}
-	resp, err := h.client.Do(req)
+	resp, err := h.Client.Do(req)
 	if err != nil {
 		t.Fatalf("UploadPartCopy: %v", err)
 	}
@@ -454,17 +456,17 @@ func (h *harness) mpuPartCopy(
 }
 
 // copyPartETag issues an UploadPartCopy and returns the ETag from its body.
-func (h *harness) copyPartETag(
-	t *testing.T, key, token string, number int, srcKey, rangeSpec string,
+func copyPartETag(
+	t *testing.T, h *proxytest.Harness, key, token string, number int, srcKey, rangeSpec string,
 ) string {
 	t.Helper()
-	resp := h.mpuPartCopy(t, key, token, number, srcKey, rangeSpec)
+	resp := mpuPartCopy(t, h, key, token, number, srcKey, rangeSpec)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("UploadPartCopy part %d returned %d: %s", number, resp.StatusCode, readBody(t, resp))
+		t.Fatalf("UploadPartCopy part %d returned %d: %s", number, resp.StatusCode, proxytest.ReadBody(t, resp))
 	}
-	var out copyPartResult
-	if err := xml.Unmarshal([]byte(readBody(t, resp)), &out); err != nil {
+	var out proxytest.CopyPartResult
+	if err := xml.Unmarshal([]byte(proxytest.ReadBody(t, resp)), &out); err != nil {
 		t.Fatalf("parsing the copy part result: %v", err)
 	}
 	if out.ETag == "" {
@@ -482,43 +484,43 @@ func (h *harness) copyPartETag(
 // ciphertext cannot be the source's. What must hold is that the plaintext comes
 // back identical.
 func TestIntegrationUploadPartCopy(t *testing.T) {
-	h := newHarness(t)
-	src, dst := testKey(t, "src.bin"), testKey(t, "dst.bin")
+	h := proxytest.New(t)
+	src, dst := proxytest.TestKey(t, "src.bin"), proxytest.TestKey(t, "dst.bin")
 
 	// Two aligned parts and a short remainder, which is the shape the part-size
 	// rules allow (FORMAT §7.3).
-	body := randomBytes(t, testPart*2+4321)
-	h.store(t, src, body)
+	body := proxytest.RandomBytes(t, proxytest.TestPart*2+4321)
+	h.Store(t, src, body)
 
-	token := h.mpuStart(t, dst, nil)
+	token := h.MpuStart(t, dst, nil)
 	parts := []struct{ first, last int }{
-		{0, testPart - 1},
-		{testPart, testPart*2 - 1},
-		{testPart * 2, len(body) - 1},
+		{0, proxytest.TestPart - 1},
+		{proxytest.TestPart, proxytest.TestPart*2 - 1},
+		{proxytest.TestPart * 2, len(body) - 1},
 	}
-	completed := make([]completeReqPart, 0, len(parts))
+	completed := make([]proxytest.CompletedPart, 0, len(parts))
 	for i, part := range parts {
-		etag := h.copyPartETag(t, dst, token, i+1, src,
+		etag := copyPartETag(t, h, dst, token, i+1, src,
 			fmt.Sprintf("bytes=%d-%d", part.first, part.last))
-		completed = append(completed, completeReqPart{PartNumber: i + 1, ETag: etag})
+		completed = append(completed, proxytest.CompletedPart{PartNumber: i + 1, ETag: etag})
 	}
 
-	resp := h.mpuComplete(t, dst, token, completed)
+	resp := h.MpuComplete(t, dst, token, completed)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("completion returned %d: %s", resp.StatusCode, readBody(t, resp))
+		t.Fatalf("completion returned %d: %s", resp.StatusCode, proxytest.ReadBody(t, resp))
 	}
 
-	if got := h.getOK(t, dst); got != string(body) {
+	if got := getOK(t, h, dst); got != string(body) {
 		t.Errorf("the copied object differs from the source (%d vs %d bytes)", len(got), len(body))
 	}
-	if size := h.list(t, dst); size != int64(len(body)) {
+	if size := h.List(t, dst); size != int64(len(body)) {
 		t.Errorf("the listing reports %d bytes, want %d", size, len(body))
 	}
 
 	// The destination is its own object under its own data key, which is the
 	// point of re-encrypting rather than copying bytes.
-	srcMeta, dstMeta := h.storedMeta(t, src), h.storedMeta(t, dst)
+	srcMeta, dstMeta := storedMeta(t, h, src), storedMeta(t, h, dst)
 	if string(srcMeta.WrappedDEK) == string(dstMeta.WrappedDEK) {
 		t.Error("the copied object shares the source's wrapped key")
 	}
@@ -528,30 +530,30 @@ func TestIntegrationUploadPartCopy(t *testing.T) {
 // itself multipart, so the source range crosses segment boundaries the manifest
 // describes.
 func TestIntegrationUploadPartCopyFromMultipart(t *testing.T) {
-	h := newHarness(t)
-	src, dst := testKey(t, "src.bin"), testKey(t, "dst.bin")
+	h := proxytest.New(t)
+	src, dst := proxytest.TestKey(t, "src.bin"), proxytest.TestKey(t, "dst.bin")
 
-	whole := h.mpuStore(t, src, [][]byte{
-		randomBytes(t, testPart),
-		randomBytes(t, testPart),
-		randomBytes(t, 2048),
+	whole := h.MpuStore(t, src, [][]byte{
+		proxytest.RandomBytes(t, proxytest.TestPart),
+		proxytest.RandomBytes(t, proxytest.TestPart),
+		proxytest.RandomBytes(t, 2048),
 	})
-	t.Cleanup(func() { _ = h.upstream.DeleteObject(context.Background(), testBucket, src) })
+	t.Cleanup(func() { _ = h.Upstream.DeleteObject(context.Background(), proxytest.Bucket, src) })
 
 	// One part covering a range that starts inside the source's first segment
 	// and ends inside its second.
-	const first, last = 1000, testPart + 5000
-	token := h.mpuStart(t, dst, nil)
-	etag := h.copyPartETag(t, dst, token, 1, src, fmt.Sprintf("bytes=%d-%d", first, last))
+	const first, last = 1000, proxytest.TestPart + 5000
+	token := h.MpuStart(t, dst, nil)
+	etag := copyPartETag(t, h, dst, token, 1, src, fmt.Sprintf("bytes=%d-%d", first, last))
 
-	resp := h.mpuComplete(t, dst, token, []completeReqPart{{PartNumber: 1, ETag: etag}})
+	resp := h.MpuComplete(t, dst, token, []proxytest.CompletedPart{{PartNumber: 1, ETag: etag}})
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("completion returned %d: %s", resp.StatusCode, readBody(t, resp))
+		t.Fatalf("completion returned %d: %s", resp.StatusCode, proxytest.ReadBody(t, resp))
 	}
 
 	want := string(whole[first : last+1])
-	if got := h.getOK(t, dst); got != want {
+	if got := getOK(t, h, dst); got != want {
 		t.Errorf("the copied range differs (%d bytes vs %d)", len(got), len(want))
 	}
 }
@@ -559,21 +561,21 @@ func TestIntegrationUploadPartCopyFromMultipart(t *testing.T) {
 // TestIntegrationUploadPartCopyWholeObject: without a range, the part is the
 // whole source object.
 func TestIntegrationUploadPartCopyWholeObject(t *testing.T) {
-	h := newHarness(t)
-	src, dst := testKey(t, "src.bin"), testKey(t, "dst.bin")
+	h := proxytest.New(t)
+	src, dst := proxytest.TestKey(t, "src.bin"), proxytest.TestKey(t, "dst.bin")
 
-	body := randomBytes(t, 40_000)
-	h.store(t, src, body)
+	body := proxytest.RandomBytes(t, 40_000)
+	h.Store(t, src, body)
 
-	token := h.mpuStart(t, dst, nil)
-	etag := h.copyPartETag(t, dst, token, 1, src, "")
+	token := h.MpuStart(t, dst, nil)
+	etag := copyPartETag(t, h, dst, token, 1, src, "")
 
-	resp := h.mpuComplete(t, dst, token, []completeReqPart{{PartNumber: 1, ETag: etag}})
+	resp := h.MpuComplete(t, dst, token, []proxytest.CompletedPart{{PartNumber: 1, ETag: etag}})
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("completion returned %d: %s", resp.StatusCode, readBody(t, resp))
+		t.Fatalf("completion returned %d: %s", resp.StatusCode, proxytest.ReadBody(t, resp))
 	}
-	if got := h.getOK(t, dst); got != string(body) {
+	if got := getOK(t, h, dst); got != string(body) {
 		t.Errorf("the copied object differs from the source (%d vs %d bytes)", len(got), len(body))
 	}
 }
@@ -582,18 +584,18 @@ func TestIntegrationUploadPartCopyWholeObject(t *testing.T) {
 // and copying it means reading it. A provider that changed it must not get its
 // bytes laundered into a new object under a valid key.
 func TestIntegrationUploadPartCopyRefusesTamperedSource(t *testing.T) {
-	h := newHarness(t)
-	src, dst := testKey(t, "src.bin"), testKey(t, "dst.bin")
+	h := proxytest.New(t)
+	src, dst := proxytest.TestKey(t, "src.bin"), proxytest.TestKey(t, "dst.bin")
 
-	h.store(t, src, randomBytes(t, 20_000))
-	h.rewriteUpstream(t, src, func(stored []byte) []byte {
+	h.Store(t, src, proxytest.RandomBytes(t, 20_000))
+	h.RewriteUpstream(t, src, func(stored []byte) []byte {
 		modified := append([]byte(nil), stored...)
 		modified[len(modified)/2] ^= 0x01
 		return modified
 	})
 
-	token := h.mpuStart(t, dst, nil)
-	resp := h.mpuPartCopy(t, dst, token, 1, src, "")
+	token := h.MpuStart(t, dst, nil)
+	resp := mpuPartCopy(t, h, dst, token, 1, src, "")
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusOK {
 		t.Fatal("the gateway copied a source that failed authentication")

@@ -1,8 +1,10 @@
 //go:build unix
 
-package proxy
+package integration
 
-import "syscall"
+import (
+	"syscall"
+)
 
 // receiveBuffer returns a dialer Control function that sets the socket's
 // receive buffer before it connects, which is when the size still bounds the

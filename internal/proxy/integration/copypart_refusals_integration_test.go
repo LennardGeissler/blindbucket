@@ -1,4 +1,4 @@
-package proxy
+package integration
 
 import (
 	"context"
@@ -7,16 +7,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
 // partCopy issues an UploadPartCopy with any headers, for the cases mpuPartCopy
 // cannot express: a source other than a key in the test bucket, or conditions.
-func (h *harness) partCopy(
-	t *testing.T, key, token, source string, headers map[string]string,
+func partCopy(
+	t *testing.T, h *proxytest.Harness, key, token, source string, headers map[string]string,
 ) *http.Response {
 	t.Helper()
-	target := fmt.Sprintf("%s?partNumber=1&uploadId=%s", h.url(key), urlQueryEscape(token))
+	target := fmt.Sprintf("%s?partNumber=1&uploadId=%s", h.URL(key), proxytest.URLQueryEscape(token))
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, target, nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
@@ -26,7 +27,7 @@ func (h *harness) partCopy(
 	for name, value := range headers {
 		req.Header.Set(name, value)
 	}
-	resp, err := h.client.Do(req)
+	resp, err := h.Client.Do(req)
 	if err != nil {
 		t.Fatalf("UploadPartCopy: %v", err)
 	}
@@ -38,23 +39,23 @@ func (h *harness) partCopy(
 // part copy that skipped the bucket check would let a credential read any
 // bucket the gateway's upstream credentials can, by copying it into one it may.
 func TestIntegrationUploadPartCopyRefusals(t *testing.T) {
-	h := newHarness(t)
-	src := testKey(t, "src.bin")
-	h.store(t, src, randomBytes(t, 3000))
-	info, err := h.upstream.HeadObject(context.Background(), testBucket, src)
+	h := proxytest.New(t)
+	src := proxytest.TestKey(t, "src.bin")
+	h.Store(t, src, proxytest.RandomBytes(t, 3000))
+	info, err := h.Upstream.HeadObject(context.Background(), proxytest.Bucket, src)
 	if err != nil {
 		t.Fatalf("HEAD upstream: %v", err)
 	}
 	etag := strings.Trim(info.ETag, `"`)
-	source := "/" + testBucket + "/" + src
+	source := "/" + proxytest.Bucket + "/" + src
 
-	foreign := testKey(t, "foreign.bin")
-	if _, err := h.upstream.PutObject(context.Background(), upstream.PutObjectInput{
-		Bucket: testBucket, Key: foreign, Body: strings.NewReader("not ours"), ContentLength: 8,
+	foreign := proxytest.TestKey(t, "foreign.bin")
+	if _, err := h.Upstream.PutObject(context.Background(), upstream.PutObjectInput{
+		Bucket: proxytest.Bucket, Key: foreign, Body: strings.NewReader("not ours"), ContentLength: 8,
 	}); err != nil {
 		t.Fatalf("writing the foreign object: %v", err)
 	}
-	t.Cleanup(func() { _ = h.upstream.DeleteObject(context.Background(), testBucket, foreign) })
+	t.Cleanup(func() { _ = h.Upstream.DeleteObject(context.Background(), proxytest.Bucket, foreign) })
 
 	cases := []struct {
 		name    string
@@ -65,11 +66,11 @@ func TestIntegrationUploadPartCopyRefusals(t *testing.T) {
 	}{
 		{"a bucket the credential does not have", "/other-bucket/some-key", nil,
 			http.StatusForbidden, "AccessDenied"},
-		{"the reserved prefix", "/" + testBucket + "/.blindbucket/anything", nil,
+		{"the reserved prefix", "/" + proxytest.Bucket + "/.blindbucket/anything", nil,
 			http.StatusBadRequest, "InvalidRequest"},
 		{"a malformed source", "not-a-path", nil, http.StatusBadRequest, ""},
-		{"a missing source", "/" + testBucket + "/does-not-exist", nil, http.StatusNotFound, ""},
-		{"an object this gateway did not write", "/" + testBucket + "/" + foreign, nil,
+		{"a missing source", "/" + proxytest.Bucket + "/does-not-exist", nil, http.StatusNotFound, ""},
+		{"an object this gateway did not write", "/" + proxytest.Bucket + "/" + foreign, nil,
 			0, "ObjectNotEncrypted"},
 		{"a failed if-match", source,
 			map[string]string{"X-Amz-Copy-Source-If-Match": strings.Repeat("0", 32)},
@@ -83,11 +84,11 @@ func TestIntegrationUploadPartCopyRefusals(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dst := testKey(t, "dst.bin")
-			token := h.mpuStart(t, dst, nil)
-			resp := h.partCopy(t, dst, token, tc.source, tc.headers)
+			dst := proxytest.TestKey(t, "dst.bin")
+			token := h.MpuStart(t, dst, nil)
+			resp := partCopy(t, h, dst, token, tc.source, tc.headers)
 			defer func() { _ = resp.Body.Close() }()
-			body := readBody(t, resp)
+			body := proxytest.ReadBody(t, resp)
 			if resp.StatusCode == http.StatusOK {
 				t.Fatalf("the part copy was accepted: %s", body)
 			}
@@ -105,30 +106,30 @@ func TestIntegrationUploadPartCopyRefusals(t *testing.T) {
 // destination upload can be gone: an upload id the gateway never issued, and
 // one it issued for an upload that has since been aborted.
 func TestIntegrationUploadPartCopyIntoAnEndedUpload(t *testing.T) {
-	h := newHarness(t)
-	src := testKey(t, "src.bin")
-	h.store(t, src, randomBytes(t, 3000))
-	source := "/" + testBucket + "/" + src
+	h := proxytest.New(t)
+	src := proxytest.TestKey(t, "src.bin")
+	h.Store(t, src, proxytest.RandomBytes(t, 3000))
+	source := "/" + proxytest.Bucket + "/" + src
 
 	t.Run("an upload id the gateway never issued", func(t *testing.T) {
-		dst := testKey(t, "dst.bin")
-		resp := h.partCopy(t, dst, "not-a-sealed-token", source, nil)
+		dst := proxytest.TestKey(t, "dst.bin")
+		resp := partCopy(t, h, dst, "not-a-sealed-token", source, nil)
 		defer func() { _ = resp.Body.Close() }()
-		if body := readBody(t, resp); resp.StatusCode != http.StatusNotFound ||
+		if body := proxytest.ReadBody(t, resp); resp.StatusCode != http.StatusNotFound ||
 			!strings.Contains(body, "NoSuchUpload") {
 			t.Errorf("returned %d: %s", resp.StatusCode, body)
 		}
 	})
 
 	t.Run("an aborted upload", func(t *testing.T) {
-		dst := testKey(t, "dst.bin")
-		token := h.mpuStart(t, dst, nil)
+		dst := proxytest.TestKey(t, "dst.bin")
+		token := h.MpuStart(t, dst, nil)
 		abort, err := http.NewRequestWithContext(t.Context(), http.MethodDelete,
-			h.url(dst)+"?uploadId="+urlQueryEscape(token), nil)
+			h.URL(dst)+"?uploadId="+proxytest.URLQueryEscape(token), nil)
 		if err != nil {
 			t.Fatalf("building request: %v", err)
 		}
-		resp, err := h.client.Do(abort)
+		resp, err := h.Client.Do(abort)
 		if err != nil {
 			t.Fatalf("abort: %v", err)
 		}
@@ -139,9 +140,9 @@ func TestIntegrationUploadPartCopyIntoAnEndedUpload(t *testing.T) {
 
 		// The token still opens -- it is sealed, not looked up -- so this is
 		// the provider saying the upload is gone, passed on as what it means.
-		resp = h.partCopy(t, dst, token, source, nil)
+		resp = partCopy(t, h, dst, token, source, nil)
 		defer func() { _ = resp.Body.Close() }()
-		if body := readBody(t, resp); resp.StatusCode != http.StatusNotFound ||
+		if body := proxytest.ReadBody(t, resp); resp.StatusCode != http.StatusNotFound ||
 			!strings.Contains(body, "NoSuchUpload") {
 			t.Errorf("returned %d: %s", resp.StatusCode, body)
 		}
@@ -153,7 +154,7 @@ func TestIntegrationUploadPartCopyIntoAnEndedUpload(t *testing.T) {
 // range past its end, a single-part source whose range starts mid-object so its
 // header is fetched on its own -- and checked on its own -- and an empty one.
 func TestIntegrationUploadPartCopySourceEdges(t *testing.T) {
-	h := newHarness(t)
+	h := proxytest.New(t)
 	flipAt := func(offset int) func([]byte) []byte {
 		return func(stored []byte) []byte {
 			modified := append([]byte(nil), stored...)
@@ -163,12 +164,12 @@ func TestIntegrationUploadPartCopySourceEdges(t *testing.T) {
 	}
 
 	t.Run("a tampered multipart source", func(t *testing.T) {
-		src := testKey(t, "mpu-src.bin")
-		h.mpuStore(t, src, [][]byte{randomBytes(t, testPart), randomBytes(t, 50_000)})
-		h.rewriteUpstream(t, src, flipAt(10)) // inside the first part's header
+		src := proxytest.TestKey(t, "mpu-src.bin")
+		h.MpuStore(t, src, [][]byte{proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, 50_000)})
+		h.RewriteUpstream(t, src, flipAt(10)) // inside the first part's header
 
-		dst := testKey(t, "dst.bin")
-		resp := h.mpuPartCopy(t, dst, h.mpuStart(t, dst, nil), 1, src, "")
+		dst := proxytest.TestKey(t, "dst.bin")
+		resp := mpuPartCopy(t, h, dst, h.MpuStart(t, dst, nil), 1, src, "")
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == http.StatusOK {
 			t.Fatal("a multipart source that failed authentication was copied")
@@ -176,12 +177,12 @@ func TestIntegrationUploadPartCopySourceEdges(t *testing.T) {
 	})
 
 	t.Run("a tampered header under a mid-object range", func(t *testing.T) {
-		src := testKey(t, "src.bin")
-		h.store(t, src, randomBytes(t, 300_000))
-		h.rewriteUpstream(t, src, flipAt(10))
+		src := proxytest.TestKey(t, "src.bin")
+		h.Store(t, src, proxytest.RandomBytes(t, 300_000))
+		h.RewriteUpstream(t, src, flipAt(10))
 
-		dst := testKey(t, "dst.bin")
-		resp := h.mpuPartCopy(t, dst, h.mpuStart(t, dst, nil), 1, src, "bytes=200000-299999")
+		dst := proxytest.TestKey(t, "dst.bin")
+		resp := mpuPartCopy(t, h, dst, h.MpuStart(t, dst, nil), 1, src, "bytes=200000-299999")
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == http.StatusOK {
 			t.Fatal("a range was copied from a source whose header failed authentication")
@@ -189,44 +190,44 @@ func TestIntegrationUploadPartCopySourceEdges(t *testing.T) {
 	})
 
 	t.Run("a range past the end of a multipart source", func(t *testing.T) {
-		src := testKey(t, "mpu-src.bin")
-		h.mpuStore(t, src, [][]byte{randomBytes(t, testPart), randomBytes(t, 1000)})
+		src := proxytest.TestKey(t, "mpu-src.bin")
+		h.MpuStore(t, src, [][]byte{proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, 1000)})
 
-		dst := testKey(t, "dst.bin")
-		resp := h.mpuPartCopy(t, dst, h.mpuStart(t, dst, nil), 1, src,
-			fmt.Sprintf("bytes=%d-%d", testPart*3, testPart*3+10))
+		dst := proxytest.TestKey(t, "dst.bin")
+		resp := mpuPartCopy(t, h, dst, h.MpuStart(t, dst, nil), 1, src,
+			fmt.Sprintf("bytes=%d-%d", proxytest.TestPart*3, proxytest.TestPart*3+10))
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusRequestedRangeNotSatisfiable {
-			t.Errorf("returned %d, want 416: %s", resp.StatusCode, readBody(t, resp))
+			t.Errorf("returned %d, want 416: %s", resp.StatusCode, proxytest.ReadBody(t, resp))
 		}
 	})
 
 	// No position permits an empty part (ADR-008), so refuse it on arrival
 	// without storing a part or replacing a previous, usable attempt.
 	t.Run("an empty source", func(t *testing.T) {
-		src := testKey(t, "empty.bin")
-		h.store(t, src, nil)
+		src := proxytest.TestKey(t, "empty.bin")
+		h.Store(t, src, nil)
 
-		dst := testKey(t, "dst.bin")
-		token := h.mpuStart(t, dst, nil)
-		resp := h.mpuPartCopy(t, dst, token, 1, src, "")
+		dst := proxytest.TestKey(t, "dst.bin")
+		token := h.MpuStart(t, dst, nil)
+		resp := mpuPartCopy(t, h, dst, token, 1, src, "")
 		defer func() { _ = resp.Body.Close() }()
-		h.requireEmptyPartRefused(t, dst, token, resp, nil)
+		requireEmptyPartRefused(t, h, dst, token, resp, nil)
 
-		small := testKey(t, "small.bin")
-		h.store(t, small, []byte("x"))
-		etag := h.copyPartETag(t, dst, token, 1, small, "")
-		before := h.storedParts(t, dst, token)
-		retry := h.mpuPartCopy(t, dst, token, 1, src, "")
+		small := proxytest.TestKey(t, "small.bin")
+		h.Store(t, small, []byte("x"))
+		etag := copyPartETag(t, h, dst, token, 1, small, "")
+		before := storedParts(t, h, dst, token)
+		retry := mpuPartCopy(t, h, dst, token, 1, src, "")
 		defer func() { _ = retry.Body.Close() }()
-		h.requireEmptyPartRefused(t, dst, token, retry, before)
+		requireEmptyPartRefused(t, h, dst, token, retry, before)
 
-		done := h.mpuComplete(t, dst, token, []completeReqPart{{PartNumber: 1, ETag: etag}})
+		done := h.MpuComplete(t, dst, token, []proxytest.CompletedPart{{PartNumber: 1, ETag: etag}})
 		defer func() { _ = done.Body.Close() }()
 		if done.StatusCode != http.StatusOK {
-			t.Fatalf("completion returned %d: %s", done.StatusCode, readBody(t, done))
+			t.Fatalf("completion returned %d: %s", done.StatusCode, proxytest.ReadBody(t, done))
 		}
-		if got := h.getOK(t, dst); got != "x" {
+		if got := getOK(t, h, dst); got != "x" {
 			t.Errorf("the retained last part reads back as %q, want x", got)
 		}
 	})

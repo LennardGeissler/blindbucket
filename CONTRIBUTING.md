@@ -89,10 +89,10 @@ without them**, so a green `go test ./...` is not proof that you ran everything:
 ```sh
 make test                  # unit tests, -race
 
-# Against a provider — internal/upstream, internal/proxy, internal/probe:
+# Against a provider -- the gateway's suite in internal/proxy/integration, and
+# the tests of rotate, migrate, scrub, gc, probe and upstream:
 docker compose up -d
-BLINDBUCKET_TEST_S3_ENDPOINT=http://localhost:9002 \
-  go test ./internal/upstream ./internal/proxy ./internal/probe
+BLINDBUCKET_TEST_S3_ENDPOINT=http://localhost:9002 go test ./internal/...
 
 # Against Vault and a KMS emulator — internal/rootkey:
 docker compose --profile keys up -d
@@ -149,7 +149,7 @@ running. Garage, the second provider CI runs against, comes up in one command:
 
 ```sh
 eval "$(test/providers/garage.sh)"      # start it and export the variables
-go test ./internal/upstream ./internal/proxy ./internal/probe
+go test ./internal/...
 test/providers/garage.sh stop
 ```
 

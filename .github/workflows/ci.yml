@@ -229,7 +229,8 @@ jobs:
       # coverage is measured, and without MinIO the proxy's tests skip.
       # -coverpkg counts a line in any package as covered by a test in any
       # other, and names only production code: the test helpers under
-      # internal/testprovider and test/ are not what the number is about.
+      # internal/testprovider, internal/proxy/proxytest and test/ are not
+      # what the number is about.
       - name: Run the integration tests, measuring coverage
         env:
           BLINDBUCKET_TEST_S3_ENDPOINT: http://localhost:9002
@@ -237,7 +238,7 @@ jobs:
           BLINDBUCKET_TEST_VAULT_TOKEN: blindbucket-dev-token
           BLINDBUCKET_TEST_KMS_ENDPOINT: http://localhost:4599
         run: |
-          pkgs=$(go list ./... | grep -v -e /internal/testprovider -e /test/ | paste -sd, -)
+          pkgs=$(go list ./... | grep -v -e /internal/testprovider -e /proxytest -e /test/ | paste -sd, -)
           go test -race -count=1 -coverpkg="$pkgs" -coverprofile=coverage.out ./...
       # The floor sits a little under the measured value, so it catches a
       # change that drops tests rather than one that adds untested lines. The

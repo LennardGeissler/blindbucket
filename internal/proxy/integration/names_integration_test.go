@@ -1,4 +1,4 @@
-package proxy
+package integration
 
 import (
 	"bytes"
@@ -12,32 +12,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
 	"github.com/LennardGeissler/blindbucket/internal/manifest"
+	"github.com/LennardGeissler/blindbucket/internal/proxy"
+	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
 	"github.com/LennardGeissler/blindbucket/internal/rotate"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
-// withEncryptedNames turns object-name encryption on for a harness, and hands
-// back the encrypter so a test can check what the provider was addressed with.
-func withEncryptedNames(t *testing.T) (func(*Config), *names.Encrypter) {
-	t.Helper()
-	key := make([]byte, names.KeySize)
-	if _, err := rand.Read(key); err != nil {
-		t.Fatalf("rand: %v", err)
-	}
-	enc, err := names.New(key)
-	if err != nil {
-		t.Fatalf("names.New: %v", err)
-	}
-	return func(cfg *Config) { cfg.Names = enc }, enc
-}
-
 // TestEncryptedNamesRoundTripThroughTheGateway is the whole point of the slice:
 // a client uses ordinary keys, and the provider never sees one.
 func TestEncryptedNamesRoundTripThroughTheGateway(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 	ctx := context.Background()
 
 	const key = "photos/2026/03/holiday.jpg"
@@ -47,19 +33,19 @@ func TestEncryptedNamesRoundTripThroughTheGateway(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncryptKey: %v", err)
 	}
-	h.cleanupStored(t, stored)
+	h.CleanupStored(t, stored)
 
-	resp := h.put(t, key, body, nil)
+	resp := h.Put(t, key, body, nil)
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT returned %d", resp.StatusCode)
 	}
 
 	// The provider holds it under the encrypted name, and under nothing else.
-	if _, err := h.upstream.HeadObject(ctx, testBucket, stored); err != nil {
+	if _, err := h.Upstream.HeadObject(ctx, proxytest.Bucket, stored); err != nil {
 		t.Fatalf("the object is not at its encrypted key upstream: %v", err)
 	}
-	if _, err := h.upstream.HeadObject(ctx, testBucket, key); err == nil {
+	if _, err := h.Upstream.HeadObject(ctx, proxytest.Bucket, key); err == nil {
 		t.Error("the object is also stored under its plaintext key")
 	}
 	for _, segment := range strings.Split(key, "/") {
@@ -69,27 +55,27 @@ func TestEncryptedNamesRoundTripThroughTheGateway(t *testing.T) {
 	}
 
 	// GET, HEAD and DELETE all reach it by the plaintext key.
-	get := h.do(t, http.MethodGet, key)
+	get := h.Do(t, http.MethodGet, key)
 	defer func() { _ = get.Body.Close() }()
 	if get.StatusCode != http.StatusOK {
-		t.Fatalf("GET returned %d: %s", get.StatusCode, readBody(t, get))
+		t.Fatalf("GET returned %d: %s", get.StatusCode, proxytest.ReadBody(t, get))
 	}
 	if got := readBodyBytes(t, get); !bytes.Equal(got, body) {
 		t.Errorf("GET returned %d bytes, want %d", len(got), len(body))
 	}
 
-	head := h.do(t, http.MethodHead, key)
+	head := h.Do(t, http.MethodHead, key)
 	_ = head.Body.Close()
 	if head.StatusCode != http.StatusOK {
 		t.Fatalf("HEAD returned %d", head.StatusCode)
 	}
 
-	del := h.do(t, http.MethodDelete, key)
+	del := h.Do(t, http.MethodDelete, key)
 	_ = del.Body.Close()
 	if del.StatusCode != http.StatusNoContent {
 		t.Fatalf("DELETE returned %d", del.StatusCode)
 	}
-	if _, err := h.upstream.HeadObject(ctx, testBucket, stored); err == nil {
+	if _, err := h.Upstream.HeadObject(ctx, proxytest.Bucket, stored); err == nil {
 		t.Error("DELETE left the object at its encrypted key")
 	}
 }
@@ -97,8 +83,8 @@ func TestEncryptedNamesRoundTripThroughTheGateway(t *testing.T) {
 // TestEncryptedNamesServeRanges: a range read makes a HEAD and one or two GETs,
 // and every one of them has to address the same encrypted key.
 func TestEncryptedNamesServeRanges(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 
 	const key = "logs/2026/app.log"
 	body := make([]byte, 200_000)
@@ -109,9 +95,9 @@ func TestEncryptedNamesServeRanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncryptKey: %v", err)
 	}
-	h.cleanupStored(t, stored)
+	h.CleanupStored(t, stored)
 
-	resp := h.put(t, key, body, nil)
+	resp := h.Put(t, key, body, nil)
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT returned %d", resp.StatusCode)
@@ -120,18 +106,18 @@ func TestEncryptedNamesServeRanges(t *testing.T) {
 	// Deliberately far enough in that the header is not adjacent to the range,
 	// which is the two-request path.
 	const start, end = 150_000, 150_999
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.url(key), nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.URL(key), nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
 	req.Header.Set("Range", "bytes=150000-150999")
-	get, err := h.client.Do(req)
+	get, err := h.Client.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
 	defer func() { _ = get.Body.Close() }()
 	if get.StatusCode != http.StatusPartialContent {
-		t.Fatalf("ranged GET returned %d: %s", get.StatusCode, readBody(t, get))
+		t.Fatalf("ranged GET returned %d: %s", get.StatusCode, proxytest.ReadBody(t, get))
 	}
 	if got := readBodyBytes(t, get); !bytes.Equal(got, body[start:end+1]) {
 		t.Errorf("the ranged read returned the wrong %d bytes", len(got))
@@ -142,11 +128,11 @@ func TestEncryptedNamesServeRanges(t *testing.T) {
 // provider must see exactly the key the client used, or every existing
 // deployment would lose its objects on upgrade.
 func TestPlaintextNamesAreUnchanged(t *testing.T) {
-	h := newHarness(t)
+	h := proxytest.New(t)
 	const key = "photos/2026/03/holiday.jpg"
-	h.store(t, key, []byte("hello"))
+	h.Store(t, key, []byte("hello"))
 
-	if _, err := h.upstream.HeadObject(context.Background(), testBucket, key); err != nil {
+	if _, err := h.Upstream.HeadObject(context.Background(), proxytest.Bucket, key); err != nil {
 		t.Fatalf("with names off the object is not at its plaintext key: %v", err)
 	}
 }
@@ -163,14 +149,14 @@ func readBodyBytes(t *testing.T, resp *http.Response) []byte {
 // listQuery sends a raw listing query and returns the status, the raw body and
 // the parsed result. It closes the response itself, so that a test asserting on
 // a refusal has nothing left to leak.
-func (h *harness) listQuery(t *testing.T, query string) (int, string, upstream.ListBucketResult) {
+func listQuery(t *testing.T, h *proxytest.Harness, query string) (int, string, upstream.ListBucketResult) {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
-		h.proxy.URL+"/"+testBucket+"?"+query, nil)
+		h.Server.URL+"/"+proxytest.Bucket+"?"+query, nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
-	resp, err := h.client.Do(req)
+	resp, err := h.Client.Do(req)
 	if err != nil {
 		t.Fatalf("GET listing: %v", err)
 	}
@@ -191,8 +177,8 @@ func (h *harness) listQuery(t *testing.T, query string) (int, string, upstream.L
 // because a listing out of order makes `aws s3 sync --delete` delete objects
 // that exist.
 func TestEncryptedListingIsInTheClientsOrder(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 
 	// Enough keys that agreement between the two orders would be a coincidence.
 	plain := []string{
@@ -206,15 +192,15 @@ func TestEncryptedListingIsInTheClientsOrder(t *testing.T) {
 			t.Fatalf("EncryptKey: %v", err)
 		}
 		stored = append(stored, s)
-		resp := h.put(t, key, []byte("x"), nil)
+		resp := h.Put(t, key, []byte("x"), nil)
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("PUT %s returned %d", key, resp.StatusCode)
 		}
-		h.cleanupStored(t, s)
+		h.CleanupStored(t, s)
 	}
 
-	status, body, got := h.listQuery(t, "list-type=2&prefix=docs/")
+	status, body, got := listQuery(t, h, "list-type=2&prefix=docs/")
 	if status != http.StatusOK {
 		t.Fatalf("listing returned %d: %s", status, body)
 	}
@@ -240,20 +226,20 @@ func TestEncryptedListingIsInTheClientsOrder(t *testing.T) {
 // TestEncryptedListingGroupsOnDelimiter: the '/' separators survive encryption,
 // so the provider's own grouping lines up with the plaintext one.
 func TestEncryptedListingGroupsOnDelimiter(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 
 	for _, key := range []string{"tree/a/1.txt", "tree/b/1.txt", "tree/top.txt"} {
 		s, err := enc.EncryptKey(key)
 		if err != nil {
 			t.Fatalf("EncryptKey: %v", err)
 		}
-		resp := h.put(t, key, []byte("x"), nil)
+		resp := h.Put(t, key, []byte("x"), nil)
 		_ = resp.Body.Close()
-		h.cleanupStored(t, s)
+		h.CleanupStored(t, s)
 	}
 
-	status, body, got := h.listQuery(t, "list-type=2&prefix=tree/&delimiter=/")
+	status, body, got := listQuery(t, h, "list-type=2&prefix=tree/&delimiter=/")
 	if status != http.StatusOK {
 		t.Fatalf("listing returned %d: %s", status, body)
 	}
@@ -272,17 +258,17 @@ func TestEncryptedListingGroupsOnDelimiter(t *testing.T) {
 // TestEncryptedListingRefusesWhatItCannotSort covers the two shapes that stay
 // refused, because they are the ones no amount of buffering answers.
 func TestEncryptedListingRefusesWhatItCannotSort(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 
 	for _, key := range []string{"many/a.txt", "many/b.txt", "many/c.txt"} {
 		stored, err := enc.EncryptKey(key)
 		if err != nil {
 			t.Fatalf("EncryptKey: %v", err)
 		}
-		resp := h.put(t, key, []byte("x"), nil)
+		resp := h.Put(t, key, []byte("x"), nil)
 		_ = resp.Body.Close()
-		h.cleanupStored(t, stored)
+		h.CleanupStored(t, stored)
 	}
 
 	for _, tc := range []struct{ name, query, wants string }{
@@ -292,7 +278,7 @@ func TestEncryptedListingRefusesWhatItCannotSort(t *testing.T) {
 		{"another delimiter", "list-type=2&delimiter=-", "one separator that survives"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			status, body, _ := h.listQuery(t, tc.query)
+			status, body, _ := listQuery(t, h, tc.query)
 			if status != http.StatusNotImplemented {
 				t.Fatalf("returned %d, want 501: %s", status, body)
 			}
@@ -306,8 +292,8 @@ func TestEncryptedListingRefusesWhatItCannotSort(t *testing.T) {
 // TestEncryptedListingRefusesAPrefixPastTheBound: past the bound the answer is
 // an error naming the limit, never a listing in an order the client cannot use.
 func TestEncryptedListingRefusesAPrefixPastTheBound(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option, func(cfg *Config) { cfg.MaxListingKeys = 3 })
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option, func(cfg *proxy.Config) { cfg.MaxListingKeys = 3 })
 
 	for i := range 5 {
 		key := fmt.Sprintf("bounded/%02d.txt", i)
@@ -315,12 +301,12 @@ func TestEncryptedListingRefusesAPrefixPastTheBound(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EncryptKey: %v", err)
 		}
-		resp := h.put(t, key, []byte("x"), nil)
+		resp := h.Put(t, key, []byte("x"), nil)
 		_ = resp.Body.Close()
-		h.cleanupStored(t, stored)
+		h.CleanupStored(t, stored)
 	}
 
-	status, body, _ := h.listQuery(t, "list-type=2&prefix=bounded/")
+	status, body, _ := listQuery(t, h, "list-type=2&prefix=bounded/")
 	if status != http.StatusNotImplemented {
 		t.Fatalf("returned %d, want 501: %s", status, body)
 	}
@@ -337,8 +323,8 @@ func TestEncryptedListingRefusesAPrefixPastTheBound(t *testing.T) {
 // resume point is the last key served, which the client hands back -- as a
 // continuation token for v2, as a marker for v1.
 func TestEncryptedListingPaginates(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 
 	var want []string
 	for i := range 11 {
@@ -348,9 +334,9 @@ func TestEncryptedListingPaginates(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EncryptKey: %v", err)
 		}
-		resp := h.put(t, key, []byte("x"), nil)
+		resp := h.Put(t, key, []byte("x"), nil)
 		_ = resp.Body.Close()
-		h.cleanupStored(t, stored)
+		h.CleanupStored(t, stored)
 	}
 
 	t.Run("v2 continuation token", func(t *testing.T) {
@@ -360,7 +346,7 @@ func TestEncryptedListingPaginates(t *testing.T) {
 			if page > 20 {
 				t.Fatal("the listing did not terminate")
 			}
-			status, body, result := h.listQuery(t, query)
+			status, body, result := listQuery(t, h, query)
 			if status != http.StatusOK {
 				t.Fatalf("page %d returned %d: %s", page, status, body)
 			}
@@ -391,7 +377,7 @@ func TestEncryptedListingPaginates(t *testing.T) {
 			if page > 20 {
 				t.Fatal("the listing did not terminate")
 			}
-			status, body, result := h.listQuery(t, query)
+			status, body, result := listQuery(t, h, query)
 			if status != http.StatusOK {
 				t.Fatalf("page %d returned %d: %s", page, status, body)
 			}
@@ -414,7 +400,7 @@ func TestEncryptedListingPaginates(t *testing.T) {
 	// start-after is a plaintext key, and it is the cursor spelled the way a
 	// client spells it when it picks its own resume point.
 	t.Run("start-after", func(t *testing.T) {
-		status, body, result := h.listQuery(t,
+		status, body, result := listQuery(t, h,
 			"list-type=2&prefix=paged/&start-after="+url.QueryEscape("paged/08.txt"))
 		if status != http.StatusOK {
 			t.Fatalf("returned %d: %s", status, body)
@@ -437,8 +423,8 @@ func TestEncryptedListingPaginates(t *testing.T) {
 // the failure was loud rather than silent, but key rotation could not run at all
 // against a bucket with encrypted names.
 func TestEncryptedNamesRotate(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 
 	const key = "rotate/me/please.bin"
 	body := bytes.Repeat([]byte("rotate"), 900)
@@ -446,18 +432,18 @@ func TestEncryptedNamesRotate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncryptKey: %v", err)
 	}
-	h.cleanupStored(t, stored)
+	h.CleanupStored(t, stored)
 
-	resp := h.put(t, key, body, nil)
+	resp := h.Put(t, key, body, nil)
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT returned %d", resp.StatusCode)
 	}
-	before := h.objectKID(t, stored)
+	before := h.ObjectKID(t, stored)
 
 	// The rotation is given the same encrypter the gateway serves with, and a
 	// prefix in the client's namespace -- both of which it has to map itself.
-	cfg := h.rotateConfig(t, "rotate/me/")
+	cfg := h.RotateConfig(t, "rotate/me/")
 	cfg.Names = enc
 	result, err := rotate.Run(t.Context(), cfg)
 	if err != nil {
@@ -468,16 +454,16 @@ func TestEncryptedNamesRotate(t *testing.T) {
 			result.Rotated, result.Failed, result.Scanned)
 	}
 
-	if after := h.objectKID(t, stored); after == before {
+	if after := h.ObjectKID(t, stored); after == before {
 		t.Errorf("the object is still wrapped under %q", after)
 	}
 
 	// The point of the test: it still reads back through the gateway, which
 	// unwraps with the plaintext key as associated data.
-	get := h.do(t, http.MethodGet, key)
+	get := h.Do(t, http.MethodGet, key)
 	defer func() { _ = get.Body.Close() }()
 	if get.StatusCode != http.StatusOK {
-		t.Fatalf("GET after rotation returned %d: %s", get.StatusCode, readBody(t, get))
+		t.Fatalf("GET after rotation returned %d: %s", get.StatusCode, proxytest.ReadBody(t, get))
 	}
 	if got := readBodyBytes(t, get); !bytes.Equal(got, body) {
 		t.Errorf("the rotated object came back as %d bytes, want %d", len(got), len(body))
@@ -488,10 +474,10 @@ func TestEncryptedNamesRotate(t *testing.T) {
 // client's namespace and has to map, so it carries the same '/' boundary rule a
 // listing does.
 func TestEncryptedNamesRotateRefusesAPartialPrefix(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 
-	cfg := h.rotateConfig(t, "rotate/me")
+	cfg := h.RotateConfig(t, "rotate/me")
 	cfg.Names = enc
 	if _, err := rotate.Run(t.Context(), cfg); err == nil {
 		t.Fatal("a prefix not ending on a '/' boundary was accepted")
@@ -507,38 +493,38 @@ func TestEncryptedNamesRotateRefusesAPartialPrefix(t *testing.T) {
 // key it stores, and the manifest is bound to the stored key and lives at the
 // hash of it.
 func TestEncryptedNamesMultipartRoundTrip(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 	ctx := context.Background()
 
 	const key = "big/2026/archive.tar"
-	parts := [][]byte{randomBytes(t, testPart), randomBytes(t, testPart), randomBytes(t, 4321)}
+	parts := [][]byte{proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, 4321)}
 	stored, err := enc.EncryptKey(key)
 	if err != nil {
 		t.Fatalf("EncryptKey: %v", err)
 	}
-	h.cleanupStored(t, stored)
+	h.CleanupStored(t, stored)
 
-	whole := h.mpuStore(t, key, parts)
+	whole := h.MpuStore(t, key, parts)
 
 	// Stored where the mapping says, and nowhere else.
-	if _, err := h.upstream.HeadObject(ctx, testBucket, stored); err != nil {
+	if _, err := h.Upstream.HeadObject(ctx, proxytest.Bucket, stored); err != nil {
 		t.Fatalf("the object is not at its encrypted key upstream: %v", err)
 	}
-	if _, err := h.upstream.HeadObject(ctx, testBucket, key); err == nil {
+	if _, err := h.Upstream.HeadObject(ctx, proxytest.Bucket, key); err == nil {
 		t.Error("the object is also stored under its plaintext key")
 	}
 
 	// The manifest hangs off the stored key, which is what keeps gc free of the
 	// name key. Reading it by the plaintext key must find nothing.
-	if _, id := h.manifestKeyOf(t, stored); id == (manifest.ID{}) {
+	if _, id := h.ManifestKeyOf(t, stored); id == (manifest.ID{}) {
 		t.Error("no manifest was written for the multipart object")
 	}
 
-	get := h.do(t, http.MethodGet, key)
+	get := h.Do(t, http.MethodGet, key)
 	defer func() { _ = get.Body.Close() }()
 	if get.StatusCode != http.StatusOK {
-		t.Fatalf("GET returned %d: %s", get.StatusCode, readBody(t, get))
+		t.Fatalf("GET returned %d: %s", get.StatusCode, proxytest.ReadBody(t, get))
 	}
 	if got := readBodyBytes(t, get); !bytes.Equal(got, whole) {
 		t.Errorf("GET returned %d bytes, want %d", len(got), len(whole))
@@ -549,33 +535,33 @@ func TestEncryptedNamesMultipartRoundTrip(t *testing.T) {
 // path that loads the manifest and then fetches byte ranges of the object --
 // two different addresses derived from one client key.
 func TestEncryptedNamesMultipartRange(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 
 	const key = "big/ranged.bin"
-	parts := [][]byte{randomBytes(t, testPart), randomBytes(t, testPart)}
+	parts := [][]byte{proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, proxytest.TestPart)}
 	stored, err := enc.EncryptKey(key)
 	if err != nil {
 		t.Fatalf("EncryptKey: %v", err)
 	}
-	h.cleanupStored(t, stored)
+	h.CleanupStored(t, stored)
 
-	whole := h.mpuStore(t, key, parts)
+	whole := h.MpuStore(t, key, parts)
 
 	// Straddling the boundary between part one and part two.
-	start, end := testPart-500, testPart+499
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.url(key), nil)
+	start, end := proxytest.TestPart-500, proxytest.TestPart+499
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.URL(key), nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
-	get, err := h.client.Do(req)
+	get, err := h.Client.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
 	defer func() { _ = get.Body.Close() }()
 	if get.StatusCode != http.StatusPartialContent {
-		t.Fatalf("ranged GET returned %d: %s", get.StatusCode, readBody(t, get))
+		t.Fatalf("ranged GET returned %d: %s", get.StatusCode, proxytest.ReadBody(t, get))
 	}
 	if got := readBodyBytes(t, get); !bytes.Equal(got, whole[start:end+1]) {
 		t.Errorf("the ranged read returned the wrong %d bytes", len(got))
@@ -585,8 +571,8 @@ func TestEncryptedNamesMultipartRange(t *testing.T) {
 // TestEncryptedNamesCopyObject covers CopyObject, where objcopy copies the
 // ciphertext inside the provider and only re-wraps the data key.
 func TestEncryptedNamesCopyObject(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 	ctx := context.Background()
 
 	const src, dst = "copy/src/small.bin", "copy/dst/small.bin"
@@ -595,23 +581,23 @@ func TestEncryptedNamesCopyObject(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EncryptKey: %v", err)
 		}
-		h.cleanupStored(t, stored)
+		h.CleanupStored(t, stored)
 	}
 
-	want := randomBytes(t, 4096)
-	h.store(t, src, want)
+	want := proxytest.RandomBytes(t, 4096)
+	h.Store(t, src, want)
 
-	resp := h.copyTo(t, src, dst, nil)
-	body := readBody(t, resp)
+	resp := copyTo(t, h, src, dst, nil)
+	body := proxytest.ReadBody(t, resp)
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("copy returned %d: %s", resp.StatusCode, body)
 	}
 
-	get := h.do(t, http.MethodGet, dst)
+	get := h.Do(t, http.MethodGet, dst)
 	defer func() { _ = get.Body.Close() }()
 	if get.StatusCode != http.StatusOK {
-		t.Fatalf("GET of the copy returned %d: %s", get.StatusCode, readBody(t, get))
+		t.Fatalf("GET of the copy returned %d: %s", get.StatusCode, proxytest.ReadBody(t, get))
 	}
 	if got := readBodyBytes(t, get); !bytes.Equal(got, want) {
 		t.Errorf("the copy is %d bytes, want %d", len(got), len(want))
@@ -621,10 +607,10 @@ func TestEncryptedNamesCopyObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncryptKey: %v", err)
 	}
-	if _, err := h.upstream.HeadObject(ctx, testBucket, storedDst); err != nil {
+	if _, err := h.Upstream.HeadObject(ctx, proxytest.Bucket, storedDst); err != nil {
 		t.Errorf("the copy is not at its encrypted key: %v", err)
 	}
-	if _, err := h.upstream.HeadObject(ctx, testBucket, dst); err == nil {
+	if _, err := h.Upstream.HeadObject(ctx, proxytest.Bucket, dst); err == nil {
 		t.Error("the copy is also stored under its plaintext key")
 	}
 }
@@ -642,8 +628,8 @@ func TestEncryptedNamesCopyObject(t *testing.T) {
 // The source is itself multipart, so the read crosses a segment boundary the
 // manifest describes and exercises the manifest lookup as well.
 func TestEncryptedNamesUploadPartCopy(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 
 	const src, dst = "copy/src/big.bin", "copy/dst/big.bin"
 	for _, key := range []string{src, dst} {
@@ -651,29 +637,29 @@ func TestEncryptedNamesUploadPartCopy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EncryptKey: %v", err)
 		}
-		h.cleanupStored(t, stored)
+		h.CleanupStored(t, stored)
 	}
 
-	whole := h.mpuStore(t, src, [][]byte{
-		randomBytes(t, testPart), randomBytes(t, testPart), randomBytes(t, 2048),
+	whole := h.MpuStore(t, src, [][]byte{
+		proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, 2048),
 	})
 
 	// A range starting inside the source's first segment and ending inside its
 	// second, which is where the separate-header fetch happens too.
-	const first, last = 1000, testPart + 5000
-	token := h.mpuStart(t, dst, nil)
-	etag := h.copyPartETag(t, dst, token, 1, src, fmt.Sprintf("bytes=%d-%d", first, last))
+	const first, last = 1000, proxytest.TestPart + 5000
+	token := h.MpuStart(t, dst, nil)
+	etag := copyPartETag(t, h, dst, token, 1, src, fmt.Sprintf("bytes=%d-%d", first, last))
 
-	resp := h.mpuComplete(t, dst, token, []completeReqPart{{PartNumber: 1, ETag: etag}})
+	resp := h.MpuComplete(t, dst, token, []proxytest.CompletedPart{{PartNumber: 1, ETag: etag}})
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("completion returned %d", resp.StatusCode)
 	}
 
-	get := h.do(t, http.MethodGet, dst)
+	get := h.Do(t, http.MethodGet, dst)
 	defer func() { _ = get.Body.Close() }()
 	if get.StatusCode != http.StatusOK {
-		t.Fatalf("GET of the copy returned %d: %s", get.StatusCode, readBody(t, get))
+		t.Fatalf("GET of the copy returned %d: %s", get.StatusCode, proxytest.ReadBody(t, get))
 	}
 	if got := readBodyBytes(t, get); !bytes.Equal(got, whole[first:last+1]) {
 		t.Errorf("the copied range is %d bytes, want %d", len(got), last-first+1)
@@ -689,11 +675,11 @@ func TestEncryptedNamesUploadPartCopy(t *testing.T) {
 // read-after-write consistent since 2020 and clients lean on it, so a listing
 // that a write has overtaken is a wrong answer, not a stale one.
 func TestEncryptedListingIsReadAfterWriteConsistent(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 
 	// The listing that populates the cache: the prefix is empty.
-	status, body, first := h.listQuery(t, "list-type=2&prefix=rw/")
+	status, body, first := listQuery(t, h, "list-type=2&prefix=rw/")
 	if status != http.StatusOK {
 		t.Fatalf("the first listing returned %d: %s", status, body)
 	}
@@ -706,15 +692,15 @@ func TestEncryptedListingIsReadAfterWriteConsistent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EncryptKey: %v", err)
 		}
-		resp := h.put(t, key, []byte("x"), nil)
+		resp := h.Put(t, key, []byte("x"), nil)
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("PUT %s returned %d", key, resp.StatusCode)
 		}
-		h.cleanupStored(t, stored)
+		h.CleanupStored(t, stored)
 	}
 
-	status, body, second := h.listQuery(t, "list-type=2&prefix=rw/")
+	status, body, second := listQuery(t, h, "list-type=2&prefix=rw/")
 	if status != http.StatusOK {
 		t.Fatalf("the second listing returned %d: %s", status, body)
 	}
@@ -732,8 +718,8 @@ func TestEncryptedListingIsReadAfterWriteConsistent(t *testing.T) {
 // no promise that keys written during a paginated listing turn up in it, and
 // serving every page from one snapshot is what a client expects.
 func TestEncryptedListingContinuationUsesOneSnapshot(t *testing.T) {
-	option, enc := withEncryptedNames(t)
-	h := newHarness(t, option)
+	option, enc := proxytest.WithEncryptedNames(t)
+	h := proxytest.New(t, option)
 
 	var want []string
 	for i := range 6 {
@@ -743,12 +729,12 @@ func TestEncryptedListingContinuationUsesOneSnapshot(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EncryptKey: %v", err)
 		}
-		resp := h.put(t, key, []byte("x"), nil)
+		resp := h.Put(t, key, []byte("x"), nil)
 		_ = resp.Body.Close()
-		h.cleanupStored(t, stored)
+		h.CleanupStored(t, stored)
 	}
 
-	status, body, page1 := h.listQuery(t, "list-type=2&prefix=snap/&max-keys=3")
+	status, body, page1 := listQuery(t, h, "list-type=2&prefix=snap/&max-keys=3")
 	if status != http.StatusOK {
 		t.Fatalf("page 1 returned %d: %s", status, body)
 	}
@@ -763,15 +749,15 @@ func TestEncryptedListingContinuationUsesOneSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncryptKey: %v", err)
 	}
-	resp := h.put(t, intruder, []byte("x"), nil)
+	resp := h.Put(t, intruder, []byte("x"), nil)
 	_ = resp.Body.Close()
-	h.cleanupStored(t, stored)
+	h.CleanupStored(t, stored)
 
 	var got []string
 	for _, e := range page1.Contents {
 		got = append(got, e.Key)
 	}
-	status, body, page2 := h.listQuery(t,
+	status, body, page2 := listQuery(t, h,
 		"list-type=2&prefix=snap/&max-keys=3&continuation-token="+
 			url.QueryEscape(page1.NextContinuationToken))
 	if status != http.StatusOK {

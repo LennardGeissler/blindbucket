@@ -1,4 +1,4 @@
-package proxy
+package integration
 
 import (
 	"bytes"
@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
@@ -25,9 +26,9 @@ func plainPut(keyPart string) func(*http.Request) bool {
 	}
 }
 
-func (h *harness) absentUpstream(t *testing.T, key string) {
+func absentUpstream(t *testing.T, h *proxytest.Harness, key string) {
 	t.Helper()
-	if _, err := h.upstream.HeadObject(context.Background(), testBucket, key); !upstream.NotFound(err) {
+	if _, err := h.Upstream.HeadObject(context.Background(), proxytest.Bucket, key); !upstream.NotFound(err) {
 		t.Errorf("%s exists at the provider after a failed write (err %v)", key, err)
 	}
 }
@@ -40,12 +41,12 @@ func TestFaultPutObjectLeavesNothing(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFaultyProvider(t)
-			h := newHarness(t, f.option(t))
-			key := testKey(t, "put.bin")
+			h := proxytest.New(t, f.option(t))
+			key := proxytest.TestKey(t, "put.bin")
 			rule.match = plainPut(key)
 			f.fail(rule)
 
-			resp := h.put(t, key, randomBytes(t, 200_000), nil)
+			resp := h.Put(t, key, proxytest.RandomBytes(t, 200_000), nil)
 			_ = resp.Body.Close()
 			if resp.StatusCode < 500 {
 				t.Errorf("a failed upstream write answered %d", resp.StatusCode)
@@ -53,7 +54,7 @@ func TestFaultPutObjectLeavesNothing(t *testing.T) {
 			if f.hits(rule) == 0 {
 				t.Fatal("the fault was never reached")
 			}
-			h.absentUpstream(t, key)
+			absentUpstream(t, h, key)
 		})
 	}
 }
@@ -63,39 +64,39 @@ func TestFaultPutObjectLeavesNothing(t *testing.T) {
 // then, so the only honest signal left is a broken connection.
 func TestFaultGetObjectIsCutOff(t *testing.T) {
 	f := newFaultyProvider(t)
-	h := newHarness(t, f.option(t))
+	h := proxytest.New(t, f.option(t))
 
 	for name, tc := range map[string]struct {
 		store func(key string) []byte
 		rng   string
 	}{
 		"a single-part object": {func(key string) []byte {
-			body := randomBytes(t, 300_000)
-			h.store(t, key, body)
+			body := proxytest.RandomBytes(t, 300_000)
+			h.Store(t, key, body)
 			return body
 		}, ""},
 		"a range of one": {func(key string) []byte {
-			body := randomBytes(t, 300_000)
-			h.store(t, key, body)
+			body := proxytest.RandomBytes(t, 300_000)
+			h.Store(t, key, body)
 			return body[1000:250_000]
 		}, "bytes=1000-249999"},
 		"a multipart object": {func(key string) []byte {
-			return h.mpuStore(t, key, [][]byte{randomBytes(t, testPart), randomBytes(t, 70_000)})
+			return h.MpuStore(t, key, [][]byte{proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, 70_000)})
 		}, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			key := testKey(t, "cut.bin")
+			key := proxytest.TestKey(t, "cut.bin")
 			want := tc.store(key)
 			rule := f.fail(&fault{match: objectRequest(http.MethodGet, key), times: 1, cutAfter: 100_000})
 
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.url(key), nil)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.URL(key), nil)
 			if err != nil {
 				t.Fatalf("request: %v", err)
 			}
 			if tc.rng != "" {
 				req.Header.Set("Range", tc.rng)
 			}
-			resp, err := h.client.Do(req)
+			resp, err := h.Client.Do(req)
 			if err != nil {
 				t.Fatalf("GET: %v", err)
 			}
@@ -115,7 +116,7 @@ func TestFaultGetObjectIsCutOff(t *testing.T) {
 			}
 
 			// And the object itself is untouched: the next read is whole.
-			if back := h.getOK(t, key); back != string(want) && tc.rng == "" {
+			if back := getOK(t, h, key); back != string(want) && tc.rng == "" {
 				t.Error("the object does not read back whole after a cut-off download")
 			}
 		})
@@ -127,7 +128,7 @@ func TestFaultGetObjectIsCutOff(t *testing.T) {
 // manifest observed as visible is ever deleted.
 func TestFaultCompleteMultipartUpload(t *testing.T) {
 	parts := func(t *testing.T) [][]byte {
-		return [][]byte{randomBytes(t, testPart), randomBytes(t, 40_000)}
+		return [][]byte{proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, 40_000)}
 	}
 
 	for name, step := range map[string]func(key string) *fault{
@@ -143,21 +144,21 @@ func TestFaultCompleteMultipartUpload(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFaultyProvider(t)
-			h := newHarness(t, f.option(t))
-			key := testKey(t, "mpu.bin")
+			h := proxytest.New(t, f.option(t))
+			key := proxytest.TestKey(t, "mpu.bin")
 			body := parts(t)
 			whole := append(append([]byte{}, body[0]...), body[1]...)
 
-			token := h.mpuStart(t, key, nil)
-			var done []completeReqPart
+			token := h.MpuStart(t, key, nil)
+			var done []proxytest.CompletedPart
 			for i, part := range body {
-				etag, resp := h.mpuPart(t, key, token, i+1, part)
+				etag, resp := h.MpuPart(t, key, token, i+1, part)
 				_ = resp.Body.Close()
-				done = append(done, completeReqPart{PartNumber: i + 1, ETag: etag})
+				done = append(done, proxytest.CompletedPart{PartNumber: i + 1, ETag: etag})
 			}
 
 			rule := f.fail(step(key))
-			resp := h.mpuComplete(t, key, token, done)
+			resp := h.MpuComplete(t, key, token, done)
 			_ = resp.Body.Close()
 			if f.hits(rule) == 0 {
 				t.Fatal("the fault was never reached")
@@ -167,15 +168,15 @@ func TestFaultCompleteMultipartUpload(t *testing.T) {
 			}
 			// Not visible: a visible multipart object without its manifest is
 			// the unreadable state the model exists to rule out.
-			h.absentUpstream(t, key)
+			absentUpstream(t, h, key)
 
 			// The upload is still open, and the same completion finishes it.
-			resp = h.mpuComplete(t, key, token, done)
+			resp = h.MpuComplete(t, key, token, done)
 			_ = resp.Body.Close()
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("retrying the completion returned %d", resp.StatusCode)
 			}
-			if got := h.getOK(t, key); got != string(whole) {
+			if got := getOK(t, h, key); got != string(whole) {
 				t.Error("the object does not read back after a retried completion")
 			}
 		})
@@ -187,34 +188,34 @@ func TestFaultCompleteMultipartUpload(t *testing.T) {
 // orphan gc will collect -- so the client is told it succeeded, and it did.
 func TestFaultReplacedManifestIsLeftForGC(t *testing.T) {
 	f := newFaultyProvider(t)
-	h := newHarness(t, f.option(t))
-	key := testKey(t, "replaced.bin")
-	h.mpuStore(t, key, [][]byte{randomBytes(t, testPart), randomBytes(t, 1000)})
-	oldManifest, _ := h.manifestKeyOf(t, key)
+	h := proxytest.New(t, f.option(t))
+	key := proxytest.TestKey(t, "replaced.bin")
+	h.MpuStore(t, key, [][]byte{proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, 1000)})
+	oldManifest, _ := h.ManifestKeyOf(t, key)
 
 	rule := f.fail(&fault{match: manifestRequest(http.MethodDelete), times: 1, status: 500})
-	second := h.mpuStore(t, key, [][]byte{randomBytes(t, testPart), randomBytes(t, 2000)})
+	second := h.MpuStore(t, key, [][]byte{proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, 2000)})
 	if f.hits(rule) == 0 {
 		t.Fatal("the fault was never reached")
 	}
-	if got := h.getOK(t, key); got != string(second) {
+	if got := getOK(t, h, key); got != string(second) {
 		t.Error("the replacing object does not read back")
 	}
-	if _, err := h.upstream.HeadObject(context.Background(), testBucket, oldManifest); err != nil {
+	if _, err := h.Upstream.HeadObject(context.Background(), proxytest.Bucket, oldManifest); err != nil {
 		t.Errorf("the old manifest is gone although its delete failed: %v", err)
 	}
-	h.cleanupStored(t, oldManifest)
+	h.CleanupStored(t, oldManifest)
 }
 
 func TestFaultUploadPartCanBeRetried(t *testing.T) {
 	f := newFaultyProvider(t)
-	h := newHarness(t, f.option(t))
-	key := testKey(t, "part-retry.bin")
-	body := randomBytes(t, testPart)
+	h := proxytest.New(t, f.option(t))
+	key := proxytest.TestKey(t, "part-retry.bin")
+	body := proxytest.RandomBytes(t, proxytest.TestPart)
 
-	token := h.mpuStart(t, key, nil)
+	token := h.MpuStart(t, key, nil)
 	rule := f.fail(&fault{match: objectRequest(http.MethodPut, key, "partNumber"), times: 1, drop: true})
-	_, resp := h.mpuPart(t, key, token, 1, body)
+	_, resp := h.MpuPart(t, key, token, 1, body)
 	_ = resp.Body.Close()
 	if f.hits(rule) == 0 {
 		t.Fatal("the fault was never reached")
@@ -223,32 +224,32 @@ func TestFaultUploadPartCanBeRetried(t *testing.T) {
 		t.Fatal("a part whose upload failed was acknowledged")
 	}
 
-	etag, resp := h.mpuPart(t, key, token, 1, body)
+	etag, resp := h.MpuPart(t, key, token, 1, body)
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("the retried part returned %d", resp.StatusCode)
 	}
-	resp = h.mpuComplete(t, key, token, []completeReqPart{{PartNumber: 1, ETag: etag}})
+	resp = h.MpuComplete(t, key, token, []proxytest.CompletedPart{{PartNumber: 1, ETag: etag}})
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("completion after a retried part returned %d", resp.StatusCode)
 	}
-	if got := h.getOK(t, key); got != string(body) {
+	if got := getOK(t, h, key); got != string(body) {
 		t.Error("the object does not read back after a retried part")
 	}
 }
 
 func TestFaultCreateMultipartUploadIsRefused(t *testing.T) {
 	f := newFaultyProvider(t)
-	h := newHarness(t, f.option(t))
-	key := testKey(t, "create.bin")
+	h := proxytest.New(t, f.option(t))
+	key := proxytest.TestKey(t, "create.bin")
 	rule := f.fail(&fault{match: objectRequest(http.MethodPost, key, "uploads"), status: 500})
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.url(key)+"?uploads", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.URL(key)+"?uploads", nil)
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
-	resp, err := h.client.Do(req)
+	resp, err := h.Client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -263,14 +264,14 @@ func TestFaultCreateMultipartUploadIsRefused(t *testing.T) {
 
 func TestFaultCopyObjectLeavesNoDestination(t *testing.T) {
 	f := newFaultyProvider(t)
-	h := newHarness(t, f.option(t))
-	src, dst := testKey(t, "src.bin"), testKey(t, "dst.bin")
-	h.store(t, src, []byte("copied, or not"))
+	h := proxytest.New(t, f.option(t))
+	src, dst := proxytest.TestKey(t, "src.bin"), proxytest.TestKey(t, "dst.bin")
+	h.Store(t, src, []byte("copied, or not"))
 
 	rule := f.fail(&fault{match: func(r *http.Request) bool {
 		return r.Method == http.MethodPut && r.Header.Get("X-Amz-Copy-Source") != ""
 	}, status: 500})
-	resp := h.copyTo(t, src, dst, nil)
+	resp := copyTo(t, h, src, dst, nil)
 	_ = resp.Body.Close()
 	if f.hits(rule) == 0 {
 		t.Fatal("the fault was never reached")
@@ -278,32 +279,32 @@ func TestFaultCopyObjectLeavesNoDestination(t *testing.T) {
 	if resp.StatusCode == http.StatusOK {
 		t.Fatal("a failed copy was reported as done")
 	}
-	h.absentUpstream(t, dst)
-	if got := h.getOK(t, src); got != "copied, or not" {
+	absentUpstream(t, h, dst)
+	if got := getOK(t, h, src); got != "copied, or not" {
 		t.Error("the source was changed by a failed copy")
 	}
 }
 
 func TestFaultDeleteAndListAreReported(t *testing.T) {
 	f := newFaultyProvider(t)
-	h := newHarness(t, f.option(t))
-	key := testKey(t, "kept.bin")
-	h.store(t, key, []byte("still here"))
+	h := proxytest.New(t, f.option(t))
+	key := proxytest.TestKey(t, "kept.bin")
+	h.Store(t, key, []byte("still here"))
 
 	rule := f.fail(&fault{match: objectRequest(http.MethodDelete, key), times: 1, status: 500})
-	resp := h.do(t, http.MethodDelete, key)
+	resp := h.Do(t, http.MethodDelete, key)
 	_ = resp.Body.Close()
 	if f.hits(rule) == 0 || resp.StatusCode < 500 {
 		t.Errorf("a failed delete answered %d (fault reached: %t)", resp.StatusCode, f.hits(rule) > 0)
 	}
-	if got := h.getOK(t, key); got != "still here" {
+	if got := getOK(t, h, key); got != "still here" {
 		t.Error("the object is gone after a delete that failed")
 	}
 
 	list := f.fail(&fault{match: func(r *http.Request) bool {
 		return r.Method == http.MethodGet && r.URL.Query().Has("list-type")
 	}, times: 1, status: 500})
-	status, body, _ := h.listQuery(t, "list-type=2")
+	status, body, _ := listQuery(t, h, "list-type=2")
 	if f.hits(list) == 0 || status < 500 {
 		t.Errorf("a failed listing answered %d: %s", status, body)
 	}
@@ -319,20 +320,20 @@ func TestFaultDeleteAndListAreReported(t *testing.T) {
 // the outranked one; the AWS workflow meets the real thing.
 func TestFaultDiscardedCompletionKeepsTheVisibleManifest(t *testing.T) {
 	f := newFaultyProvider(t)
-	h := newHarness(t, f.option(t), withFreshness(t))
-	key := testKey(t, "discarded.bin")
-	visible := h.mpuStore(t, key, [][]byte{randomBytes(t, testPart), randomBytes(t, 10)})
-	visibleManifest, _ := h.manifestKeyOf(t, key)
+	h := proxytest.New(t, f.option(t), proxytest.WithFreshness(t))
+	key := proxytest.TestKey(t, "discarded.bin")
+	visible := h.MpuStore(t, key, [][]byte{proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, 10)})
+	visibleManifest, _ := h.ManifestKeyOf(t, key)
 
-	token := h.mpuStart(t, key, nil)
-	etag, resp := h.mpuPart(t, key, token, 1, randomBytes(t, 1000))
+	token := h.MpuStart(t, key, nil)
+	etag, resp := h.MpuPart(t, key, token, 1, proxytest.RandomBytes(t, 1000))
 	_ = resp.Body.Close()
 	rule := f.fail(&fault{
 		match: objectRequest(http.MethodPost, key, "uploadId"),
 		acknowledge: `<?xml version="1.0" encoding="UTF-8"?>` +
 			`<CompleteMultipartUploadResult><ETag>"discarded-1"</ETag></CompleteMultipartUploadResult>`,
 	})
-	resp = h.mpuComplete(t, key, token, []completeReqPart{{PartNumber: 1, ETag: etag}})
+	resp = h.MpuComplete(t, key, token, []proxytest.CompletedPart{{PartNumber: 1, ETag: etag}})
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("the acknowledged completion answered %d", resp.StatusCode)
@@ -341,10 +342,10 @@ func TestFaultDiscardedCompletionKeepsTheVisibleManifest(t *testing.T) {
 		t.Fatal("the fault was never reached")
 	}
 
-	if _, err := h.upstream.HeadObject(t.Context(), testBucket, visibleManifest); err != nil {
+	if _, err := h.Upstream.HeadObject(t.Context(), proxytest.Bucket, visibleManifest); err != nil {
 		t.Errorf("the manifest of the version still visible was deleted: %v", err)
 	}
-	if got := h.mustRead(t, key, "after a discarded completion"); !bytes.Equal(got, visible) {
+	if got := h.MustRead(t, key, "after a discarded completion"); !bytes.Equal(got, visible) {
 		t.Error("the visible object reads differently after a discarded completion")
 	}
 }

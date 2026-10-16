@@ -10,9 +10,9 @@ import (
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
-// The behaviour against a provider is in internal/proxy, where a gateway on
-// either side of the switch can be run: migrate_integration_test.go. What is
-// here needs neither.
+// The behaviour against a provider is in migrate_integration_test.go, which
+// runs a gateway on either side of the switch through
+// internal/proxy/proxytest. What is here needs neither.
 
 func TestRunRefusesAnIncompleteConfig(t *testing.T) {
 	client, err := upstream.New(upstream.Config{

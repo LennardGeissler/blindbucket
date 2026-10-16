@@ -1,4 +1,4 @@
-package proxy
+package integration
 
 import (
 	"errors"
@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/LennardGeissler/blindbucket/internal/proxy"
+	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
 	"github.com/LennardGeissler/blindbucket/internal/s3api"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
@@ -146,16 +148,16 @@ func (f *faultyProvider) hits(rule *fault) int {
 
 // option gives a harness's gateway the faulty provider as its transport, with
 // retries off so that one injected failure is one failure the gateway sees.
-func (f *faultyProvider) option(t *testing.T) func(*Config) {
+func (f *faultyProvider) option(t *testing.T) func(*proxy.Config) {
 	t.Helper()
-	cfg := upstreamConfig(t)
+	cfg := proxytest.UpstreamConfig(t)
 	cfg.HTTPClient = &http.Client{Transport: f}
 	cfg.MaxRetries = 1
 	client, err := upstream.New(cfg)
 	if err != nil {
 		t.Fatalf("upstream.New: %v", err)
 	}
-	return func(c *Config) { c.Upstream = client }
+	return func(c *proxy.Config) { c.Upstream = client }
 }
 
 // cutBody ends a response body early with an error.

@@ -1,4 +1,4 @@
-package proxy
+package integration
 
 import (
 	"bytes"
@@ -7,9 +7,10 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/LennardGeissler/blindbucket/internal/obs"
+	"github.com/LennardGeissler/blindbucket/internal/proxy"
+	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // TestIntegrationGzipEncodedObjectReadsBack: an object a client stores with
@@ -22,8 +23,8 @@ import (
 // decompresses only the gzip it asked for itself.
 func TestIntegrationGzipEncodedObjectReadsBack(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	h := newHarness(t, func(cfg *Config) { cfg.Metrics = obs.NewMetrics(reg, obs.MetricsConfig{}) })
-	prefix := scrubPrefix(t)
+	h := proxytest.New(t, func(cfg *proxy.Config) { cfg.Metrics = obs.NewMetrics(reg, obs.MetricsConfig{}) })
+	prefix := proxytest.ScrubPrefix(t)
 	key := prefix + "page.html.gz"
 
 	var compressed bytes.Buffer
@@ -36,23 +37,23 @@ func TestIntegrationGzipEncodedObjectReadsBack(t *testing.T) {
 	}
 	plaintext := compressed.Bytes()
 
-	resp := h.put(t, key, plaintext, map[string]string{
+	resp := h.Put(t, key, plaintext, map[string]string{
 		"Content-Type": "text/html", "Content-Encoding": "gzip",
 	})
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT returned %d", resp.StatusCode)
 	}
-	h.cleanupStored(t, key)
+	h.CleanupStored(t, key)
 
 	// The client's own transport would gunzip the response just as the
 	// gateway's did; asking for identity keeps the bytes as stored.
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.url(key), nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.URL(key), nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
 	req.Header.Set("Accept-Encoding", "identity")
-	got, err := h.client.Do(req)
+	got, err := h.Client.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -87,7 +88,7 @@ func TestIntegrationGzipEncodedObjectReadsBack(t *testing.T) {
 		}
 	}
 
-	result := h.scrub(t, h.scrubConfig(prefix))
+	result := h.Scrub(t, h.ScrubConfig(prefix))
 	if result.Scanned != 1 || result.Verified != 1 || result.Incomplete() {
 		t.Errorf("scrub: scanned %d, verified %d, failed %d, unreadable %d; want 1 verified (findings: %+v)",
 			result.Scanned, result.Verified, result.Failed, result.Errors, result.Findings)
