@@ -439,9 +439,8 @@ everything else works.
 ```sh
 docker compose up -d
 make build
-export BLINDBUCKET_PASSPHRASE=...
-./bin/blindbucket keygen --out keyring.json
-# fill in blindbucket.yaml, then:
+./bin/blindbucket init                       # or --non-interactive, see CONTRIBUTING.md
+set -a; . ./blindbucket.env; set +a
 ./bin/blindbucket serve --config blindbucket.yaml
 ```
 

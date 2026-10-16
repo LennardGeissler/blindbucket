@@ -16,6 +16,12 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Added
+
+- **`blindbucket init` sets a gateway up in one step.** It writes a configuration, a keyring and `blindbucket.env` into one directory, asking only what it cannot default: the provider (with presets for MinIO, AWS S3, Cloudflare R2, Backblaze B2 and Garage), the bucket, the provider's credentials, the root-key source and whether names are encrypted. A first run is now `init`, loading the environment file, and `serve` ([ADR-030](docs/adr/ADR-030-init.md)).
+- **Nothing is overwritten, and nothing that opens the keyring is stored beside it.** If any of the three files exists, `init` writes none of them. The passphrase, a Vault token and KMS keys stay out of `blindbucket.env`; the summary names what `serve` still needs from the environment. The keyring is written last, so a failed seal removes the other two files and never a keyring.
+- **`init --non-interactive` for scripts.** It never asks: a missing answer is an error naming the flag or variable that supplies it, and secrets come from the environment, never from flags. The CI job that runs the AWS CLI and boto3 now starts its gateways from the configuration it writes.
+
 ## [1.3.0] — 2026-10-14
 
 **Upgrade recommended** where clients use AWS CLI 2.38 or later, or store objects with

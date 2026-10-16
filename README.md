@@ -228,18 +228,24 @@ plaintext hop never crosses a network interface.
 docker compose up -d                         # MinIO on :9002, as a stand-in provider
 make build
 
-export BLINDBUCKET_PASSPHRASE='...'          # or --passphrase-file, or you are prompted
-./bin/blindbucket keygen --out keyring.json --kid 2026-09
-
-cp blindbucket.example.yaml blindbucket.yaml
-export UPSTREAM_ACCESS_KEY_ID=minioadmin UPSTREAM_SECRET_ACCESS_KEY=minioadmin
+./bin/blindbucket init                       # MinIO is the default; the bucket is blindbucket-dev
+set -a; . ./blindbucket.env; set +a          # the provider's and the client's credentials
 ./bin/blindbucket serve --config blindbucket.yaml
 ```
 
-Then point any S3 client at it. Nothing about the client changes except the
-endpoint:
+`init` asks for what it cannot default — the provider (MinIO's key and secret
+are `minioadmin`), the bucket, and a passphrase for the keyring — and writes
+the configuration, the keyring and `blindbucket.env` beside them. It overwrites
+nothing, and it stores nothing that opens the keyring: `serve` asks for the
+passphrase again, or takes it from `$BLINDBUCKET_PASSPHRASE`
+([ADR-030](docs/adr/ADR-030-init.md)). For a script,
+`init --non-interactive` takes every answer as a flag.
+
+Then point any S3 client at it, with the credentials `init` printed. Nothing
+about the client changes except the endpoint:
 
 ```sh
+export AWS_ACCESS_KEY_ID=BB... AWS_SECRET_ACCESS_KEY=...   # as init printed them
 export AWS_ENDPOINT_URL=http://127.0.0.1:9000
 aws s3 cp big.tar.zst s3://blindbucket-dev/
 aws s3 ls s3://blindbucket-dev/
@@ -697,7 +703,7 @@ the gateway already costs per request.
 | — | Releases built with current Go, checked by `govulncheck` with the Go that builds them, and attested (SLSA provenance) | **done** in 1.2 |
 | — | `scrub`: every stored object verified by the read path's own checks, without waiting for a read (ADR-028) | **done** in 1.3 |
 | — | Unsigned payloads accepted by default, so AWS CLI 2.38 works, and signed ones requirable (ADR-029) | **done** in 1.3 |
-| M11 | The first ten minutes: `blindbucket init` writes a working configuration, keyring and client credentials, `blindbucket doctor` checks configuration, provider and root-key source and names the fix, a Homebrew tap and ArtifactHub — measured by watching people who have never seen the project get to their first encrypted upload | next |
+| M11 | The first ten minutes: `blindbucket init` writes a working configuration, keyring and client credentials, `blindbucket doctor` checks configuration, provider and root-key source and names the fix, a Homebrew tap and ArtifactHub — measured by watching people who have never seen the project get to their first encrypted upload | in progress: `init` done, unreleased |
 | M12 | Works with software that cannot be changed: Nextcloud, Velero, GitLab, Loki and Mastodon storing through the gateway, each as a CI job and a guide, with what breaks written down | planned |
 | M13 | A dashboard on the admin listener: instance health, keyring and root-key source, the audit log verified — read-only, nothing on it changes state | planned |
 | M14 | What is refused today, decided again: presigned uploads and encrypted object tags, each an ADR first — where the answer stays no, the ADR says why | planned |

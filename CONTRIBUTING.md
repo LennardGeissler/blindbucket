@@ -67,11 +67,15 @@ To run the gateway locally against a stand-in provider:
 ```sh
 docker compose up -d                          # MinIO on :9002, console on :9091
 export BLINDBUCKET_PASSPHRASE='dev-passphrase-not-a-secret'
-./bin/blindbucket keygen --out keyring.json --kid dev
-cp blindbucket.example.yaml blindbucket.yaml
 export UPSTREAM_ACCESS_KEY_ID=minioadmin UPSTREAM_SECRET_ACCESS_KEY=minioadmin
+./bin/blindbucket init --non-interactive --kid dev \
+  --endpoint http://localhost:9002 --bucket blindbucket-dev
+set -a; . ./blindbucket.env; set +a
 ./bin/blindbucket serve --config blindbucket.yaml
 ```
+
+The configuration `init` writes sets only what it asked about;
+`blindbucket.example.yaml` describes every other setting.
 
 `make demo-setup` does all of that plus a payload, if you want the end-to-end
 demo rather than a shell.

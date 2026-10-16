@@ -1,5 +1,9 @@
 # blindbucket configuration.
 #
+# This file describes every setting. `blindbucket init` writes a shorter one,
+# with only what a first run needs, and the secrets it references beside it
+# (ADR-030).
+#
 # Secrets are referenced, never written here: ${VAR} is resolved from the
 # environment at startup, and a missing variable is a startup error rather than
 # an empty credential.

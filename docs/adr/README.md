@@ -53,6 +53,7 @@ document is gone, so they are kept here.
 | [027](ADR-027-plaintext-listing-provider-errors.md) | Attribute provider errors in the plaintext listing handler | Accepted | post-1.0 |
 | [028](ADR-028-scrub.md) | Scrub: every stored object verified by the read path's own checks | Accepted | post-1.0 |
 | [029](ADR-029-unsigned-payloads-accepted-by-default.md) | Unsigned payloads are accepted by default, and signed ones can be required | Accepted | post-1.0 |
+| [030](ADR-030-init.md) | `init` writes what a gateway needs to start, and nothing that opens the keyring | Accepted | M11 |
 
 Every entry is Accepted. 025 was Accepted with its code: it corrects an assumption
 010 had stated as fact, which the AWS workflow disproved, and amends 009 and 022 for

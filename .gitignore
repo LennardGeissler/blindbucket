@@ -29,6 +29,8 @@ coverage.*
 *.local.yaml
 *.local.yml
 keyring.json
+blindbucket.env
+/blindbucket.yaml
 *.pem
 *.key
 *.crt

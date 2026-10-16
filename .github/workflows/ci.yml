@@ -420,32 +420,22 @@ jobs:
             "mc alias set local http://localhost:9002 minioadmin minioadmin && \
              mc mb --ignore-existing local/blindbucket-dev"
 
+      # The configuration is the one `blindbucket init` writes, so every client
+      # below runs against what a new user starts from rather than against a
+      # configuration written for CI (#119). The environment file goes into
+      # GITHUB_ENV as well: that is how the later steps, and the second
+      # instance, get the client's generated credentials.
       - name: Start the gateway
         env:
           BLINDBUCKET_PASSPHRASE: ci-passphrase-not-a-secret
+          UPSTREAM_ACCESS_KEY_ID: minioadmin
+          UPSTREAM_SECRET_ACCESS_KEY: minioadmin
         run: |
           make build
-          ./bin/blindbucket keygen --out keyring.json --kid ci
-          cat > blindbucket.yaml <<'YAML'
-          server:
-            listen: "127.0.0.1:9000"
-          upstream:
-            endpoint: http://localhost:9002
-            region: us-east-1
-            path_style: true
-            access_key_id: minioadmin
-            secret_access_key: minioadmin
-          clients:
-            - name: ci
-              access_key_id: CITESTKEY
-              secret_access_key: ci-test-secret-key
-              buckets: ["blindbucket-dev"]
-          keys:
-            provider: file
-            keyring: keyring.json
-          crypto:
-            log2_chunk_size: 16
-          YAML
+          ./bin/blindbucket init --non-interactive --dir . --kid ci \
+            --endpoint http://localhost:9002 --bucket blindbucket-dev
+          sed -n "s/^\([A-Z_]*\)='\(.*\)'$/\1=\2/p" blindbucket.env >> "$GITHUB_ENV"
+          set -a; . ./blindbucket.env; set +a
           ./bin/blindbucket serve --config blindbucket.yaml > gateway.log 2>&1 &
           for _ in $(seq 1 30); do
             if curl -s -o /dev/null http://127.0.0.1:9000/; then break; fi
@@ -460,7 +450,8 @@ jobs:
         env:
           BLINDBUCKET_PASSPHRASE: ci-passphrase-not-a-secret
         run: |
-          sed 's/127.0.0.1:9000/127.0.0.1:9010/' blindbucket.yaml > blindbucket-b.yaml
+          sed -e 's/127.0.0.1:9000/127.0.0.1:9010/' -e 's/127.0.0.1:9100/127.0.0.1:9110/' \
+            blindbucket.yaml > blindbucket-b.yaml
           ./bin/blindbucket serve --config blindbucket-b.yaml > gateway-b.log 2>&1 &
           for _ in $(seq 1 30); do
             if curl -s -o /dev/null http://127.0.0.1:9010/; then break; fi
@@ -495,8 +486,8 @@ jobs:
 
       - name: boto3 scenarios
         env:
-          AWS_ACCESS_KEY_ID: CITESTKEY
-          AWS_SECRET_ACCESS_KEY: ci-test-secret-key
+          AWS_ACCESS_KEY_ID: ${{ env.BB_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.BB_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
           BLINDBUCKET_ENDPOINT: http://127.0.0.1:9000
           BLINDBUCKET_BUCKET: blindbucket-dev
@@ -509,8 +500,8 @@ jobs:
       # not.
       - name: AWS CLI scenarios
         env:
-          AWS_ACCESS_KEY_ID: CITESTKEY
-          AWS_SECRET_ACCESS_KEY: ci-test-secret-key
+          AWS_ACCESS_KEY_ID: ${{ env.BB_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.BB_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
           AWS_ENDPOINT_URL: http://127.0.0.1:9000
         run: |
@@ -544,8 +535,8 @@ jobs:
       # exactly why the gateway only ever has to verify one (ADR-019).
       - name: Presigned URL scenarios
         env:
-          AWS_ACCESS_KEY_ID: CITESTKEY
-          AWS_SECRET_ACCESS_KEY: ci-test-secret-key
+          AWS_ACCESS_KEY_ID: ${{ env.BB_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.BB_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
           AWS_ENDPOINT_URL: http://127.0.0.1:9000
         run: |
@@ -574,8 +565,8 @@ jobs:
       # its own, so this is the client's code path and not a hand-built request.
       - name: Multipart across two instances
         env:
-          AWS_ACCESS_KEY_ID: CITESTKEY
-          AWS_SECRET_ACCESS_KEY: ci-test-secret-key
+          AWS_ACCESS_KEY_ID: ${{ env.BB_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.BB_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
           AWS_ENDPOINT_URL: http://127.0.0.1:9020
         run: |
@@ -612,8 +603,8 @@ jobs:
       - name: gc leaves a live multipart object readable
         env:
           BLINDBUCKET_PASSPHRASE: ci-passphrase-not-a-secret
-          AWS_ACCESS_KEY_ID: CITESTKEY
-          AWS_SECRET_ACCESS_KEY: ci-test-secret-key
+          AWS_ACCESS_KEY_ID: ${{ env.BB_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.BB_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
           AWS_ENDPOINT_URL: http://127.0.0.1:9020
         run: |
@@ -629,8 +620,8 @@ jobs:
       # presigned step download an object that is no longer there.
       - name: The client can delete, recursively and one by one
         env:
-          AWS_ACCESS_KEY_ID: CITESTKEY
-          AWS_SECRET_ACCESS_KEY: ci-test-secret-key
+          AWS_ACCESS_KEY_ID: ${{ env.BB_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.BB_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
           AWS_ENDPOINT_URL: http://127.0.0.1:9000
         run: |

@@ -1,13 +1,14 @@
 // Command blindbucket is the CLI for the blindbucket S3 encryption gateway.
 //
-// It runs the gateway (serve), manages keyrings (keygen, keys, reseal, rotate), removes
-// orphaned multipart manifests (gc), moves objects stored in clear to their
-// encrypted names (migrate-names), measures what a provider does with
-// conditional writes (probe), verifies the audit log (audit), reports what a
-// stored segment's header says with no key in sight (inspect), and encrypts or
-// decrypts a stream against a keyring with no provider in the way (encrypt,
-// decrypt) -- exercising exactly the code the proxy uses for object bodies. The
-// wire format and the decisions behind it are in docs/.
+// It sets a gateway up (init), runs it (serve), manages keyrings (keygen, keys,
+// reseal, rotate), removes orphaned multipart manifests (gc), moves objects
+// stored in clear to their encrypted names (migrate-names), measures what a
+// provider does with conditional writes (probe), verifies the audit log
+// (audit), reports what a stored segment's header says with no key in sight
+// (inspect), and encrypts or decrypts a stream against a keyring with no
+// provider in the way (encrypt, decrypt) -- exercising exactly the code the
+// proxy uses for object bodies. The wire format and the decisions behind it
+// are in docs/.
 package main
 
 import (
@@ -32,6 +33,7 @@ type command struct {
 
 func commands() []command {
 	return []command{
+		{"init", "write a configuration, a keyring and client credentials to start from", runInit},
 		{"serve", "run the S3 gateway", runServe},
 		{"keygen", "create a keyring, or add a key to an existing one", runKeygen},
 		{"keys", "list the keys in a keyring, or retire one", runKeys},
