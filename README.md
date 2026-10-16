@@ -228,14 +228,18 @@ plaintext hop never crosses a network interface.
 
 ## Try it today
 
-```sh
-docker compose up -d                         # MinIO on :9002, as a stand-in provider
-make build
+You need Docker, Go 1.26 or later, and the AWS CLI. MinIO stands in for the
+provider, on your machine:
 
-./bin/blindbucket init                       # MinIO is the default; the bucket is blindbucket-dev
+```sh
+git clone https://github.com/LennardGeissler/blindbucket && cd blindbucket
+docker compose up -d                         # MinIO on :9002, with the bucket blindbucket-dev
+make build                                   # ./bin/blindbucket
+
+./bin/blindbucket init                       # Enter takes each default; MinIO's key and secret are minioadmin
 set -a; . ./blindbucket.env; set +a          # the provider's and the client's credentials
 ./bin/blindbucket doctor --config blindbucket.yaml   # optional: checks all of it, names any fix
-./bin/blindbucket serve --config blindbucket.yaml
+./bin/blindbucket serve --config blindbucket.yaml    # runs in the foreground; leave it running
 ```
 
 `init` asks for what it cannot default — the provider (MinIO's key and secret
@@ -246,8 +250,8 @@ passphrase again, or takes it from `$BLINDBUCKET_PASSPHRASE`
 ([ADR-030](docs/adr/ADR-030-init.md)). For a script,
 `init --non-interactive` takes every answer as a flag.
 
-Then point any S3 client at it, with the credentials `init` printed. Nothing
-about the client changes except the endpoint:
+Then, in a second terminal, point any S3 client at it, with the credentials
+`init` printed. Nothing about the client changes except the endpoint:
 
 ```sh
 export AWS_ACCESS_KEY_ID=BB... AWS_SECRET_ACCESS_KEY=...   # as init printed them

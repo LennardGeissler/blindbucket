@@ -467,3 +467,54 @@ func assertEmptyDir(t *testing.T, dir string) {
 		t.Errorf("a failed init left %v behind", names)
 	}
 }
+
+// TestInitWrittenConfigBoundsPresignedURLs pins what a walkthrough of the
+// README found: without a bound, serve's first words on a fresh configuration
+// were a warning about presigned URLs.
+func TestInitWrittenConfigBoundsPresignedURLs(t *testing.T) {
+	initEnv(t)
+	dir := t.TempDir()
+	if _, _, err := runCLI(t, "init", "--non-interactive", "--dir", dir,
+		"--endpoint", "http://localhost:9002", "--bucket", "b"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	cfg, _ := loadInitConfig(t, dir)
+	if !cfg.Server.Presign.Enabled || cfg.Server.Presign.MaxExpiry != "1h" {
+		t.Errorf("presign = %+v, want enabled with a max_expiry of 1h", cfg.Server.Presign)
+	}
+}
+
+// TestInitLocalMinIOOffersTheComposeBucket: the README's quickstart answers
+// every question with its default, and the bucket docker-compose.yml creates
+// is one of them.
+func TestInitLocalMinIOOffersTheComposeBucket(t *testing.T) {
+	initEnv(t)
+	_, a, prompts, err := interactiveInit(t, "\n\n\n\n\n\n")
+	if err != nil {
+		t.Fatalf("init: %v\n%s", err, prompts)
+	}
+	if a.bucket != "blindbucket-dev" || !strings.Contains(prompts, "Bucket [blindbucket-dev]") {
+		t.Errorf("bucket %q, prompts:\n%s", a.bucket, prompts)
+	}
+}
+
+// TestInitSummaryNamesTheBinaryAsRun: after `make build` the binary is
+// ./bin/blindbucket and not on $PATH, so the commands the summary prints have
+// to say so.
+func TestInitSummaryNamesTheBinaryAsRun(t *testing.T) {
+	arg0 := os.Args[0]
+	t.Cleanup(func() { os.Args[0] = arg0 })
+	for run, want := range map[string]string{
+		"blindbucket":                    "blindbucket",
+		"./bin/blindbucket":              "./bin/blindbucket",
+		"bin/blindbucket":                "./bin/blindbucket",
+		"/usr/local/bin/blindbucket":     "/usr/local/bin/blindbucket",
+		"/tmp/go-build/blindbucket.test": "blindbucket",
+		"/tmp/my dir/blindbucket":        "'/tmp/my dir/blindbucket'",
+	} {
+		os.Args[0] = filepath.FromSlash(run)
+		if got := selfCommand(); got != filepath.FromSlash(want) && got != want {
+			t.Errorf("run as %q: %q, want %q", run, got, want)
+		}
+	}
+}

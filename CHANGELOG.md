@@ -22,6 +22,10 @@ version 1 would keep being readable.
 - **The Helm chart describes itself for Artifact Hub.** Chart 0.1.6 carries the image it deploys, a category and links to the documentation, the threat model and the format specification, which `ah lint` accepts, and names its maintainer for `helm show chart`. `make chart` fails when the image named there is not the one `appVersion` deploys.
 - **The binary is not notarised by Apple, and the cask says so.** Homebrew quarantines a cask's download, which would stop Gatekeeper from running it, so the cask removes the quarantine from that one file. What protects the download is the cask's SHA-256 and the release's attestation, and the caveat it prints gives the command that checks the archive.
 
+### Fixed
+
+- **A first run from the README no longer stumbles where a walkthrough of it did.** `init`'s summary names the binary as it was run, `./bin/blindbucket` after `make build`, where it said `blindbucket`, which is not on `$PATH` after building from a checkout. The configuration it writes bounds presigned URLs to an hour, as the example does, so that `serve`'s first words are no longer a warning about them. For the local MinIO preset it offers the bucket `docker compose up` creates. The README's quickstart says what it needs, starts from `git clone`, and says that `serve` stays in the foreground.
+
 ## [1.4.0] — 2026-10-16
 
 **A first run in three commands.** `blindbucket init` writes a configuration, a keyring

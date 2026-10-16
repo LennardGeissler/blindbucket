@@ -78,6 +78,9 @@ type initAnswers struct {
 	// unmeasured names a provider the gateway has not been measured against,
 	// so the summary can say so rather than imply otherwise.
 	unmeasured string
+	// bucketDefault is offered when the bucket is asked for: the one
+	// docker-compose.yml creates, for the local MinIO preset.
+	bucketDefault string
 }
 
 func runInit(ctx context.Context, args []string) error {
@@ -264,7 +267,7 @@ func initInteractively(p *prompter, f initFlags) (initAnswers, error) {
 
 	if !f.set["bucket"] {
 		var err error
-		if a.bucket, err = p.required("Bucket", ""); err != nil {
+		if a.bucket, err = p.required("Bucket", a.bucketDefault); err != nil {
 			return a, err
 		}
 	}
@@ -319,7 +322,7 @@ func askProvider(p *prompter, f initFlags, a *initAnswers) (bool, error) {
 			return false, err
 		}
 		a.region, err = region("us-east-1")
-		a.pathStyle = true
+		a.pathStyle, a.bucketDefault = true, "blindbucket-dev"
 	case 1:
 		if a.region, err = region("us-east-1"); err != nil {
 			return false, err
@@ -631,6 +634,10 @@ server:
   # Loopback: between client and gateway the body is plaintext, so a public
   # listener needs TLS first.
   listen: "127.0.0.1:9000"
+  # A presigned URL is a bearer credential for as long as it lasts (ADR-019).
+  # An hour, as in the example; S3's own maximum is seven days.
+  presign:
+    max_expiry: 1h
 
 # Metrics and health, for operators rather than storage clients.
 admin:
@@ -701,6 +708,7 @@ func printInitSummary(out io.Writer, paths map[string]string, a initAnswers) {
 		shown[name] = displayPath(path)
 	}
 	conf, env := shellQuote(shown[initConfigName]), shellQuote(shown[initEnvName])
+	self := selfCommand()
 
 	w("Wrote %s, %s and %s.\n\n", shown[initConfigName], shown[initKeyringName], shown[initEnvName])
 	w("Start the gateway:\n  set -a; . %s; set +a\n", env)
@@ -713,7 +721,7 @@ func printInitSummary(out io.Writer, paths map[string]string, a initAnswers) {
 		w("  export %s=... %s=...      # for KMS; not stored beside the keyring, which they open\n",
 			envKMSKeyID, envKMSSecret)
 	}
-	w("  blindbucket serve --config %s\n\n", conf)
+	w("  %s serve --config %s\n\n", self, conf)
 
 	w("Then point any S3 client at it. These are the client's credentials, also in\n%s:\n", shown[initEnvName])
 	w("  export AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s\n", a.clientKeyID, a.clientSecret)
@@ -723,11 +731,26 @@ func printInitSummary(out io.Writer, paths map[string]string, a initAnswers) {
 	w("To check all of it -- the keyring, the provider, the bucket, this host's clock,\n" +
 		"and the conditional writes key rotation relies on -- with the environment\n" +
 		"loaded as for serve:\n")
-	w("  blindbucket doctor --config %s\n", conf)
+	w("  %s doctor --config %s\n", self, conf)
 	if a.unmeasured != "" {
 		w("\n%s has not been measured against the gateway yet; see docs/COMPATIBILITY.md,\n"+
 			"and please report what you find.\n", a.unmeasured)
 	}
+}
+
+// selfCommand is how to run this binary again in the commands the summary
+// prints: ./bin/blindbucket after `make build`, as it was run, because a
+// binary built from a checkout is not on $PATH. A bare name, or a binary not
+// called blindbucket -- a test binary, say -- is printed as "blindbucket".
+func selfCommand() string {
+	arg := os.Args[0]
+	if filepath.Base(arg) != "blindbucket" || !strings.ContainsRune(arg, filepath.Separator) {
+		return "blindbucket"
+	}
+	if !filepath.IsAbs(arg) && !strings.HasPrefix(arg, ".") {
+		arg = "." + string(filepath.Separator) + arg
+	}
+	return shellQuote(arg)
 }
 
 // displayPath shortens a path under the working directory to ./relative, for
