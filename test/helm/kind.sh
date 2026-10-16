@@ -85,9 +85,22 @@ spec:
 EOF
 k rollout status deployment/minio --timeout=180s
 
+# Not `kubectl run -i --rm`: a command this short can exit before kubectl
+# attaches, and kubectl then falls back to streaming the pod's logs -- which
+# printed the output twice on 2026-10-16 ('BLBKBLBK' for a four-byte header).
+# The pod runs detached, its phase is waited for, and its log is read once.
 mc() {
-	k run "mc-$RANDOM" --rm -i --restart=Never --quiet --image=cgr.dev/chainguard/minio:latest \
-		--command -- sh -c "mc alias set m http://minio:9000 minioadmin minioadmin >/dev/null && $1"
+	local pod="mc-$RANDOM" phase=""
+	k run "$pod" --restart=Never --quiet --image=cgr.dev/chainguard/minio:latest \
+		--command -- sh -c "mc alias set m http://minio:9000 minioadmin minioadmin >/dev/null && $1" >/dev/null
+	for _ in $(seq 1 120); do
+		phase=$(k get pod "$pod" -o jsonpath='{.status.phase}')
+		[[ "$phase" == Succeeded || "$phase" == Failed ]] && break
+		sleep 1
+	done
+	k logs "pod/$pod"
+	k delete pod "$pod" --wait=false >/dev/null
+	[[ "$phase" == Succeeded ]]
 }
 
 # Ready is not reachable yet. rollout status returns when the pod passes its

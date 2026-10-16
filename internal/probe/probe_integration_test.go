@@ -2,6 +2,7 @@ package probe
 
 import (
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/LennardGeissler/blindbucket/internal/testprovider"
@@ -50,20 +51,25 @@ func TestIntegrationConditionalWrites(t *testing.T) {
 		t.Errorf("SafeForMigration() = %v with %+v", got.SafeForMigration(), got)
 	}
 
-	// Nothing left behind: no object, and no open upload.
+	// Nothing left behind: no object, and no open upload. Under its own key,
+	// not all of Prefix: doctor's tests probe the same bucket from another
+	// package, and `go test ./...` runs packages at the same time.
+	if !strings.HasPrefix(got.Key, Prefix) {
+		t.Fatalf("the probe wrote %q, which is not under %s", got.Key, Prefix)
+	}
 	page, err := client.ListObjects(t.Context(), p.Bucket,
-		url.Values{"list-type": {"2"}, "prefix": {Prefix}})
+		url.Values{"list-type": {"2"}, "prefix": {got.Key}})
 	if err != nil {
-		t.Fatalf("listing %s: %v", Prefix, err)
+		t.Fatalf("listing %s: %v", got.Key, err)
 	}
 	if len(page.Contents) != 0 {
-		t.Errorf("the probe left %d objects under %s", len(page.Contents), Prefix)
+		t.Errorf("the probe left its object %s behind", got.Key)
 	}
-	uploads, err := client.ListMultipartUploads(t.Context(), p.Bucket, Prefix)
+	uploads, err := client.ListMultipartUploads(t.Context(), p.Bucket, got.Key)
 	if err != nil {
-		t.Fatalf("listing uploads under %s: %v", Prefix, err)
+		t.Fatalf("listing uploads under %s: %v", got.Key, err)
 	}
 	if len(uploads) != 0 {
-		t.Errorf("the probe left %d uploads open under %s", len(uploads), Prefix)
+		t.Errorf("the probe left %d uploads open on %s", len(uploads), got.Key)
 	}
 }

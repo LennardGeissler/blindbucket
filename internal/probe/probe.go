@@ -80,6 +80,11 @@ type Conditions struct {
 	// guard between a migration's HEAD of an object's encrypted key and its copy
 	// landing there, in which a client may write that key first (ADR-022).
 	CompleteIfNoneMatch Check
+	// Key is the object the measurement wrote under Prefix and removed again.
+	// Other measurements may run against the same bucket at the same time --
+	// doctor makes this one -- so what it left behind is a question about
+	// this key, not about everything under Prefix.
+	Key string
 }
 
 // RotationChecks returns the two checks a rotation relies on, in the order it
@@ -151,7 +156,7 @@ func ConditionalWrites(ctx context.Context, client *upstream.Client, bucket stri
 		}
 	}()
 
-	var out Conditions
+	out := Conditions{Key: key}
 
 	// Guard 1. The object is copied onto its own upload, so a provider that
 	// ignored the condition has only copied a probe onto itself.
