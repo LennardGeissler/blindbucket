@@ -69,7 +69,7 @@ denotes an access architecture as defined in NIST SP 800-207, not an encryption 
 |---|---|
 | Object plaintext | in flight between client and proxy; transiently in proxy memory |
 | Key material — root key, KEKs, DEKs, token keys | KMS/Vault/passphrase; proxy memory; wrapped DEKs in object metadata |
-| Client credentials for the proxy | proxy configuration |
+| Client credentials for the proxy | proxy configuration, as references to the environment; a configuration `blindbucket init` wrote has the values in `blindbucket.env` beside it, mode 0600 |
 | Upstream credentials for the storage provider | proxy configuration, or resolved from the platform — IRSA, Pod Identity, the instance role ([ADR-024](adr/ADR-024-aws-credentials-without-the-sdk.md)); never disclosed to clients |
 
 ---

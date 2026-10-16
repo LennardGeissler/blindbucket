@@ -70,11 +70,12 @@ six months. The 0.x releases predate that promise and are not covered by it.
 | Version | Supported |
 |---|---|
 | `main` | yes |
-| 1.3.x | yes |
-| 1.2.x | no — upgrade to 1.3.x, which keeps everything 1.0 promised |
-| 1.1.x | no — upgrade to 1.3.x, which keeps everything 1.0 promised; 1.1.x and older were built with Go 1.24.0 |
-| 1.0.x | no — upgrade to 1.3.x, which keeps everything 1.0 promised |
-| 0.6.x and older | no — upgrade to 1.3.x; everything they wrote stays readable |
+| 1.4.x | yes |
+| 1.3.x | no — upgrade to 1.4.x, which keeps everything 1.0 promised |
+| 1.2.x | no — upgrade to 1.4.x, which keeps everything 1.0 promised |
+| 1.1.x | no — upgrade to 1.4.x, which keeps everything 1.0 promised; 1.1.x and older were built with Go 1.24.0 |
+| 1.0.x | no — upgrade to 1.4.x, which keeps everything 1.0 promised |
+| 0.6.x and older | no — upgrade to 1.4.x; everything they wrote stays readable |
 
 Objects written by any released version stay readable: a change to the segment
 format would be a change to its version number, announced in the changelog.

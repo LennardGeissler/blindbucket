@@ -21,7 +21,7 @@ body:
     id: gateway
     attributes:
       label: Gateway version or commit
-      placeholder: "1.3.0, or main at a commit"
+      placeholder: "1.4.0, or main at a commit"
     validations:
       required: true
 

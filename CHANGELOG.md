@@ -16,15 +16,29 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-10-16
+
+**A first run in three commands.** `blindbucket init` writes a configuration, a keyring
+and the credentials they reference; `blindbucket doctor` checks a deployment before
+`serve` does and names the fix for everything it finds; every error `serve` can stop on
+before it listens now says which setting to change; and bash, zsh and fish complete
+every command and flag. All of it is additive under
+[ADR-021](docs/adr/ADR-021-what-1.0-promises.md), and the format is still `1`.
+
+**Upgrading:** nothing to do for the binaries, the image or the Helm chart. No
+configuration that 1.3 started with is refused: the mistakes now caught when the
+configuration loads -- an endpoint without `http://` or `https://`, two clients with
+one access key -- stopped 1.3 as well, later and less clearly.
+
 ### Added
 
-- **Shell completions for bash, zsh and fish.** Commands, the subcommands of `keys` and `audit`, every flag, file paths where a flag takes a file, and the values of `--keys-provider` and `--credential-source`. They are in each release archive under `contrib/completions/`. They are written by hand, and a test fails when they and a command's `-h` disagree, so a new flag cannot be forgotten in them.
-- **`blindbucket doctor` checks a deployment and names the fix.** It runs every check on every run, so one run shows everything that is wrong: the configuration, the listener and its TLS certificate, the keyring opened as `serve` opens it, the keys enabled features need, the audit log and rollback index paths, the provider's credentials, each bucket, the provider's conditional writes, and this host's clock. Each finding says which setting, command or permission to change ([ADR-031](docs/adr/ADR-031-doctor.md)).
-- **One read per bucket finds most provider mistakes.** A wrong access key, a secret that does not match it, a wrong region (with the region the provider names), a missing bucket and missing list permission each map to the setting they point at. The clock is read from the provider's `Date` header, a warning from one minute's difference and a failure from fifteen.
-- **`doctor` writes one small object per bucket, as `probe` does,** to measure the conditional writes rotation relies on, and removes it. `--no-write` skips that check. A provider that ignores the conditions is a warning, since the gateway still serves. `doctor --json` is a stable document listing every check by name, and the exit code is 1 only when a check failed.
 - **`blindbucket init` sets a gateway up in one step.** It writes a configuration, a keyring and `blindbucket.env` into one directory, asking only what it cannot default: the provider (with presets for MinIO, AWS S3, Cloudflare R2, Backblaze B2 and Garage), the bucket, the provider's credentials, the root-key source and whether names are encrypted. A first run is now `init`, loading the environment file, and `serve` ([ADR-030](docs/adr/ADR-030-init.md)).
 - **Nothing is overwritten, and nothing that opens the keyring is stored beside it.** If any of the three files exists, `init` writes none of them. The passphrase, a Vault token and KMS keys stay out of `blindbucket.env`; the summary names what `serve` still needs from the environment. The keyring is written last, so a failed seal removes the other two files and never a keyring.
 - **`init --non-interactive` for scripts.** It never asks: a missing answer is an error naming the flag or variable that supplies it, and secrets come from the environment, never from flags. The CI job that runs the AWS CLI and boto3 now starts its gateways from the configuration it writes.
+- **`blindbucket doctor` checks a deployment and names the fix.** It runs every check on every run, so one run shows everything that is wrong: the configuration, the listener and its TLS certificate, the keyring opened as `serve` opens it, the keys enabled features need, the audit log and rollback index paths, the provider's credentials, each bucket, the provider's conditional writes, and this host's clock. Each finding says which setting, command or permission to change ([ADR-031](docs/adr/ADR-031-doctor.md)).
+- **One read per bucket finds most provider mistakes.** A wrong access key, a secret that does not match it, a wrong region (with the region the provider names), a missing bucket and missing list permission each map to the setting they point at. The clock is read from the provider's `Date` header, a warning from one minute's difference and a failure from fifteen.
+- **`doctor` writes one small object per bucket, as `probe` does,** to measure the conditional writes rotation relies on, and removes it. `--no-write` skips that check. A provider that ignores the conditions is a warning, since the gateway still serves. `doctor --json` is a stable document listing every check by name, and the exit code is 1 only when a check failed.
+- **Shell completions for bash, zsh and fish.** Commands, the subcommands of `keys` and `audit`, every flag, file paths where a flag takes a file, and the values of `--keys-provider` and `--credential-source`. They are in each release archive under `contrib/completions/`. They are written by hand, and a test fails when they and a command's `-h` disagree, so a new flag cannot be forgotten in them.
 
 ### Changed
 
@@ -1311,7 +1325,8 @@ figures and the methodology are in [bench/](bench/).
   of ten seconds, so the time is the provider's; why it behaves that way under
   this access pattern is not established.
 
-[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.0.0...v1.1.0
