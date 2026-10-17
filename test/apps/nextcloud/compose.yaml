@@ -1,0 +1,87 @@
+# Nextcloud with S3 as primary storage, through the gateway, in front of MinIO.
+# Twice: once with object names in clear and once with names.encrypt, each
+# with a bucket, a gateway and a Nextcloud of its own. run.sh drives it; it is
+# not meant to be brought up by hand, because the keyring it mounts is written
+# by run.sh first.
+#
+# The gateway image is built from this checkout by run.sh, once, before this
+# file is brought up -- two services building one tag at the same time race --
+# so the scenario tests the code, not a release. Nextcloud is pinned by digest: what is measured is that version,
+# and COMPATIBILITY.md says which one.
+name: blindbucket-nextcloud
+
+services:
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  buckets:
+    image: cgr.dev/chainguard/minio:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "mc alias set m http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing m/nc-plain m/nc-names"
+
+  gateway-plain: &gateway
+    image: blindbucket-nextcloud-gateway
+    pull_policy: never
+    command: ["serve", "-v", "--config", "/etc/blindbucket/blindbucket.yaml"]
+    environment:
+      BLINDBUCKET_PASSPHRASE: nextcloud-scenario-not-a-secret
+    volumes:
+      - ./gateway-plain.yaml:/etc/blindbucket/blindbucket.yaml:ro
+      - ${KEYRING:?run.sh writes the keyring}:/etc/blindbucket/keyring.json:ro
+    depends_on:
+      buckets:
+        condition: service_completed_successfully
+
+  gateway-names:
+    <<: *gateway
+    volumes:
+      - ./gateway-names.yaml:/etc/blindbucket/blindbucket.yaml:ro
+      - ${KEYRING:?run.sh writes the keyring}:/etc/blindbucket/keyring.json:ro
+
+  nextcloud-plain: &nextcloud
+    image: nextcloud:35.0.2-apache@sha256:a588aa5353703b44106a6129adaaf7bf22521b7a4754f9f529b3228d6aa390c5
+    ports:
+      - "127.0.0.1:8081:80"
+    environment: &nextcloud-env
+      SQLITE_DATABASE: nextcloud
+      NEXTCLOUD_ADMIN_USER: admin
+      NEXTCLOUD_ADMIN_PASSWORD: scenario-admin-plain
+      NEXTCLOUD_TRUSTED_DOMAINS: localhost 127.0.0.1
+      OBJECTSTORE_S3_HOST: gateway-plain
+      OBJECTSTORE_S3_PORT: "9000"
+      OBJECTSTORE_S3_BUCKET: nc-plain
+      OBJECTSTORE_S3_KEY: NCSCENARIOPLAIN
+      OBJECTSTORE_S3_SECRET: nc-scenario-secret-plain
+      OBJECTSTORE_S3_SSL: "false"
+      OBJECTSTORE_S3_USEPATH_STYLE: "true"
+      OBJECTSTORE_S3_REGION: us-east-1
+      OBJECTSTORE_S3_AUTOCREATE: "false"
+    depends_on:
+      - gateway-plain
+
+  nextcloud-names:
+    <<: *nextcloud
+    ports:
+      - "127.0.0.1:8082:80"
+    environment:
+      <<: *nextcloud-env
+      NEXTCLOUD_ADMIN_PASSWORD: scenario-admin-names
+      OBJECTSTORE_S3_HOST: gateway-names
+      OBJECTSTORE_S3_BUCKET: nc-names
+      OBJECTSTORE_S3_KEY: NCSCENARIONAMES
+      OBJECTSTORE_S3_SECRET: nc-scenario-secret-names
+    depends_on:
+      - gateway-names

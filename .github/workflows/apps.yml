@@ -1,0 +1,53 @@
+name: Applications
+
+# M12: software that stores to S3 and cannot be changed, run through the
+# gateway built from this checkout, against MinIO. Each application is a
+# scenario under test/apps/ that brings itself up with Docker Compose and
+# fails when the gateway refuses or corrupts anything the application does.
+#
+# Not part of ci.yml: a scenario pulls an application image and installs it,
+# which takes minutes, so it runs on changes that can affect it, and once a
+# week to notice what changed underneath it -- MinIO's image is not pinned.
+on:
+  pull_request:
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - "deploy/Dockerfile"
+      - "test/apps/**"
+      - ".github/workflows/apps.yml"
+  push:
+    branches: [main]
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - "deploy/Dockerfile"
+      - "test/apps/**"
+      - ".github/workflows/apps.yml"
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apps-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nextcloud:
+    name: Nextcloud
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Nextcloud with S3 as primary storage, through the gateway
+        run: test/apps/nextcloud/run.sh

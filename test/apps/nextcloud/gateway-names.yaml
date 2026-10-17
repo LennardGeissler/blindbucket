@@ -1,0 +1,28 @@
+# The gateway in front of Nextcloud's bucket nc-names. Plain HTTP and no admin
+# listener: it is reachable only on the scenario's own network.
+server:
+  listen: "0.0.0.0:9000"
+  presign:
+    max_expiry: 1h
+admin:
+  listen: ""
+upstream:
+  endpoint: http://minio:9000
+  region: us-east-1
+  path_style: true
+  access_key_id: minioadmin
+  secret_access_key: minioadmin
+keys:
+  provider: file
+  keyring: /etc/blindbucket/keyring.json
+clients:
+  - name: nextcloud
+    access_key_id: NCSCENARIONAMES
+    secret_access_key: nc-scenario-secret-names
+    buckets: ["nc-names"]
+
+# Names encrypted: Nextcloud's keys are urn:oid:<n>, so this hides nothing
+# that matters -- the guide says why -- but it is how a careful operator might
+# configure it, and it is measured.
+names:
+  encrypt: true

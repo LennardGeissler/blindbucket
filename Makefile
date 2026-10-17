@@ -172,6 +172,10 @@ chart: ## Lint, render and validate the Helm chart.
 		|| { echo "the chart rendered an unknown credential source"; exit 1; }
 	@echo "refuses static without a Secret, and an unknown source: ok"
 
+.PHONY: app-nextcloud
+app-nextcloud: ## Run Nextcloud through the gateway (test/apps/nextcloud, M12).
+	test/apps/nextcloud/run.sh
+
 .PHONY: chart-e2e
 chart-e2e: ## Install the chart in kind and put an object through it.
 	test/helm/kind.sh

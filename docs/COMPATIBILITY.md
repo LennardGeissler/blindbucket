@@ -65,6 +65,25 @@ Multipart included since M4: each client was run with a file over its own
 threshold, so the parts, the manifest and the size arithmetic are all exercised by
 the client's own code path rather than by a hand-built request.
 
+## Applications
+
+Software that stores to S3 and cannot be changed, run through the gateway by a
+scenario under [test/apps/](../test/apps/), which fails when the gateway refuses
+or corrupts anything the application does (M12). Each has a guide in
+[guides/](guides/).
+
+| Application | Version tested | Status | Last measured | Guide |
+|---|---|---|---|---|
+| Nextcloud, S3 as primary storage | 35.0.2 | **Works**, new installations only: an existing bucket's objects cannot be read until [#151](https://github.com/LennardGeissler/blindbucket/issues/151) | on changes to the gateway and weekly, in CI (`test/apps/nextcloud`) | [nextcloud.md](guides/nextcloud.md) |
+
+Measured with object names in clear and encrypted: upload and download,
+ranges, rename, copy, versions, the desktop client's chunked upload, multipart
+above Nextcloud's threshold, public link shares, and delete with the trash.
+A multipart part size that is not a multiple of 64 KiB fails every large
+upload; Nextcloud's default of 500 MiB is one. A client that closes a download
+early is logged as an integrity failure
+([#150](https://github.com/LennardGeissler/blindbucket/issues/150)).
+
 ---
 
 ## AWS CLI v2
