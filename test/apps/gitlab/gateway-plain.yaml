@@ -1,0 +1,25 @@
+# The gateway in front of GitLab's buckets gl-<kind>-plain. Plain HTTP and no
+# admin listener: it is reachable only on the scenario's own network.
+server:
+  listen: "0.0.0.0:9000"
+  # Workhorse reads an artifact archive back through a URL GitLab signs for
+  # 4h15m, to index it; with init's 1h it is refused, and the artifact cannot
+  # be browsed.
+  presign:
+    max_expiry: 5h
+admin:
+  listen: ""
+upstream:
+  endpoint: http://minio:9000
+  region: us-east-1
+  path_style: true
+  access_key_id: minioadmin
+  secret_access_key: minioadmin
+keys:
+  provider: file
+  keyring: /etc/blindbucket/keyring.json
+clients:
+  - name: gitlab
+    access_key_id: GITLABSCENARIOPLAIN
+    secret_access_key: gitlab-scenario-secret-plain
+    buckets: ["gl-artifacts-plain", "gl-lfs-plain", "gl-uploads-plain", "gl-packages-plain"]

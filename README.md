@@ -676,7 +676,7 @@ the gateway already costs per request.
 | [docs/FORMAT.md](docs/FORMAT.md) | Normative wire format. An independent implementation should be able to interoperate from this document alone. |
 | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | What is protected, what is not, and what the residual risks are. |
 | [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Which clients work, which settings they need, and what does not work yet. Measured, not assumed. |
-| [docs/guides/](docs/guides/) | Putting the gateway in front of an application that stores to S3, as measured by the scenarios in [test/apps/](test/apps/): Nextcloud, Grafana Loki, Mastodon and Velero so far. |
+| [docs/guides/](docs/guides/) | Putting the gateway in front of an application that stores to S3, as measured by the scenarios in [test/apps/](test/apps/): Nextcloud, GitLab, Grafana Loki, Mastodon and Velero. |
 | [docs/adr/](docs/adr/) | Architecture decisions, with the alternatives that were rejected and why. |
 | [docs/adr/ADR-016-audit-log.md](docs/adr/ADR-016-audit-log.md) | The audit log: what it proves, what it does not, and what it costs. |
 | [testdata/vectors/](testdata/vectors/) | Known-answer vectors, normative alongside the format spec. |
@@ -714,7 +714,7 @@ the gateway already costs per request.
 | — | `scrub`: every stored object verified by the read path's own checks, without waiting for a read (ADR-028) | **done** in 1.3 |
 | — | Unsigned payloads accepted by default, so AWS CLI 2.38 works, and signed ones requirable (ADR-029) | **done** in 1.3 |
 | M11 | The first ten minutes: `blindbucket init` writes a working configuration, keyring and client credentials, `blindbucket doctor` checks configuration, provider and root-key source and names the fix, a Homebrew tap and ArtifactHub — measured by watching people who have never seen the project get to their first encrypted upload | in progress: `init`, `doctor`, startup errors that name their fix and shell completions **done** in 1.4 |
-| M12 | Works with software that cannot be changed: Nextcloud, Velero, GitLab, Loki and Mastodon storing through the gateway, each as a CI job and a guide, with what breaks written down | planned |
+| M12 | Works with software that cannot be changed: Nextcloud, Velero, GitLab, Loki and Mastodon storing through the gateway, each as a CI job and a guide, with what breaks written down | in progress: all five measured; encrypting a bucket's existing objects in place ([#151](https://github.com/LennardGeissler/blindbucket/issues/151)) not yet |
 | M13 | A dashboard on the admin listener: instance health, keyring and root-key source, the audit log verified — read-only, nothing on it changes state | planned |
 | M14 | What is refused today, decided again: presigned uploads and encrypted object tags, each an ADR first — where the answer stays no, the ADR says why | planned |
 | M15 | Several tenants on one gateway: keys per tenant, a tenant deleted by destroying its key, OIDC sign-in for the dashboard, the audit log exported | planned |

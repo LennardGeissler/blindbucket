@@ -74,10 +74,21 @@ or corrupts anything the application does (M12). Each has a guide in
 
 | Application | Version tested | Status | Last measured | Guide |
 |---|---|---|---|---|
+| GitLab CE, object storage (consolidated form) | 19.5.0 | **Works** from the release after 1.4.0 ([ADR-032](adr/ADR-032-response-header-overrides.md)), with the feature flag `s3_multithreaded_uploads` off and `presign.max_expiry` of at least 4h15m. New buckets only ([#151](https://github.com/LennardGeissler/blindbucket/issues/151)) | on changes to the gateway and weekly, in CI (`test/apps/gitlab`) | [gitlab.md](guides/gitlab.md) |
 | Grafana Loki, single binary | 3.7.8 | **Works**, new buckets only ([#151](https://github.com/LennardGeissler/blindbucket/issues/151)) | on changes to the gateway and weekly, in CI (`test/apps/loki`) | [loki.md](guides/loki.md) |
 | Mastodon, media storage | 4.7.3 | **Works** behind a media proxy that signs, such as nginx-s3-gateway: Mastodon's media URLs are unsigned, and the gateway refuses them. New buckets only ([#151](https://github.com/LennardGeissler/blindbucket/issues/151)); video and audio not measured | on changes to the gateway and weekly, in CI (`test/apps/mastodon`) | [mastodon.md](guides/mastodon.md) |
 | Nextcloud, S3 as primary storage | 35.0.2 | **Works**, new installations only: an existing bucket's objects cannot be read until [#151](https://github.com/LennardGeissler/blindbucket/issues/151) | on changes to the gateway and weekly, in CI (`test/apps/nextcloud`) | [nextcloud.md](guides/nextcloud.md) |
 | Velero, with velero-plugin-for-aws | 1.18.4, plugin 1.14.4 | **Works** for resource backups, new buckets only ([#151](https://github.com/LennardGeissler/blindbucket/issues/151)); file-system backups not measured | on changes to the gateway and weekly, in CI (`test/apps/velero`) | [velero.md](guides/velero.md) |
+
+GitLab, with object names in clear and encrypted: an attachment, a generic
+package, a 12 MB LFS object and a CI job's artifact archive, each uploaded
+through Workhorse's S3 client and downloaded through the presigned URL GitLab
+redirects to, identical; one file read out of the archive by Workhorse, the
+archive browsable; an attachment deleted. GitLab puts
+`response-content-disposition` on every download, which releases up to and
+including 1.4 refuse. fog-aws copies files over 10 MB in parts one byte too
+long for the gateway's 64 KiB chunks, which turning `s3_multithreaded_uploads`
+off avoids.
 
 Loki, with object names in clear and encrypted: lines pushed and flushed,
 read back identical after a restart without a WAL, and a stream deleted by the

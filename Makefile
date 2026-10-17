@@ -176,6 +176,10 @@ chart: ## Lint, render and validate the Helm chart.
 app-nextcloud: ## Run Nextcloud through the gateway (test/apps/nextcloud, M12).
 	test/apps/nextcloud/run.sh
 
+.PHONY: app-gitlab
+app-gitlab: ## Run GitLab's object storage through the gateway (test/apps/gitlab, M12).
+	test/apps/gitlab/run.sh
+
 .PHONY: app-loki
 app-loki: ## Run Grafana Loki through the gateway (test/apps/loki, M12).
 	test/apps/loki/run.sh

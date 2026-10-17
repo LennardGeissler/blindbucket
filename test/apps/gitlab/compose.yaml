@@ -1,0 +1,87 @@
+# GitLab storing job artifacts, LFS objects, uploads and packages through the
+# gateway, in front of MinIO. Twice: once with object names in clear and once
+# with names.encrypt, each with its buckets, a gateway and a GitLab of its own.
+# run.sh drives it and starts one GitLab at a time: each wants some 4 GB.
+#
+# client is what a user's machine is in the scenario: a curl on the network
+# that can reach both GitLab and the gateway, and follows GitLab's redirects
+# from one to the other.
+#
+# The gateway image is built from this checkout by test/apps/lib.sh, once,
+# before this file is brought up, so the scenario tests the code, not a
+# release. GitLab is pinned by digest: what is measured is that version, and
+# COMPATIBILITY.md says which one.
+name: blindbucket-gitlab
+
+services:
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  buckets:
+    image: cgr.dev/chainguard/minio:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "mc alias set m http://minio:9000 minioadmin minioadmin &&
+      for v in plain names; do for k in artifacts lfs uploads packages; do
+      mc mb --ignore-existing m/gl-$$k-$$v || exit 1; done; done"
+
+  gateway-plain: &gateway
+    image: blindbucket-apps-gateway
+    pull_policy: never
+    command: ["serve", "-v", "--config", "/etc/blindbucket/blindbucket.yaml"]
+    environment:
+      BLINDBUCKET_PASSPHRASE: apps-scenario-not-a-secret
+    volumes:
+      - ./gateway-plain.yaml:/etc/blindbucket/blindbucket.yaml:ro
+      - ${KEYRING:?run.sh writes the keyring}:/etc/blindbucket/keyring.json:ro
+    depends_on:
+      buckets:
+        condition: service_completed_successfully
+
+  gateway-names:
+    <<: *gateway
+    volumes:
+      - ./gateway-names.yaml:/etc/blindbucket/blindbucket.yaml:ro
+      - ${KEYRING:?run.sh writes the keyring}:/etc/blindbucket/keyring.json:ro
+
+  client:
+    image: curlimages/curl:8.16.0@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6
+    entrypoint: ["sleep", "infinity"]
+
+  gitlab-plain: &gitlab
+    image: gitlab/gitlab-ce:19.5.0-ce.0@sha256:6cde3a3fc33c8261310422c570da962a987bc1e8a08489a03cb7017d3cf452fc
+    profiles: [plain]
+    shm_size: 256m
+    ports:
+      - "127.0.0.1:8181:8181"
+    environment:
+      SCENARIO_MODE: plain
+      GITLAB_OMNIBUS_CONFIG: "from_file '/scenario/gitlab.rb'"
+    # The directory, not the file: an editor that replaces gitlab.rb would
+    # leave a file mount pointing at the old one.
+    volumes:
+      - .:/scenario:ro
+    depends_on:
+      - gateway-plain
+
+  gitlab-names:
+    <<: *gitlab
+    profiles: [names]
+    ports:
+      - "127.0.0.1:8182:8182"
+    environment:
+      SCENARIO_MODE: names
+      GITLAB_OMNIBUS_CONFIG: "from_file '/scenario/gitlab.rb'"
+    depends_on:
+      - gateway-names
