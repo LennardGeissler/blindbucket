@@ -74,9 +74,15 @@ or corrupts anything the application does (M12). Each has a guide in
 
 | Application | Version tested | Status | Last measured | Guide |
 |---|---|---|---|---|
+| Grafana Loki, single binary | 3.7.8 | **Works**, new buckets only ([#151](https://github.com/LennardGeissler/blindbucket/issues/151)) | on changes to the gateway and weekly, in CI (`test/apps/loki`) | [loki.md](guides/loki.md) |
 | Nextcloud, S3 as primary storage | 35.0.2 | **Works**, new installations only: an existing bucket's objects cannot be read until [#151](https://github.com/LennardGeissler/blindbucket/issues/151) | on changes to the gateway and weekly, in CI (`test/apps/nextcloud`) | [nextcloud.md](guides/nextcloud.md) |
 
-Measured with object names in clear and encrypted: upload and download,
+Loki, with object names in clear and encrypted: lines pushed and flushed,
+read back identical after a restart without a WAL, and a stream deleted by the
+compactor, which lists, rewrites the index and deletes a chunk through the
+gateway.
+
+Nextcloud, measured with object names in clear and encrypted: upload and download,
 ranges, rename, copy, versions, the desktop client's chunked upload, multipart
 above Nextcloud's threshold, public link shares, and delete with the trash.
 A multipart part size that is not a multiple of 64 KiB fails every large

@@ -4,9 +4,9 @@
 # not meant to be brought up by hand, because the keyring it mounts is written
 # by run.sh first.
 #
-# The gateway image is built from this checkout by run.sh, once, before this
-# file is brought up -- two services building one tag at the same time race --
-# so the scenario tests the code, not a release. Nextcloud is pinned by digest: what is measured is that version,
+# The gateway image is built from this checkout by test/apps/lib.sh, once,
+# before this file is brought up, so the scenario tests the code, not a
+# release. Nextcloud is pinned by digest: what is measured is that version,
 # and COMPATIBILITY.md says which one.
 name: blindbucket-nextcloud
 
@@ -33,11 +33,11 @@ services:
       mc mb --ignore-existing m/nc-plain m/nc-names"
 
   gateway-plain: &gateway
-    image: blindbucket-nextcloud-gateway
+    image: blindbucket-apps-gateway
     pull_policy: never
     command: ["serve", "-v", "--config", "/etc/blindbucket/blindbucket.yaml"]
     environment:
-      BLINDBUCKET_PASSPHRASE: nextcloud-scenario-not-a-secret
+      BLINDBUCKET_PASSPHRASE: apps-scenario-not-a-secret
     volumes:
       - ./gateway-plain.yaml:/etc/blindbucket/blindbucket.yaml:ro
       - ${KEYRING:?run.sh writes the keyring}:/etc/blindbucket/keyring.json:ro

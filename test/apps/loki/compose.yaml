@@ -1,0 +1,79 @@
+# Grafana Loki in single-binary mode, storing chunks, its TSDB index and its
+# compactor's state in S3 through the gateway, in front of MinIO. Twice: with
+# object names in clear and with names.encrypt. run.sh drives it.
+#
+# The gateway image is built from this checkout by test/apps/lib.sh, so the
+# scenario tests the code, not a release. Loki is pinned by digest: what is
+# measured is that version, and COMPATIBILITY.md says which one.
+name: blindbucket-loki
+
+services:
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  buckets:
+    image: cgr.dev/chainguard/minio:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "mc alias set m http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing m/loki-plain m/loki-names"
+
+  gateway-plain: &gateway
+    image: blindbucket-apps-gateway
+    pull_policy: never
+    command: ["serve", "-v", "--config", "/etc/blindbucket/blindbucket.yaml"]
+    environment:
+      BLINDBUCKET_PASSPHRASE: apps-scenario-not-a-secret
+    volumes:
+      - ./gateway-plain.yaml:/etc/blindbucket/blindbucket.yaml:ro
+      - ${KEYRING:?run.sh writes the keyring}:/etc/blindbucket/keyring.json:ro
+    depends_on:
+      buckets:
+        condition: service_completed_successfully
+
+  gateway-names:
+    <<: *gateway
+    volumes:
+      - ./gateway-names.yaml:/etc/blindbucket/blindbucket.yaml:ro
+      - ${KEYRING:?run.sh writes the keyring}:/etc/blindbucket/keyring.json:ro
+
+  loki-plain: &loki
+    image: grafana/loki:3.7.8@sha256:1107dd5274e0ada47e42472b7a7e71f3b2a2fe878878108f3e2f9e51528f0193
+    command: ["-config.file=/etc/loki/loki.yaml", "-config.expand-env=true"]
+    ports:
+      - "127.0.0.1:3101:3100"
+    environment: &loki-env
+      GATEWAY: gateway-plain
+      BUCKET: loki-plain
+      ACCESS_KEY_ID: LOKISCENARIOPLAIN
+      SECRET_ACCESS_KEY: loki-scenario-secret-plain
+    volumes:
+      - ./loki.yaml:/etc/loki/loki.yaml:ro
+    tmpfs:
+      - /loki:uid=10001,gid=10001
+    depends_on:
+      - gateway-plain
+
+  loki-names:
+    <<: *loki
+    ports:
+      - "127.0.0.1:3102:3100"
+    environment:
+      <<: *loki-env
+      GATEWAY: gateway-names
+      BUCKET: loki-names
+      ACCESS_KEY_ID: LOKISCENARIONAMES
+      SECRET_ACCESS_KEY: loki-scenario-secret-names
+    depends_on:
+      - gateway-names

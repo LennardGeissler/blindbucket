@@ -1,0 +1,64 @@
+# Loki in single-binary mode, with every byte it stores going to S3 through
+# the gateway: chunks, the TSDB index, the compactor's markers and the
+# deletion requests. Tuned so that what normally takes hours happens in a
+# scenario's minute: chunks flush on demand, the index is shipped at once,
+# the compactor runs every few seconds, and a deletion request is acted on
+# right away.
+#
+# No WAL: after a restart, every log line has to come back from the bucket,
+# which is the point.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  log_level: warn
+
+common:
+  path_prefix: /loki
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+  storage:
+    s3:
+      endpoint: ${GATEWAY}:9000
+      bucketnames: ${BUCKET}
+      region: us-east-1
+      access_key_id: ${ACCESS_KEY_ID}
+      secret_access_key: ${SECRET_ACCESS_KEY}
+      s3forcepathstyle: true
+      insecure: true
+
+schema_config:
+  configs:
+    - from: "2024-01-01"
+      store: tsdb
+      object_store: s3
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+ingester:
+  wal:
+    enabled: false
+  chunk_idle_period: 5m
+  max_chunk_age: 1h
+
+storage_config:
+  tsdb_shipper:
+    active_index_directory: /loki/tsdb-index
+    cache_location: /loki/tsdb-cache
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 5s
+  retention_enabled: true
+  retention_delete_delay: 1s
+  delete_request_store: s3
+  delete_request_cancel_period: 1s
+
+limits_config:
+  deletion_mode: filter-and-delete
+  retention_period: 744h
+  allow_structured_metadata: true

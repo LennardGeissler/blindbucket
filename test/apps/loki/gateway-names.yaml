@@ -1,0 +1,28 @@
+# The gateway in front of Loki's bucket loki-names. Plain HTTP and no admin
+# listener: it is reachable only on the scenario's own network.
+server:
+  listen: "0.0.0.0:9000"
+  presign:
+    max_expiry: 1h
+admin:
+  listen: ""
+upstream:
+  endpoint: http://minio:9000
+  region: us-east-1
+  path_style: true
+  access_key_id: minioadmin
+  secret_access_key: minioadmin
+keys:
+  provider: file
+  keyring: /etc/blindbucket/keyring.json
+clients:
+  - name: loki
+    access_key_id: LOKISCENARIONAMES
+    secret_access_key: loki-scenario-secret-names
+    buckets: ["loki-names"]
+
+# Names encrypted. Loki's keys carry the tenant, a stream's fingerprint and
+# the day of each index table; its compactor finds the tables by listing, which
+# names.encrypt has to answer in the client's order (ADR-017).
+names:
+  encrypt: true

@@ -8,8 +8,12 @@ application does.
 | Directory | Application | Guide |
 |---|---|---|
 | [nextcloud/](nextcloud/) | Nextcloud, S3 as primary storage | [docs/guides/nextcloud.md](../../docs/guides/nextcloud.md) |
+| [loki/](loki/) | Grafana Loki, single binary | [docs/guides/loki.md](../../docs/guides/loki.md) |
 
-The shape every scenario keeps:
+[lib.sh](lib.sh) does what every scenario does -- the keyring, the gateway
+image, starting clean, tearing down, and the checks at the provider and in
+the gateway's log -- so that a scenario's run.sh is only what is particular to
+its application. The shape every scenario keeps:
 
 - **`run.sh`** brings it up with Docker Compose, waits for the application,
   runs the operations, then asks the provider and the gateway what happened:
@@ -25,4 +29,5 @@ The shape every scenario keeps:
 - Each runs **with object names in clear and encrypted**, side by side.
 
 [.github/workflows/apps.yml](../../.github/workflows/apps.yml) runs them on
-changes that can affect them and weekly. Locally: `make app-nextcloud`.
+changes that can affect them and weekly. Locally: `make app-nextcloud`,
+`make app-loki`.

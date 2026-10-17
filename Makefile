@@ -176,6 +176,10 @@ chart: ## Lint, render and validate the Helm chart.
 app-nextcloud: ## Run Nextcloud through the gateway (test/apps/nextcloud, M12).
 	test/apps/nextcloud/run.sh
 
+.PHONY: app-loki
+app-loki: ## Run Grafana Loki through the gateway (test/apps/loki, M12).
+	test/apps/loki/run.sh
+
 .PHONY: chart-e2e
 chart-e2e: ## Install the chart in kind and put an object through it.
 	test/helm/kind.sh
