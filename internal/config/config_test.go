@@ -370,6 +370,106 @@ audit:
 	}
 }
 
+func TestAuditExportConfig(t *testing.T) {
+	t.Run("syslog and otlp parsed with env expansion and facility zero", func(t *testing.T) {
+		t.Setenv("TEST_OTLP_TOKEN", "secret-token-val")
+		cfg, err := Load(write(t, minimal+`
+audit:
+  log: /var/lib/blindbucket/audit.log
+  export:
+    syslog:
+      endpoint: "localhost:6514"
+      ca_cert: "/etc/ssl/syslog.pem"
+      app_name: "custom-bb"
+      facility: 0
+      severity: 0
+    otlp:
+      endpoint: "https://collector:4318/v1/logs"
+      ca_cert: "/etc/ssl/otlp.pem"
+      headers:
+        Authorization: "Bearer ${TEST_OTLP_TOKEN}"
+`))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !cfg.Audit.Export.Enabled() {
+			t.Fatal("export not enabled")
+		}
+		if cfg.Audit.Export.Syslog == nil || cfg.Audit.Export.Syslog.Endpoint != "localhost:6514" {
+			t.Errorf("syslog endpoint = %v, want localhost:6514", cfg.Audit.Export.Syslog)
+		}
+		if cfg.Audit.Export.Syslog.Facility == nil || *cfg.Audit.Export.Syslog.Facility != 0 {
+			t.Errorf("syslog facility = %v, want 0", cfg.Audit.Export.Syslog.Facility)
+		}
+		if cfg.Audit.Export.Syslog.Severity == nil || *cfg.Audit.Export.Syslog.Severity != 0 {
+			t.Errorf("syslog severity = %v, want 0", cfg.Audit.Export.Syslog.Severity)
+		}
+		if cfg.Audit.Export.OTLP == nil || cfg.Audit.Export.OTLP.Endpoint != "https://collector:4318/v1/logs" {
+			t.Errorf("otlp endpoint = %v, want https://collector:4318/v1/logs", cfg.Audit.Export.OTLP)
+		}
+		if got := cfg.Audit.Export.OTLP.Headers["Authorization"]; got != "Bearer secret-token-val" {
+			t.Errorf("otlp Authorization header = %q, want Bearer secret-token-val", got)
+		}
+	})
+
+	t.Run("export rejected without audit.log", func(t *testing.T) {
+		_, err := Load(write(t, minimal+`
+audit:
+  export:
+    syslog:
+      endpoint: "localhost:6514"
+`))
+		if err == nil {
+			t.Error("export without audit.log was accepted")
+		}
+	})
+
+	t.Run("syslog rejects invalid facility", func(t *testing.T) {
+		_, err := Load(write(t, minimal+`
+audit:
+  log: /var/lib/blindbucket/audit.log
+  export:
+    syslog:
+      endpoint: "localhost:6514"
+      facility: 99
+`))
+		if err == nil {
+			t.Error("invalid facility was accepted")
+		}
+	})
+
+	t.Run("otlp rejects http endpoint URL", func(t *testing.T) {
+		_, err := Load(write(t, minimal+`
+audit:
+  log: /var/lib/blindbucket/audit.log
+  export:
+    otlp:
+      endpoint: "http://collector:4318/v1/logs"
+`))
+		if err == nil {
+			t.Error("plain http otlp endpoint was accepted, want rejection")
+		}
+	})
+
+	t.Run("otlp rejects missing env var in header", func(t *testing.T) {
+		_, err := Load(write(t, minimal+`
+audit:
+  log: /var/lib/blindbucket/audit.log
+  export:
+    otlp:
+      endpoint: "https://collector:4318/v1/logs"
+      headers:
+        Authorization: "Bearer ${MISSING_OTLP_TOKEN}"
+`))
+		if err == nil {
+			t.Error("missing env reference in header was accepted")
+		}
+		if !strings.Contains(err.Error(), "MISSING_OTLP_TOKEN") {
+			t.Errorf("error = %v, want it to name MISSING_OTLP_TOKEN", err)
+		}
+	})
+}
+
 // TestCredentialSourcesAreAccepted: a section names a source instead of
 // keys, for every source ADR-024 defines, and "static" with keys is the same
 // as no source at all.
@@ -513,5 +613,62 @@ func TestValidationNamesTheProblem(t *testing.T) {
 		if d, err := cfg.Freshness.Retention(); err != nil || d != want {
 			t.Errorf("%s: retention = %v, %v; want %v", body, d, err, want)
 		}
+	}
+}
+
+// TestAuditExportEnvReferences: a header may carry a reference inside other
+// text, and nothing else may. Every other field takes a reference only as its
+// whole value, as before the export existed.
+func TestAuditExportEnvReferences(t *testing.T) {
+	t.Run("a reference inside another field stays literal", func(t *testing.T) {
+		t.Setenv("PART", "expanded")
+		literal := "prefix-${PART}"
+		field := literal
+		if err := expandEnv("upstream.secret_access_key", &field); err != nil {
+			t.Fatalf("expandEnv: %v", err)
+		}
+		if field != literal {
+			t.Errorf("a reference inside a credential was expanded to %q", field)
+		}
+	})
+
+	t.Run("a header is expanded once, not again in what a variable holds", func(t *testing.T) {
+		t.Setenv("OTLP_TOKEN", "${OTHER}")
+		t.Setenv("OTHER", "leaked")
+		cfg, err := Load(write(t, minimal+`
+audit:
+  log: /var/lib/blindbucket/audit.log
+  export:
+    otlp:
+      endpoint: "https://collector:4318/v1/logs"
+      headers:
+        Authorization: "Bearer ${OTLP_TOKEN} for ${OTHER}"
+`))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got, want := cfg.Audit.Export.OTLP.Headers["Authorization"], "Bearer ${OTHER} for leaked"; got != want {
+			t.Errorf("Authorization = %q, want %q", got, want)
+		}
+	})
+
+	for _, tc := range []struct{ name, syslog string }{
+		{"syslog over udp is refused", "network: udp"},
+		{"an app_name with a space is refused", `app_name: "blind bucket"`},
+		{"an app_name longer than 48 is refused", "app_name: " + strings.Repeat("a", 49)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(write(t, minimal+`
+audit:
+  log: /var/lib/blindbucket/audit.log
+  export:
+    syslog:
+      endpoint: "localhost:6514"
+      `+tc.syslog+`
+`))
+			if err == nil {
+				t.Error("accepted")
+			}
+		})
 	}
 }

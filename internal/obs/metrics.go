@@ -44,23 +44,27 @@ var integrityKinds = []string{
 	KindChunk, KindHeader, KindDEKUnwrap, KindManifest, KindToken, KindSize, KindFreshness,
 }
 
+// exportDestinations lists the destinations for audit export metrics.
+var exportDestinations = []string{"syslog", "otlp"}
+
 // Metrics is the gateway's instrument panel.
 //
 // A nil *Metrics is usable and records nothing, so a caller that was built
 // without observability does not need a branch at every call site.
 type Metrics struct {
-	requests          *prometheus.CounterVec
-	requestDuration   *prometheus.HistogramVec
-	upstreamDuration  *prometheus.HistogramVec
-	bytes             *prometheus.CounterVec
-	activeStreams     *prometheus.GaugeVec
-	integrityFailures *prometheus.CounterVec
-	authFailures      *prometheus.CounterVec
-	checksumMismatch  *prometheus.CounterVec
-	auditFailures     prometheus.Counter
-	auditBroken       prometheus.Gauge
-	keyringKeys       prometheus.Gauge
-	keyringCreated    *prometheus.GaugeVec
+	requests            *prometheus.CounterVec
+	requestDuration     *prometheus.HistogramVec
+	upstreamDuration    *prometheus.HistogramVec
+	bytes               *prometheus.CounterVec
+	activeStreams       *prometheus.GaugeVec
+	integrityFailures   *prometheus.CounterVec
+	authFailures        *prometheus.CounterVec
+	checksumMismatch    *prometheus.CounterVec
+	auditFailures       prometheus.Counter
+	auditBroken         prometheus.Gauge
+	auditExportFailures *prometheus.CounterVec
+	keyringKeys         prometheus.Gauge
+	keyringCreated      *prometheus.GaugeVec
 }
 
 // KeyringInfo is what this package needs to know about a keyring. It is an
@@ -156,6 +160,11 @@ func NewMetrics(reg prometheus.Registerer, cfg MetricsConfig) *Metrics {
 				"gateway is refusing requests.",
 		}),
 
+		auditExportFailures: factory.counterVec(prometheus.CounterOpts{
+			Name: "blindbucket_audit_export_failures_total",
+			Help: "Audit entries that could not be exported to external receivers.",
+		}, []string{"destination"}),
+
 		// Key age is the input to a rotation decision, and until these existed
 		// the only way to see it was to open the keyring by hand. A creation
 		// timestamp rather than an age, because a gauge that has to be
@@ -181,6 +190,9 @@ func NewMetrics(reg prometheus.Registerer, cfg MetricsConfig) *Metrics {
 	// the first failure — the one an operator most needs to hear about.
 	for _, kind := range integrityKinds {
 		m.integrityFailures.WithLabelValues(kind)
+	}
+	for _, dest := range exportDestinations {
+		m.auditExportFailures.WithLabelValues(dest)
 	}
 	return m
 }
@@ -272,6 +284,15 @@ func (m *Metrics) AuditFailure() {
 	if m != nil {
 		m.auditFailures.Inc()
 		m.auditBroken.Set(1)
+	}
+}
+
+// AuditExportFailure records an audit entry that could not be exported to an external
+// receiver (e.g. syslog or OTLP). Unlike AuditFailure, an export failure does not
+// mark the log broken and does not block requests.
+func (m *Metrics) AuditExportFailure(destination string) {
+	if m != nil {
+		m.auditExportFailures.WithLabelValues(destination).Inc()
 	}
 }
 

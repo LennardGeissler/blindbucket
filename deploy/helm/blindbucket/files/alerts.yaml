@@ -57,6 +57,19 @@ groups:
             recorded. The log verifies around the gap, so the gap has to be
             noted from here.
 
+      # Audit entries could not be exported to an external SIEM and were dropped
+      # or failed to send. The local file is unaffected, but the export has gaps.
+      - alert: BlindbucketAuditExportGap
+        expr: increase(blindbucket_audit_export_failures_total[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: audit entries missing from {{ $labels.destination }} export"
+          description: >-
+            {{ $value | humanize }} audit entries could not be exported to
+            {{ $labels.destination }} in the last 10 minutes. Compare against
+            the local file to recover missing entries by seq.
+
       # Edit the job name to match the scrape configuration.
       - alert: BlindbucketDown
         expr: up{job="blindbucket"} == 0

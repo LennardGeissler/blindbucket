@@ -647,6 +647,43 @@ $ blindbucket audit verify --keyring keyring.json --print audit.log
 
 </details>
 
+<details>
+<summary><b>Exporting audit entries to a SIEM (Syslog & OTLP)</b></summary>
+
+Organisations collecting audit events in a SIEM can export entries as they are written,
+over syslog (RFC 5424, over TLS) or OpenTelemetry logs (OTLP/HTTP), in addition to the file:
+
+```yaml
+audit:
+  log: /var/lib/blindbucket/audit.log
+  export:
+    syslog:
+      endpoint: "siem.example.com:6514"
+    otlp:
+      endpoint: "https://collector.example.com:4318/v1/logs"
+```
+
+Each exported entry carries what the file entry carries, including its chain and its
+position in it (`seq`), so an exported stream can be compared with the file. Object names
+stay encrypted, as in the file. TLS is required for both; `ca_cert` names a private CA,
+and an OTLP header can take a credential from the environment:
+`Authorization: "Bearer ${OTLP_TOKEN}"`.
+
+**The export is not signed**, and verification still runs on the file with
+`blindbucket audit verify`. The file is the record; the export is a copy for search and
+alerting. It is queued and sent in batches, and when a receiver is down or slower than the
+gateway, the queue drops entries rather than making requests wait. Every dropped entry
+increments `blindbucket_audit_export_failures_total`, which `BlindbucketAuditExportGap`
+alerts on, and the log says when an export starts losing entries and when it has recovered.
+
+A SIEM finds missing entries by gaps in `seq` within a chain, and recovers them from the
+file. Entries can arrive out of `seq` order, and a syslog receiver can see one twice, after
+a reconnect. After a crash a receiver can also hold entries the file lost, because the file
+is flushed at checkpoints and the export does not wait for that. The design is in
+[ADR-033](docs/adr/ADR-033-audit-export.md).
+
+</details>
+
 **Two things it does not do**, stated here rather than in a footnote.
 
 Entries written after the last checkpoint are chained but *not* signed. Whoever

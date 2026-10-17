@@ -86,6 +86,26 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'blindbucket_audit_export_failures_total{destination="syslog",instance="gw1",job="blindbucket"}'
+        values: '0 0 3 3'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: BlindbucketAuditExportGap
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: gw1
+              job: blindbucket
+              destination: syslog
+            exp_annotations:
+              summary: "gw1: audit entries missing from syslog export"
+              description: >-
+                3 audit entries could not be exported to syslog in the last 10
+                minutes. Compare against the local file to recover missing
+                entries by seq.
+
+  - interval: 1m
+    input_series:
       - series: 'up{instance="gw1",job="blindbucket"}'
         values: '1 0 0 0 0 0 0 0'
     alert_rule_test:

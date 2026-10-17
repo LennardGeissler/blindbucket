@@ -171,6 +171,26 @@ crypto:
 #   # with a record known to be incomplete. Defaults to true. Turning it off
 #   # means a full disk silently switches auditing off instead of paging you.
 #   fail_closed: true
+#   # Stream audit entries to an external SIEM over TLS syslog (RFC 5424 / RFC 5425)
+#   # or OpenTelemetry logs (OTLP/HTTP over HTTPS). Entries are buffered in an in-memory
+#   # queue that drops records when full under receiver downtime or backpressure, so
+#   # export never blocks S3 requests or stops the file from being written.
+#   # The export stream is not signed; verification runs on the local file with
+#   # `blindbucket audit verify`. SIEMs can detect dropped entries by checking for gaps
+#   # in the sequential `seq` counter against the file.
+#   export:
+#     syslog:
+#       endpoint: "siem.example.com:6514"
+#       # network: tcp                  # or tcp4, tcp6; always over TLS
+#       # ca_cert: /etc/ssl/certs/syslog-ca.pem
+#       # app_name: blindbucket
+#       # facility: 13                   # 13 = log audit (0 = kern)
+#       # severity: 6                    # 6 = informational (0 = emerg)
+#     otlp:
+#       endpoint: "https://collector.example.com:4318/v1/logs"
+#       # headers:                     # the one setting that takes ${VAR} inside text
+#       #   Authorization: "Bearer ${OTLP_TOKEN}"
+#       # ca_cert: /etc/ssl/certs/otlp-ca.pem
 
 # Rollback detection (ADR-018). A storage provider serving an *older but genuine*
 # version of an object is the one attack the object format cannot catch by

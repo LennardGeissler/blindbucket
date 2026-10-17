@@ -105,6 +105,39 @@ type Audit struct {
 	// because the attack it guards against -- filling a disk to switch auditing
 	// off -- is cheap against a log that degrades quietly.
 	FailClosed bool `yaml:"fail_closed"`
+	// Export configures streaming audit records to an external SIEM over
+	// syslog (RFC 5424 over TLS) or OTLP logs. The export stream is not
+	// signed; verification runs on the file.
+	Export AuditExport `yaml:"export"`
+}
+
+// AuditExport configures exporting audit entries over syslog and/or OTLP.
+type AuditExport struct {
+	Syslog *SyslogExport `yaml:"syslog"`
+	OTLP   *OTLPExport   `yaml:"otlp"`
+}
+
+// Enabled reports whether any export destination is configured.
+func (e AuditExport) Enabled() bool {
+	return (e.Syslog != nil && e.Syslog.Endpoint != "") ||
+		(e.OTLP != nil && e.OTLP.Endpoint != "")
+}
+
+// SyslogExport configures exporting audit entries over syslog (RFC 5424 over TLS).
+type SyslogExport struct {
+	Endpoint string `yaml:"endpoint"`
+	Network  string `yaml:"network"`
+	CACert   string `yaml:"ca_cert"`
+	AppName  string `yaml:"app_name"`
+	Facility *int   `yaml:"facility"`
+	Severity *int   `yaml:"severity"`
+}
+
+// OTLPExport configures exporting audit entries over OTLP logs (HTTPS).
+type OTLPExport struct {
+	Endpoint string            `yaml:"endpoint"`
+	Headers  map[string]string `yaml:"headers"`
+	CACert   string            `yaml:"ca_cert"`
 }
 
 // Enabled reports whether audit logging was asked for.
@@ -391,8 +424,13 @@ func (c Client) String() string {
 		c.Name, c.AccessKeyID, c.Buckets)
 }
 
-// envRef matches a ${VARIABLE} reference.
+// envRef matches a ${VARIABLE} reference that is the whole value.
 var envRef = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
+
+// envRefWithin matches a ${VARIABLE} reference anywhere in a value. Only an
+// HTTP header takes one, because only a header carries a credential inside
+// other text: "Bearer ${OTLP_TOKEN}".
+var envRefWithin = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 // Load reads, expands and validates a configuration file.
 func Load(path string) (*Config, error) {
@@ -456,6 +494,15 @@ func Load(path string) (*Config, error) {
 			}
 		}
 	}
+	if cfg.Audit.Export.OTLP != nil {
+		for k, v := range cfg.Audit.Export.OTLP.Headers {
+			val, err := expandEnvWithin("audit.export.otlp.headers["+k+"]", v)
+			if err != nil {
+				return nil, err
+			}
+			cfg.Audit.Export.OTLP.Headers[k] = val
+		}
+	}
 
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("config: %s: %w", path, err)
@@ -469,14 +516,36 @@ func expandEnv(name string, field *string) error {
 	if match == nil {
 		return nil
 	}
-	value, ok := os.LookupEnv(match[1])
-	if !ok {
-		return fmt.Errorf("config: %s references $%s, which is not set; set it, or load the file "+
-			"that holds it -- for a configuration `blindbucket init` wrote: "+
-			"set -a; . ./blindbucket.env; set +a", name, match[1])
+	value, err := lookupEnv(name, match[1])
+	if err != nil {
+		return err
 	}
 	*field = value
 	return nil
+}
+
+// expandEnvWithin resolves every ${VAR} reference in a value, in one pass: a
+// variable's value is never itself searched for references.
+func expandEnvWithin(name, value string) (string, error) {
+	var firstErr error
+	out := envRefWithin.ReplaceAllStringFunc(value, func(ref string) string {
+		resolved, err := lookupEnv(name, envRefWithin.FindStringSubmatch(ref)[1])
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		return resolved
+	})
+	return out, firstErr
+}
+
+func lookupEnv(name, variable string) (string, error) {
+	value, ok := os.LookupEnv(variable)
+	if !ok {
+		return "", fmt.Errorf("config: %s references $%s, which is not set; set it, or load the file "+
+			"that holds it -- for a configuration `blindbucket init` wrote: "+
+			"set -a; . ./blindbucket.env; set +a", name, variable)
+	}
+	return value, nil
 }
 
 // validateCredentials checks one section's AWS credentials: keys, or a source
@@ -639,8 +708,25 @@ func (f Freshness) validate() error {
 	return nil
 }
 
+// syslogName reports whether s fits an RFC 5424 header field: 1 to max
+// printable ASCII characters, none of them a space.
+func syslogName(s string, maxLen int) bool {
+	if len(s) == 0 || len(s) > maxLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < 33 || s[i] > 126 {
+			return false
+		}
+	}
+	return true
+}
+
 func (a Audit) validate() error {
 	if !a.Enabled() {
+		if a.Export.Enabled() {
+			return fmt.Errorf("audit.export requires audit.log to be configured")
+		}
 		return nil
 	}
 	switch {
@@ -655,6 +741,40 @@ func (a Audit) validate() error {
 	}
 	if interval < 0 {
 		return fmt.Errorf("audit.checkpoint_interval must not be negative")
+	}
+	if a.Export.Syslog != nil {
+		if a.Export.Syslog.Endpoint == "" {
+			return fmt.Errorf("audit.export.syslog.endpoint is required when syslog export is configured")
+		}
+		switch a.Export.Syslog.Network {
+		case "", "tcp", "tcp4", "tcp6":
+		default:
+			return fmt.Errorf("audit.export.syslog.network must be tcp, tcp4 or tcp6, not %q: "+
+				"the export runs over TLS", a.Export.Syslog.Network)
+		}
+		if name := a.Export.Syslog.AppName; name != "" && !syslogName(name, 48) {
+			return fmt.Errorf("audit.export.syslog.app_name must be 1 to 48 printable ASCII "+
+				"characters without spaces (RFC 5424), not %q", name)
+		}
+		if a.Export.Syslog.Facility != nil {
+			if *a.Export.Syslog.Facility < 0 || *a.Export.Syslog.Facility > 23 {
+				return fmt.Errorf("audit.export.syslog.facility must be between 0 and 23")
+			}
+		}
+		if a.Export.Syslog.Severity != nil {
+			if *a.Export.Syslog.Severity < 0 || *a.Export.Syslog.Severity > 7 {
+				return fmt.Errorf("audit.export.syslog.severity must be between 0 and 7")
+			}
+		}
+	}
+	if a.Export.OTLP != nil {
+		if a.Export.OTLP.Endpoint == "" {
+			return fmt.Errorf("audit.export.otlp.endpoint is required when otlp export is configured")
+		}
+		u, err := url.Parse(a.Export.OTLP.Endpoint)
+		if err != nil || u.Scheme != "https" {
+			return fmt.Errorf("audit.export.otlp.endpoint must be a valid https URL")
+		}
 	}
 	return nil
 }
