@@ -615,3 +615,60 @@ func TestValidationNamesTheProblem(t *testing.T) {
 		}
 	}
 }
+
+// TestAuditExportEnvReferences: a header may carry a reference inside other
+// text, and nothing else may. Every other field takes a reference only as its
+// whole value, as before the export existed.
+func TestAuditExportEnvReferences(t *testing.T) {
+	t.Run("a reference inside another field stays literal", func(t *testing.T) {
+		t.Setenv("PART", "expanded")
+		literal := "prefix-${PART}"
+		field := literal
+		if err := expandEnv("upstream.secret_access_key", &field); err != nil {
+			t.Fatalf("expandEnv: %v", err)
+		}
+		if field != literal {
+			t.Errorf("a reference inside a credential was expanded to %q", field)
+		}
+	})
+
+	t.Run("a header is expanded once, not again in what a variable holds", func(t *testing.T) {
+		t.Setenv("OTLP_TOKEN", "${OTHER}")
+		t.Setenv("OTHER", "leaked")
+		cfg, err := Load(write(t, minimal+`
+audit:
+  log: /var/lib/blindbucket/audit.log
+  export:
+    otlp:
+      endpoint: "https://collector:4318/v1/logs"
+      headers:
+        Authorization: "Bearer ${OTLP_TOKEN} for ${OTHER}"
+`))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got, want := cfg.Audit.Export.OTLP.Headers["Authorization"], "Bearer ${OTHER} for leaked"; got != want {
+			t.Errorf("Authorization = %q, want %q", got, want)
+		}
+	})
+
+	for _, tc := range []struct{ name, syslog string }{
+		{"syslog over udp is refused", "network: udp"},
+		{"an app_name with a space is refused", `app_name: "blind bucket"`},
+		{"an app_name longer than 48 is refused", "app_name: " + strings.Repeat("a", 49)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(write(t, minimal+`
+audit:
+  log: /var/lib/blindbucket/audit.log
+  export:
+    syslog:
+      endpoint: "localhost:6514"
+      `+tc.syslog+`
+`))
+			if err == nil {
+				t.Error("accepted")
+			}
+		})
+	}
+}

@@ -663,15 +663,24 @@ audit:
       endpoint: "https://collector.example.com:4318/v1/logs"
 ```
 
-Each exported entry carries what the file entry carries, including its position in the
-chain (`seq`), so an exported stream can be matched and compared with the file.
-Under concurrent requests, network exports can arrive slightly out of `seq` order because
-export runs outside the writer's lock.
+Each exported entry carries what the file entry carries, including its chain and its
+position in it (`seq`), so an exported stream can be compared with the file. Object names
+stay encrypted, as in the file. TLS is required for both; `ca_cert` names a private CA,
+and an OTLP header can take a credential from the environment:
+`Authorization: "Bearer ${OTLP_TOKEN}"`.
 
-**The export is not signed**, and cryptographic verification still runs on the local file with `blindbucket audit verify`.
-The file stays the authoritative record that verifies; the export is a buffered queue for search and alerting that drops entries when full to prevent downstream backpressure from ever blocking S3 operations or file writes.
-A SIEM detects missing or dropped entries by identifying gaps in `seq` when comparing against the file.
-Export failures and drops increment `blindbucket_audit_export_failures_total` and log state transitions.
+**The export is not signed**, and verification still runs on the file with
+`blindbucket audit verify`. The file is the record; the export is a copy for search and
+alerting. It is queued and sent in batches, and when a receiver is down or slower than the
+gateway, the queue drops entries rather than making requests wait. Every dropped entry
+increments `blindbucket_audit_export_failures_total`, which `BlindbucketAuditExportGap`
+alerts on, and the log says when an export starts losing entries and when it has recovered.
+
+A SIEM finds missing entries by gaps in `seq` within a chain, and recovers them from the
+file. Entries can arrive out of `seq` order, and a syslog receiver can see one twice, after
+a reconnect. After a crash a receiver can also hold entries the file lost, because the file
+is flushed at checkpoints and the export does not wait for that. The design is in
+[ADR-033](docs/adr/ADR-033-audit-export.md).
 
 </details>
 

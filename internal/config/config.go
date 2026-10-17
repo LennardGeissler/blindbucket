@@ -424,8 +424,13 @@ func (c Client) String() string {
 		c.Name, c.AccessKeyID, c.Buckets)
 }
 
-// envRef matches a ${VARIABLE} reference within a string.
-var envRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+// envRef matches a ${VARIABLE} reference that is the whole value.
+var envRef = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
+
+// envRefWithin matches a ${VARIABLE} reference anywhere in a value. Only an
+// HTTP header takes one, because only a header carries a credential inside
+// other text: "Bearer ${OTLP_TOKEN}".
+var envRefWithin = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 // Load reads, expands and validates a configuration file.
 func Load(path string) (*Config, error) {
@@ -491,8 +496,8 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Audit.Export.OTLP != nil {
 		for k, v := range cfg.Audit.Export.OTLP.Headers {
-			val := v
-			if err := expandEnv("audit.export.otlp.headers["+k+"]", &val); err != nil {
+			val, err := expandEnvWithin("audit.export.otlp.headers["+k+"]", v)
+			if err != nil {
 				return nil, err
 			}
 			cfg.Audit.Export.OTLP.Headers[k] = val
@@ -505,25 +510,42 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// expandEnv resolves ${VAR} references in place.
+// expandEnv resolves a ${VAR} reference in place.
 func expandEnv(name string, field *string) error {
-	matches := envRef.FindAllStringSubmatch(*field, -1)
-	if len(matches) == 0 {
+	match := envRef.FindStringSubmatch(*field)
+	if match == nil {
 		return nil
 	}
-	res := *field
-	for _, match := range matches {
-		varName := match[1]
-		value, ok := os.LookupEnv(varName)
-		if !ok {
-			return fmt.Errorf("config: %s references $%s, which is not set; set it, or load the file "+
-				"that holds it -- for a configuration `blindbucket init` wrote: "+
-				"set -a; . ./blindbucket.env; set +a", name, varName)
-		}
-		res = strings.ReplaceAll(res, match[0], value)
+	value, err := lookupEnv(name, match[1])
+	if err != nil {
+		return err
 	}
-	*field = res
+	*field = value
 	return nil
+}
+
+// expandEnvWithin resolves every ${VAR} reference in a value, in one pass: a
+// variable's value is never itself searched for references.
+func expandEnvWithin(name, value string) (string, error) {
+	var firstErr error
+	out := envRefWithin.ReplaceAllStringFunc(value, func(ref string) string {
+		resolved, err := lookupEnv(name, envRefWithin.FindStringSubmatch(ref)[1])
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		return resolved
+	})
+	return out, firstErr
+}
+
+func lookupEnv(name, variable string) (string, error) {
+	value, ok := os.LookupEnv(variable)
+	if !ok {
+		return "", fmt.Errorf("config: %s references $%s, which is not set; set it, or load the file "+
+			"that holds it -- for a configuration `blindbucket init` wrote: "+
+			"set -a; . ./blindbucket.env; set +a", name, variable)
+	}
+	return value, nil
 }
 
 // validateCredentials checks one section's AWS credentials: keys, or a source
@@ -686,6 +708,20 @@ func (f Freshness) validate() error {
 	return nil
 }
 
+// syslogName reports whether s fits an RFC 5424 header field: 1 to max
+// printable ASCII characters, none of them a space.
+func syslogName(s string, maxLen int) bool {
+	if len(s) == 0 || len(s) > maxLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < 33 || s[i] > 126 {
+			return false
+		}
+	}
+	return true
+}
+
 func (a Audit) validate() error {
 	if !a.Enabled() {
 		if a.Export.Enabled() {
@@ -709,6 +745,16 @@ func (a Audit) validate() error {
 	if a.Export.Syslog != nil {
 		if a.Export.Syslog.Endpoint == "" {
 			return fmt.Errorf("audit.export.syslog.endpoint is required when syslog export is configured")
+		}
+		switch a.Export.Syslog.Network {
+		case "", "tcp", "tcp4", "tcp6":
+		default:
+			return fmt.Errorf("audit.export.syslog.network must be tcp, tcp4 or tcp6, not %q: "+
+				"the export runs over TLS", a.Export.Syslog.Network)
+		}
+		if name := a.Export.Syslog.AppName; name != "" && !syslogName(name, 48) {
+			return fmt.Errorf("audit.export.syslog.app_name must be 1 to 48 printable ASCII "+
+				"characters without spaces (RFC 5424), not %q", name)
 		}
 		if a.Export.Syslog.Facility != nil {
 			if *a.Export.Syslog.Facility < 0 || *a.Export.Syslog.Facility > 23 {

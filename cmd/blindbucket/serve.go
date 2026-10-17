@@ -363,6 +363,9 @@ func openAuditLog(
 		Exporter:           exporter,
 	})
 	if err != nil {
+		if exporter != nil {
+			_ = exporter.Close()
+		}
 		return nil, fmt.Errorf("audit.log %s: %w", cfg.Audit.Log, err)
 	}
 
@@ -393,8 +396,8 @@ func openAuditExporters(cfg config.AuditExport, log *slog.Logger, metrics *obs.M
 		if err != nil {
 			return nil, err
 		}
-		onError, onSuccess := newExportCallbacks(log, metrics)
-		asyncSyslog := audit.NewAsyncExporter(syslogExp, "syslog", 2048, audit.DefaultDrainTimeout, onError, onSuccess)
+		r := newExportReporter(log, metrics)
+		asyncSyslog := audit.NewAsyncExporter(syslogExp, "syslog", 2048, audit.DefaultDrainTimeout, r.failed, r.delivered)
 		exporters = append(exporters, asyncSyslog)
 	}
 
@@ -407,8 +410,8 @@ func openAuditExporters(cfg config.AuditExport, log *slog.Logger, metrics *obs.M
 		if err != nil {
 			return nil, err
 		}
-		onError, onSuccess := newExportCallbacks(log, metrics)
-		asyncOTLP := audit.NewAsyncExporter(otlpExp, "otlp", 2048, audit.DefaultDrainTimeout, onError, onSuccess)
+		r := newExportReporter(log, metrics)
+		asyncOTLP := audit.NewAsyncExporter(otlpExp, "otlp", 2048, audit.DefaultDrainTimeout, r.failed, r.delivered)
 		exporters = append(exporters, asyncOTLP)
 	}
 
@@ -421,38 +424,60 @@ func openAuditExporters(cfg config.AuditExport, log *slog.Logger, metrics *obs.M
 	return audit.MultiExporter(exporters), nil
 }
 
-// newExportCallbacks creates onError and onSuccess callbacks that record metrics on
-// every failure and log only on state transitions (failing vs recovered) to avoid log flooding.
-func newExportCallbacks(log *slog.Logger, metrics *obs.Metrics) (func(string, error), func(string)) {
-	var mu sync.Mutex
-	var failing bool
+// exportRecovery is how long an export has to go without losing an entry
+// before it is reported recovered.
+const exportRecovery = time.Minute
 
-	onError := func(destination string, err error) {
-		if metrics != nil {
-			metrics.AuditExportFailure(destination)
-		}
-		mu.Lock()
-		firstFailure := !failing
-		failing = true
-		mu.Unlock()
+// exportReporter turns an export's failures into the metric, which counts
+// every lost entry, and into a log line for each change of state.
+//
+// The state changes with some hysteresis. A receiver that is up but slower
+// than the gateway alternates sends that succeed with entries the full queue
+// drops; logging each switch was some 170 lines a second in each direction.
+// So the export counts as failing from its first lost entry until it has gone
+// a minute without one, and the recovery says how many were lost meanwhile.
+type exportReporter struct {
+	log     *slog.Logger
+	metrics *obs.Metrics
+	now     func() time.Time
 
-		if firstFailure && log != nil {
-			log.Error("audit export failing, entries will be dropped", "destination", destination, "err", err)
-		}
+	mu          sync.Mutex
+	failing     bool
+	lastFailure time.Time
+	lost        int64
+}
+
+func newExportReporter(log *slog.Logger, metrics *obs.Metrics) *exportReporter {
+	return &exportReporter{log: log, metrics: metrics, now: time.Now}
+}
+
+// failed records one entry that was dropped or did not arrive.
+func (r *exportReporter) failed(destination string, err error) {
+	r.metrics.AuditExportFailure(destination)
+	r.mu.Lock()
+	first := !r.failing
+	r.failing = true
+	r.lastFailure = r.now()
+	r.lost++
+	r.mu.Unlock()
+	if first && r.log != nil {
+		r.log.Error("audit export failing; entries are being dropped, the file is unaffected",
+			"destination", destination, "err", err)
 	}
+}
 
-	onSuccess := func(destination string) {
-		mu.Lock()
-		wasFailing := failing
-		failing = false
-		mu.Unlock()
-
-		if wasFailing && log != nil {
-			log.Info("audit export recovered", "destination", destination)
-		}
+// delivered records a send that arrived.
+func (r *exportReporter) delivered(destination string) {
+	r.mu.Lock()
+	recovered := r.failing && r.now().Sub(r.lastFailure) >= exportRecovery
+	lost := r.lost
+	if recovered {
+		r.failing, r.lost = false, 0
 	}
-
-	return onError, onSuccess
+	r.mu.Unlock()
+	if recovered && r.log != nil {
+		r.log.Info("audit export recovered", "destination", destination, "entries_lost", lost)
+	}
 }
 
 // openNameEncrypter builds the object-name encrypter, or nil when names are to

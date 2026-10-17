@@ -181,14 +181,14 @@ crypto:
 #   export:
 #     syslog:
 #       endpoint: "siem.example.com:6514"
-#       # network: tcp
+#       # network: tcp                  # or tcp4, tcp6; always over TLS
 #       # ca_cert: /etc/ssl/certs/syslog-ca.pem
 #       # app_name: blindbucket
 #       # facility: 13                   # 13 = log audit (0 = kern)
 #       # severity: 6                    # 6 = informational (0 = emerg)
 #     otlp:
 #       endpoint: "https://collector.example.com:4318/v1/logs"
-#       # headers:
+#       # headers:                     # the one setting that takes ${VAR} inside text
 #       #   Authorization: "Bearer ${OTLP_TOKEN}"
 #       # ca_cert: /etc/ssl/certs/otlp-ca.pem
 
