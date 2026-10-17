@@ -371,22 +371,23 @@ audit:
 }
 
 func TestAuditExportConfig(t *testing.T) {
-	t.Run("syslog and otlp parsed", func(t *testing.T) {
+	t.Run("syslog and otlp parsed with env expansion and facility zero", func(t *testing.T) {
+		t.Setenv("TEST_OTLP_TOKEN", "secret-token-val")
 		cfg, err := Load(write(t, minimal+`
 audit:
   log: /var/lib/blindbucket/audit.log
   export:
     syslog:
       endpoint: "localhost:6514"
-      insecure_skip_verify: true
+      ca_cert: "/etc/ssl/syslog.pem"
       app_name: "custom-bb"
-      facility: 13
-      severity: 6
+      facility: 0
+      severity: 0
     otlp:
       endpoint: "https://collector:4318/v1/logs"
+      ca_cert: "/etc/ssl/otlp.pem"
       headers:
-        Authorization: "Bearer test"
-      insecure_skip_verify: true
+        Authorization: "Bearer ${TEST_OTLP_TOKEN}"
 `))
 		if err != nil {
 			t.Fatalf("Load: %v", err)
@@ -397,8 +398,17 @@ audit:
 		if cfg.Audit.Export.Syslog == nil || cfg.Audit.Export.Syslog.Endpoint != "localhost:6514" {
 			t.Errorf("syslog endpoint = %v, want localhost:6514", cfg.Audit.Export.Syslog)
 		}
+		if cfg.Audit.Export.Syslog.Facility == nil || *cfg.Audit.Export.Syslog.Facility != 0 {
+			t.Errorf("syslog facility = %v, want 0", cfg.Audit.Export.Syslog.Facility)
+		}
+		if cfg.Audit.Export.Syslog.Severity == nil || *cfg.Audit.Export.Syslog.Severity != 0 {
+			t.Errorf("syslog severity = %v, want 0", cfg.Audit.Export.Syslog.Severity)
+		}
 		if cfg.Audit.Export.OTLP == nil || cfg.Audit.Export.OTLP.Endpoint != "https://collector:4318/v1/logs" {
 			t.Errorf("otlp endpoint = %v, want https://collector:4318/v1/logs", cfg.Audit.Export.OTLP)
+		}
+		if got := cfg.Audit.Export.OTLP.Headers["Authorization"]; got != "Bearer secret-token-val" {
+			t.Errorf("otlp Authorization header = %q, want Bearer secret-token-val", got)
 		}
 	})
 
@@ -428,16 +438,34 @@ audit:
 		}
 	})
 
-	t.Run("otlp rejects invalid endpoint URL", func(t *testing.T) {
+	t.Run("otlp rejects http endpoint URL", func(t *testing.T) {
 		_, err := Load(write(t, minimal+`
 audit:
   log: /var/lib/blindbucket/audit.log
   export:
     otlp:
-      endpoint: "ftp://collector:4318/v1/logs"
+      endpoint: "http://collector:4318/v1/logs"
 `))
 		if err == nil {
-			t.Error("non-http otlp endpoint was accepted")
+			t.Error("plain http otlp endpoint was accepted, want rejection")
+		}
+	})
+
+	t.Run("otlp rejects missing env var in header", func(t *testing.T) {
+		_, err := Load(write(t, minimal+`
+audit:
+  log: /var/lib/blindbucket/audit.log
+  export:
+    otlp:
+      endpoint: "https://collector:4318/v1/logs"
+      headers:
+        Authorization: "Bearer ${MISSING_OTLP_TOKEN}"
+`))
+		if err == nil {
+			t.Error("missing env reference in header was accepted")
+		}
+		if !strings.Contains(err.Error(), "MISSING_OTLP_TOKEN") {
+			t.Errorf("error = %v, want it to name MISSING_OTLP_TOKEN", err)
 		}
 	})
 }

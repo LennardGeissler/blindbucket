@@ -52,14 +52,14 @@ var exportDestinations = []string{"syslog", "otlp"}
 // A nil *Metrics is usable and records nothing, so a caller that was built
 // without observability does not need a branch at every call site.
 type Metrics struct {
-	requests          *prometheus.CounterVec
-	requestDuration   *prometheus.HistogramVec
-	upstreamDuration  *prometheus.HistogramVec
-	bytes             *prometheus.CounterVec
-	activeStreams     *prometheus.GaugeVec
-	integrityFailures *prometheus.CounterVec
-	authFailures      *prometheus.CounterVec
-	checksumMismatch  *prometheus.CounterVec
+	requests            *prometheus.CounterVec
+	requestDuration     *prometheus.HistogramVec
+	upstreamDuration    *prometheus.HistogramVec
+	bytes               *prometheus.CounterVec
+	activeStreams       *prometheus.GaugeVec
+	integrityFailures   *prometheus.CounterVec
+	authFailures        *prometheus.CounterVec
+	checksumMismatch    *prometheus.CounterVec
 	auditFailures       prometheus.Counter
 	auditBroken         prometheus.Gauge
 	auditExportFailures *prometheus.CounterVec

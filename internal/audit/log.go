@@ -517,6 +517,9 @@ func (w *Writer) Close() error {
 		w.wg.Wait()
 
 		w.mu.Lock()
+		// The final checkpoint is what signs everything written since the last one.
+		// Without it a clean shutdown would leave the tail of the log chained but unsigned,
+		// which is the one case it costs nothing to avoid.
 		if w.broken == nil && w.dirty {
 			w.closeErr = w.checkpointLocked()
 		}

@@ -11,11 +11,17 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
+
+// DefaultDrainTimeout is how long AsyncExporter waits during shutdown to flush
+// queued entries before dropping remaining entries.
+const DefaultDrainTimeout = 2 * time.Second
 
 // Exporter exports copies of audit entries to an external receiver.
 // Implementations must be safe for concurrent use.
@@ -66,14 +72,13 @@ func NewExportedEntry(chain string, e *Entry) ExportedEntry {
 
 // SyslogConfig configures an RFC 5424 syslog exporter over TLS (RFC 5425).
 type SyslogConfig struct {
-	Endpoint           string
-	Network            string
-	InsecureSkipVerify bool
-	CACert             string
-	AppName            string
-	Facility           int
-	Severity           int
-	Timeout            time.Duration
+	Endpoint string
+	Network  string
+	CACert   string
+	AppName  string
+	Facility *int
+	Severity *int
+	Timeout  time.Duration
 }
 
 // SyslogExporter exports audit entries over RFC 5424 syslog with RFC 5425 TLS framing.
@@ -83,6 +88,14 @@ type SyslogExporter struct {
 	hostname  string
 	mu        sync.Mutex
 	conn      net.Conn
+}
+
+// escapeSDParam escapes '\', '"', and ']' characters per RFC 5424 §6.3.3.
+func escapeSDParam(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, `]`, `\]`)
+	return s
 }
 
 // NewSyslogExporter creates a SyslogExporter.
@@ -96,19 +109,12 @@ func NewSyslogExporter(cfg SyslogConfig) (*SyslogExporter, error) {
 	if cfg.AppName == "" {
 		cfg.AppName = "blindbucket"
 	}
-	if cfg.Facility == 0 {
-		cfg.Facility = 13 // LOG_AUDIT
-	}
-	if cfg.Severity == 0 {
-		cfg.Severity = 6 // LOG_INFO
-	}
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 5 * time.Second
 	}
 
 	tlsConf := &tls.Config{
-		InsecureSkipVerify: cfg.InsecureSkipVerify, //nolint:gosec // configurable by operator
-		MinVersion:         tls.VersionTLS12,
+		MinVersion: tls.VersionTLS12,
 	}
 	if cfg.CACert != "" {
 		caPEM, err := os.ReadFile(cfg.CACert)
@@ -142,13 +148,21 @@ func (s *SyslogExporter) Export(chain string, entry *Entry) error {
 		return err
 	}
 
-	pri := s.cfg.Facility*8 + s.cfg.Severity
+	facility := 13 // LOG_AUDIT
+	if s.cfg.Facility != nil {
+		facility = *s.cfg.Facility
+	}
+	severity := 6 // LOG_INFO
+	if s.cfg.Severity != nil {
+		severity = *s.cfg.Severity
+	}
+	pri := facility*8 + severity
 	procID := chain
 	if procID == "" {
 		procID = "-"
 	}
 	msgID := "audit"
-	sd := fmt.Sprintf("[audit@blindbucket seq=\"%d\" chain=\"%s\"]", entry.Seq, chain)
+	sd := fmt.Sprintf("[audit@blindbucket seq=\"%d\" chain=\"%s\"]", entry.Seq, escapeSDParam(chain))
 	syslogMsg := fmt.Sprintf("<%d>1 %s %s %s %s %s %s %s",
 		pri, entry.Time, s.hostname, s.cfg.AppName, procID, msgID, sd, string(jsonBytes))
 
@@ -180,7 +194,7 @@ func (s *SyslogExporter) writeLocked(b []byte) error {
 		dialer := &net.Dialer{Timeout: s.cfg.Timeout}
 		conn, dialErr := tls.DialWithDialer(dialer, s.cfg.Network, s.cfg.Endpoint, s.tlsConfig)
 		if dialErr != nil {
-			return fmt.Errorf("write failed: %w (reconnect failed: %v)", err, dialErr)
+			return fmt.Errorf("write failed: %w (reconnect failed: %w)", err, dialErr)
 		}
 		s.conn = conn
 		_ = s.conn.SetWriteDeadline(time.Now().Add(s.cfg.Timeout))
@@ -205,16 +219,15 @@ func (s *SyslogExporter) Close() error {
 	return nil
 }
 
-// OTLPConfig configures an OTLP logs exporter over HTTP/HTTPS.
+// OTLPConfig configures an OTLP logs exporter over HTTPS.
 type OTLPConfig struct {
-	Endpoint           string
-	Headers            map[string]string
-	InsecureSkipVerify bool
-	CACert             string
-	Timeout            time.Duration
+	Endpoint string
+	Headers  map[string]string
+	CACert   string
+	Timeout  time.Duration
 }
 
-// OTLPExporter exports audit entries to an OTLP logs receiver over HTTP/HTTPS.
+// OTLPExporter exports audit entries to an OTLP logs receiver over HTTPS.
 type OTLPExporter struct {
 	cfg    OTLPConfig
 	client *http.Client
@@ -225,13 +238,16 @@ func NewOTLPExporter(cfg OTLPConfig) (*OTLPExporter, error) {
 	if cfg.Endpoint == "" {
 		return nil, errors.New("audit: otlp endpoint is required")
 	}
+	u, err := url.Parse(cfg.Endpoint)
+	if err != nil || u.Scheme != "https" {
+		return nil, errors.New("audit: otlp endpoint must be an https URL")
+	}
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 5 * time.Second
 	}
 
 	tlsConf := &tls.Config{
-		InsecureSkipVerify: cfg.InsecureSkipVerify, //nolint:gosec // configurable by operator
-		MinVersion:         tls.VersionTLS12,
+		MinVersion: tls.VersionTLS12,
 	}
 	if cfg.CACert != "" {
 		caPEM, err := os.ReadFile(cfg.CACert)
@@ -395,7 +411,7 @@ func (o *OTLPExporter) Export(chain string, entry *Entry) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -413,12 +429,14 @@ func (o *OTLPExporter) Close() error {
 // AsyncExporter wraps an Exporter with a non-blocking queue and background worker,
 // ensuring that network export never stalls or blocks gateway requests.
 type AsyncExporter struct {
-	inner       Exporter
-	destination string
-	queue       chan exportItem
-	done        chan struct{}
-	wg          sync.WaitGroup
-	onError     func(destination string, err error)
+	inner        Exporter
+	destination  string
+	queue        chan exportItem
+	done         chan struct{}
+	wg           sync.WaitGroup
+	drainTimeout time.Duration
+	onError      func(destination string, err error)
+	onSuccess    func(destination string)
 }
 
 type exportItem struct {
@@ -426,17 +444,30 @@ type exportItem struct {
 	entry *Entry
 }
 
-// NewAsyncExporter creates an AsyncExporter.
-func NewAsyncExporter(inner Exporter, destination string, queueSize int, onError func(dest string, err error)) *AsyncExporter {
+// NewAsyncExporter creates an AsyncExporter with the given queue size and drain timeout.
+// If drainTimeout <= 0, DefaultDrainTimeout is used.
+func NewAsyncExporter(
+	inner Exporter,
+	destination string,
+	queueSize int,
+	drainTimeout time.Duration,
+	onError func(dest string, err error),
+	onSuccess func(dest string),
+) *AsyncExporter {
 	if queueSize <= 0 {
 		queueSize = 2048
 	}
+	if drainTimeout <= 0 {
+		drainTimeout = DefaultDrainTimeout
+	}
 	a := &AsyncExporter{
-		inner:       inner,
-		destination: destination,
-		queue:       make(chan exportItem, queueSize),
-		done:        make(chan struct{}),
-		onError:     onError,
+		inner:        inner,
+		destination:  destination,
+		queue:        make(chan exportItem, queueSize),
+		done:         make(chan struct{}),
+		drainTimeout: drainTimeout,
+		onError:      onError,
+		onSuccess:    onSuccess,
 	}
 	a.wg.Add(1)
 	go a.worker()
@@ -454,7 +485,7 @@ func (a *AsyncExporter) Export(chain string, entry *Entry) error {
 		if a.onError != nil {
 			a.onError(a.destination, err)
 		}
-		return err
+		return nil
 	}
 }
 
@@ -467,16 +498,27 @@ func (a *AsyncExporter) worker() {
 				if a.onError != nil {
 					a.onError(a.destination, err)
 				}
+			} else if a.onSuccess != nil {
+				a.onSuccess(a.destination)
 			}
 		case <-a.done:
-			// Drain remaining queued items
+			// Drain remaining queued items up to the deadline
+			deadline := time.Now().Add(a.drainTimeout)
 			for {
 				select {
 				case item := <-a.queue:
+					if time.Now().After(deadline) {
+						if a.onError != nil {
+							a.onError(a.destination, fmt.Errorf("audit: %s export drain deadline exceeded; dropped entry", a.destination))
+						}
+						continue
+					}
 					if err := a.inner.Export(item.chain, item.entry); err != nil {
 						if a.onError != nil {
 							a.onError(a.destination, err)
 						}
+					} else if a.onSuccess != nil {
+						a.onSuccess(a.destination)
 					}
 				default:
 					return
@@ -486,7 +528,8 @@ func (a *AsyncExporter) worker() {
 	}
 }
 
-// Close signals the worker to finish draining queued entries and closes the inner exporter.
+// Close signals the worker to finish draining queued entries within the drain
+// timeout, then closes the inner exporter.
 func (a *AsyncExporter) Close() error {
 	close(a.done)
 	a.wg.Wait()

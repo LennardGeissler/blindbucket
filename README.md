@@ -684,11 +684,13 @@ audit:
 
 Each exported entry carries what the file entry carries, including its position in the
 chain (`seq`), so an exported stream can be matched and compared with the file.
+Under concurrent requests, network exports can arrive slightly out of `seq` order because
+export runs outside the writer's lock.
 
-**The export is not signed**, and verification still runs on the file with `blindbucket audit verify`.
-The file stays the record that verifies; the export is an unbuffered copy for search and alerting.
-An export that fails does not block requests and does not stop the file from being written; it is
-counted in `blindbucket_audit_export_failures_total` and logged.
+**The export is not signed**, and cryptographic verification still runs on the local file with `blindbucket audit verify`.
+The file stays the authoritative record that verifies; the export is a buffered queue for search and alerting that drops entries when full to prevent downstream backpressure from ever blocking S3 operations or file writes.
+A SIEM detects missing or dropped entries by identifying gaps in `seq` when comparing against the file.
+Export failures and drops increment `blindbucket_audit_export_failures_total` and log state transitions.
 
 </details>
 

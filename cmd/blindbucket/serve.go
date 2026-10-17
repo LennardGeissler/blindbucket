@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"syscall"
 	"time"
 
@@ -360,9 +361,6 @@ func openAuditLog(
 		CheckpointInterval: interval,
 		RotateBytes:        cfg.Audit.RotateBytes,
 		Exporter:           exporter,
-		OnExportError: func(err error) {
-			log.Error("audit export failed", "err", err)
-		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("audit.log %s: %w", cfg.Audit.Log, err)
@@ -385,46 +383,32 @@ func openAuditExporters(cfg config.AuditExport, log *slog.Logger, metrics *obs.M
 	var exporters []audit.Exporter
 	if cfg.Syslog != nil && cfg.Syslog.Endpoint != "" {
 		syslogExp, err := audit.NewSyslogExporter(audit.SyslogConfig{
-			Endpoint:           cfg.Syslog.Endpoint,
-			Network:            cfg.Syslog.Network,
-			InsecureSkipVerify: cfg.Syslog.InsecureSkipVerify,
-			CACert:             cfg.Syslog.CACert,
-			AppName:            cfg.Syslog.AppName,
-			Facility:           cfg.Syslog.Facility,
-			Severity:           cfg.Syslog.Severity,
+			Endpoint: cfg.Syslog.Endpoint,
+			Network:  cfg.Syslog.Network,
+			CACert:   cfg.Syslog.CACert,
+			AppName:  cfg.Syslog.AppName,
+			Facility: cfg.Syslog.Facility,
+			Severity: cfg.Syslog.Severity,
 		})
 		if err != nil {
 			return nil, err
 		}
-		asyncSyslog := audit.NewAsyncExporter(syslogExp, "syslog", 2048, func(dest string, err error) {
-			if metrics != nil {
-				metrics.AuditExportFailure(dest)
-			}
-			if log != nil {
-				log.Error("could not export audit record", "destination", dest, "err", err)
-			}
-		})
+		onError, onSuccess := newExportCallbacks(log, metrics)
+		asyncSyslog := audit.NewAsyncExporter(syslogExp, "syslog", 2048, audit.DefaultDrainTimeout, onError, onSuccess)
 		exporters = append(exporters, asyncSyslog)
 	}
 
 	if cfg.OTLP != nil && cfg.OTLP.Endpoint != "" {
 		otlpExp, err := audit.NewOTLPExporter(audit.OTLPConfig{
-			Endpoint:           cfg.OTLP.Endpoint,
-			Headers:            cfg.OTLP.Headers,
-			InsecureSkipVerify: cfg.OTLP.InsecureSkipVerify,
-			CACert:             cfg.OTLP.CACert,
+			Endpoint: cfg.OTLP.Endpoint,
+			Headers:  cfg.OTLP.Headers,
+			CACert:   cfg.OTLP.CACert,
 		})
 		if err != nil {
 			return nil, err
 		}
-		asyncOTLP := audit.NewAsyncExporter(otlpExp, "otlp", 2048, func(dest string, err error) {
-			if metrics != nil {
-				metrics.AuditExportFailure(dest)
-			}
-			if log != nil {
-				log.Error("could not export audit record", "destination", dest, "err", err)
-			}
-		})
+		onError, onSuccess := newExportCallbacks(log, metrics)
+		asyncOTLP := audit.NewAsyncExporter(otlpExp, "otlp", 2048, audit.DefaultDrainTimeout, onError, onSuccess)
 		exporters = append(exporters, asyncOTLP)
 	}
 
@@ -435,6 +419,40 @@ func openAuditExporters(cfg config.AuditExport, log *slog.Logger, metrics *obs.M
 		return exporters[0], nil
 	}
 	return audit.MultiExporter(exporters), nil
+}
+
+// newExportCallbacks creates onError and onSuccess callbacks that record metrics on
+// every failure and log only on state transitions (failing vs recovered) to avoid log flooding.
+func newExportCallbacks(log *slog.Logger, metrics *obs.Metrics) (func(string, error), func(string)) {
+	var mu sync.Mutex
+	var failing bool
+
+	onError := func(destination string, err error) {
+		if metrics != nil {
+			metrics.AuditExportFailure(destination)
+		}
+		mu.Lock()
+		firstFailure := !failing
+		failing = true
+		mu.Unlock()
+
+		if firstFailure && log != nil {
+			log.Error("audit export failing, entries will be dropped", "destination", destination, "err", err)
+		}
+	}
+
+	onSuccess := func(destination string) {
+		mu.Lock()
+		wasFailing := failing
+		failing = false
+		mu.Unlock()
+
+		if wasFailing && log != nil {
+			log.Info("audit export recovered", "destination", destination)
+		}
+	}
+
+	return onError, onSuccess
 }
 
 // openNameEncrypter builds the object-name encrypter, or nil when names are to
