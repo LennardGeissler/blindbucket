@@ -696,6 +696,13 @@ fixed-width unsigned integers, and a decoder MUST reject a record outside these
 bounds rather than convert it: a negative value would wrap consistently and so
 would verify, leaving a record that reads as an enormous transfer.
 
+`status` is the status the client was sent, and for an object read `bytes` is
+the plaintext it was sent. A response that ends early therefore says why. A
+client that left before the end, or stopped reading until the gateway gave
+up on it, keeps its 2xx `status` with fewer `bytes` than the object holds and
+no `code`. A response cut off because the stored data failed authentication
+has the `code` `IntegrityCheckFailed`.
+
 The chain id is inside every entry's hash, so a genuine entry from one chain
 cannot be spliced into another.
 

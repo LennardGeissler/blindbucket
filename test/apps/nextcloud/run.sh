@@ -9,8 +9,8 @@
 #   - every object in both buckets is a blindbucket segment or manifest, never
 #     plaintext;
 #   - with names.encrypt, no stored key is Nextcloud's urn:oid:<n>;
-#   - neither gateway logged an ERROR, apart from the client-closed downloads
-#     of #150, which Nextcloud causes on every partial read.
+#   - neither gateway logged an ERROR. Nextcloud closes many downloads early,
+#     which the gateway logged as integrity failures until #150.
 #
 #   test/apps/nextcloud/run.sh          run, then tear everything down
 #   KEEP=1 test/apps/nextcloud/run.sh   leave it running, to look around
@@ -131,14 +131,13 @@ for gw in gateway-plain gateway-names; do
 	echo "$gw: $n multipart uploads completed"
 done
 
-errors=$(compose logs --no-color gateway-plain gateway-names | grep '"level":"ERROR"' |
-	grep -v -e 'aborting response.*context canceled' -e 'aborting response.*broken pipe' \
-		-e 'aborting response.*connection reset' || true)
+errors=$(compose logs --no-color gateway-plain gateway-names | grep '"level":"ERROR"' || true)
 if [[ -n $errors ]]; then
-	echo "unexpected ERROR lines:" >&2
+	echo "ERROR lines:" >&2
 	echo "$errors" >&2
 	exit 1
 fi
-echo "no ERROR beyond client-closed downloads (#150)"
+closed=$(compose logs --no-color gateway-plain gateway-names | grep -c 'client closed the connection' || true)
+echo "no ERROR; $closed downloads closed early by Nextcloud, logged at INFO"
 
 echo "PASS"

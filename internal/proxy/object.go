@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 
@@ -243,14 +244,15 @@ func (p *Proxy) getObject(w http.ResponseWriter, r *http.Request, req s3api.Requ
 	guard := newStallGuard(w, p.stall)
 	defer guard.clear()
 
-	written, copyErr := io.Copy(guardedWriter{dst: w, guard: guard}, reader)
+	toClient := &guardedWriter{dst: w, guard: guard}
+	written, copyErr := io.Copy(toClient, reader)
 	p.metrics.Bytes(obs.InCipher, out.ContentLength)
 	p.metrics.Bytes(obs.OutPlain, written)
 	// Noted before the abort check, so that a download cut off by a failing
 	// chunk is recorded with what it actually delivered rather than not at all.
 	p.noteObject(r, meta.KeyID, written)
 	if copyErr != nil {
-		p.abortResponse(r, log, written, plainLen, copyErr)
+		p.abortResponse(r, log, written, plainLen, copyErr, toClient)
 	}
 	log.Info("object served", "plaintext_bytes", plainLen, "kid", meta.KeyID)
 	return nil
@@ -381,10 +383,11 @@ func (p *Proxy) getObjectRange(
 	guard := newStallGuard(w, p.stall)
 	defer guard.clear()
 
-	written, copyErr := io.Copy(guardedWriter{dst: w, guard: guard}, reader)
+	toClient := &guardedWriter{dst: w, guard: guard}
+	written, copyErr := io.Copy(toClient, reader)
 	p.noteObject(r, meta.KeyID, written)
 	if copyErr != nil {
-		p.abortResponse(r, log, written, rng.Length, copyErr)
+		p.abortResponse(r, log, written, rng.Length, copyErr, toClient)
 	}
 	log.Info("range served", "start", start, "end", end, "bytes", rng.Length, "kid", meta.KeyID)
 	return nil
@@ -540,9 +543,25 @@ func (p *Proxy) verifyError(log *slog.Logger, err error) *s3api.Error {
 // There is no legal way to report a failure here: appending an error document
 // would hand the client bytes it would read as object content. A short read
 // against the declared Content-Length is unmistakable instead.
+//
+// Which side failed decides what is recorded (#150). When the client went
+// away -- a write to it failed, or its request was cancelled -- nothing is
+// wrong with the data: the log says so at INFO, and the audit entry keeps the
+// status the client was sent and the bytes it got, with no error code. A
+// client that stopped reading and was cut off by the stall guard is the same
+// case: its write is what timed out. Only a failure on the provider's side, or
+// of the data itself, is the integrity or transport failure it always was.
 func (p *Proxy) abortResponse(
-	r *http.Request, log *slog.Logger, written, expected int64, err error,
+	r *http.Request, log *slog.Logger, written, expected int64, err error, toClient *guardedWriter,
 ) {
+	if toClient.err != nil || r.Context().Err() != nil {
+		msg := "client closed the connection before the response was complete"
+		if errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(toClient.err, os.ErrDeadlineExceeded) {
+			msg = "client stopped reading; the response was cut off after the stall timeout"
+		}
+		log.Info(msg, "written_bytes", written, "expected_bytes", expected, "err", err)
+		panic(http.ErrAbortHandler)
+	}
 	log.Error("aborting response after an integrity or transport failure",
 		"written_bytes", written, "expected_bytes", expected, "err", err)
 	// The audit record is written by a deferred call that this panic unwinds

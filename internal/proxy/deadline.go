@@ -76,14 +76,24 @@ func (g *stallGuard) clear() {
 // exactly "no progress for this long": every write that completes buys the next
 // one a full timeout, and a write that blocks is the only thing the deadline
 // ever fires on.
+//
+// It also remembers the first write that failed. A copy into the response can
+// end with an error from either side, and only the side tells what happened:
+// a failed read is the provider or the stored data, a failed write is the
+// client -- gone, or cut off by this guard for not reading (#150).
 type guardedWriter struct {
 	dst   io.Writer
 	guard *stallGuard
+	err   error
 }
 
-func (g guardedWriter) Write(p []byte) (int, error) {
+func (g *guardedWriter) Write(p []byte) (int, error) {
 	g.guard.renewWrite()
-	return g.dst.Write(p)
+	n, err := g.dst.Write(p)
+	if err != nil && g.err == nil {
+		g.err = err
+	}
+	return n, err
 }
 
 // guardedReader is the same for a request body being read from a client.

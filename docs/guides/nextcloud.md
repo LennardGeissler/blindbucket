@@ -136,11 +136,12 @@ files moved into it through Nextcloud, for instance with the desktop client.
 
 ## What you will see in the gateway's log
 
-- **`ERROR … aborting response after an integrity or transport failure`** with
-  `err` `context canceled` or `broken pipe`. Nextcloud reads the start of a
-  file and closes the connection. Nothing is wrong with the data, and the
-  integrity metric does not count these; but the log level, and the audit
-  entry's `IntegrityCheckFailed`, are wrong.
-  [#150](https://github.com/LennardGeissler/blindbucket/issues/150) fixes that.
-- **`ObjectNotEncrypted`** for a file stored before the gateway: see above.
-- **`InvalidRequest` on `CompleteMultipartUpload`**: the part size, see above.
+- **`INFO … client closed the connection before the response was complete`**:
+  Nextcloud reads the start of a file and closes the connection, often.
+  Nothing is wrong. Releases up to and including 1.4 logged these at ERROR as
+  integrity failures, and audited them with `IntegrityCheckFailed`
+  ([#150](https://github.com/LennardGeissler/blindbucket/issues/150)).
+- **`ObjectNotEncrypted`** for a file stored before the gateway: see
+  [An existing Nextcloud](#an-existing-nextcloud).
+- **`InvalidRequest` on `CompleteMultipartUpload`**: the part size, see
+  [Choices](#choices).

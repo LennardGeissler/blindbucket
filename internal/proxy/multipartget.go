@@ -283,12 +283,13 @@ func (p *Proxy) getMultipartObject(
 	guard := newStallGuard(w, p.stall)
 	defer guard.clear()
 
-	written, copyErr := io.Copy(guardedWriter{dst: w, guard: guard}, chain)
+	toClient := &guardedWriter{dst: w, guard: guard}
+	written, copyErr := io.Copy(toClient, chain)
 	p.metrics.Bytes(obs.InCipher, out.ContentLength)
 	p.metrics.Bytes(obs.OutPlain, written)
 	p.noteObject(r, meta.KeyID, written)
 	if copyErr != nil {
-		p.abortResponse(r, log, written, layout.TotalPlain, copyErr)
+		p.abortResponse(r, log, written, layout.TotalPlain, copyErr, toClient)
 	}
 	log.Info("multipart object served",
 		"parts", len(layout.Parts), "plaintext_bytes", layout.TotalPlain, "kid", meta.KeyID)
@@ -395,10 +396,11 @@ func (p *Proxy) getMultipartRange(
 	guard := newStallGuard(w, p.stall)
 	defer guard.clear()
 
-	written, copyErr := io.Copy(guardedWriter{dst: w, guard: guard}, chain)
+	toClient := &guardedWriter{dst: w, guard: guard}
+	written, copyErr := io.Copy(toClient, chain)
 	p.noteObject(r, meta.KeyID, written)
 	if copyErr != nil {
-		p.abortResponse(r, log, written, length, copyErr)
+		p.abortResponse(r, log, written, length, copyErr, toClient)
 	}
 	log.Info("multipart range served", "start", start, "end", end,
 		"bytes", length, "parts_touched", len(spans), "kid", meta.KeyID)

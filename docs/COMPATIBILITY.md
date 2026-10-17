@@ -80,8 +80,8 @@ Measured with object names in clear and encrypted: upload and download,
 ranges, rename, copy, versions, the desktop client's chunked upload, multipart
 above Nextcloud's threshold, public link shares, and delete with the trash.
 A multipart part size that is not a multiple of 64 KiB fails every large
-upload; Nextcloud's default of 500 MiB is one. A client that closes a download
-early is logged as an integrity failure
+upload; Nextcloud's default of 500 MiB is one. Nextcloud closes many downloads
+early, which releases up to and including 1.4 logged at ERROR as integrity failures
 ([#150](https://github.com/LennardGeissler/blindbucket/issues/150)).
 
 ---
