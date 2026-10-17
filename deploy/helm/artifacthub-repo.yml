@@ -1,0 +1,6 @@
+# Artifact Hub's metadata for the chart's repository,
+# oci://ghcr.io/lennardgeissler/charts/blindbucket. build/chart.sh pushes it
+# there as an OCI artifact tagged artifacthub.io, where Artifact Hub looks for
+# it. The ID is the repository's on Artifact Hub; finding it in a registry the
+# project controls is what makes the chart's publisher "verified".
+repositoryID: 0846e3f4-78b2-4291-aa30-458f49ede53f

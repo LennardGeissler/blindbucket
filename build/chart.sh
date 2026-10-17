@@ -4,6 +4,8 @@
 #   build/chart.sh check <base>   fail if the chart changed since <base> but its
 #                                 version did not; print "new" or "same"
 #   build/chart.sh publish        package the chart and push it to ghcr.io
+#   build/chart.sh metadata       push Artifact Hub's repository metadata next
+#                                 to it (deploy/helm/artifacthub-repo.yml)
 #
 # A published chart version must never change its contents: whoever pinned
 # 0.2.0 has to keep getting what 0.2.0 was. The chart has a version of its own
@@ -19,6 +21,9 @@ set -euo pipefail
 
 chart=deploy/helm/blindbucket
 registry=oci://ghcr.io/lennardgeissler/charts
+# Where the metadata goes: the chart's own repository, under the tag Artifact
+# Hub reads. Overridable only so that a local registry can stand in for a test.
+metadata_ref=${CHART_METADATA_REF:-ghcr.io/lennardgeissler/charts/blindbucket:artifacthub.io}
 
 version_at() { # <rev> -- the chart version at a revision, empty if absent there
 	git show "$1:$chart/Chart.yaml" 2>/dev/null | awk '$1 == "version:" { print $2; exit }'
@@ -48,8 +53,16 @@ publish)
 	helm package "$chart" --destination "$work"
 	helm push "$work/blindbucket-$current.tgz" "$registry"
 	;;
+metadata)
+	# The media types are Artifact Hub's, and the file is pushed from its own
+	# directory so that the layer's title is its bare name.
+	cd deploy/helm
+	oras push "$metadata_ref" \
+		--config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+		artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
+	;;
 *)
-	echo "usage: build/chart.sh check <base> | publish" >&2
+	echo "usage: build/chart.sh check <base> | publish | metadata" >&2
 	exit 2
 	;;
 esac
