@@ -73,6 +73,11 @@ func TestBucketNamesTheFix(t *testing.T) {
 		"skewed clock":  {403, "RequestTimeTooSkewed", "too skewed", nil, "NTP"},
 		"missing":       {404, "NoSuchBucket", "gone", nil, "aws s3 mb s3://b"},
 		"not permitted": {403, "AccessDenied", "denied", nil, "s3:ListBucket"},
+		// Garage says AccessDenied for both, and which one in the message.
+		"wrong secret, as Garage says it": {403, "AccessDenied", "Forbidden: Invalid signature", nil,
+			"upstream.secret_access_key"},
+		"unknown key, as Garage says it": {403, "AccessDenied", "Forbidden: No such key: GK0123", nil,
+			"upstream.access_key_id"},
 		"region in the message": {400, "AuthorizationHeaderMalformed",
 			"the region 'us-east-1' is wrong; expecting 'eu-central-1'", nil, `upstream.region to "eu-central-1"`},
 		"region in a header": {301, "PermanentRedirect", "addressed elsewhere",
@@ -312,5 +317,19 @@ func TestIntegrationProvider(t *testing.T) {
 	if got := build(tp.SecretKey+"-wrong").Bucket(t.Context(), tp.Bucket); got.Outcome != Failed ||
 		!strings.Contains(got.Fix, "secret_access_key") {
 		t.Errorf("a wrong secret: %+v", got)
+	}
+	unknown := build(tp.SecretKey)
+	unknownClient, err := upstream.New(upstream.Config{
+		Endpoint: tp.Endpoint, Region: tp.Region, PathStyle: tp.PathStyle,
+		AccessKeyID: "GKdoesnotexist000000000000", SecretAccessKey: tp.SecretKey,
+		HTTPClient: &http.Client{Transport: unknown.Recorder}, MaxRetries: 1,
+	})
+	if err != nil {
+		t.Fatalf("upstream.New: %v", err)
+	}
+	unknown.Client = unknownClient
+	if got := unknown.Bucket(t.Context(), tp.Bucket); got.Outcome != Failed ||
+		!strings.Contains(got.Fix, "access_key_id") {
+		t.Errorf("an unknown access key: %+v", got)
 	}
 }

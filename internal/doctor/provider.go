@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -113,7 +114,19 @@ func (p Provider) explain(err error, header http.Header, bucket string) (detail,
 	if m := expectingRegion.FindStringSubmatch(apiErr.Message); m != nil {
 		region = m[1]
 	}
-	switch apiErr.Code {
+	// Garage reports both credential mistakes as AccessDenied and says which
+	// in the message; telling it to grant permissions would send an operator
+	// with a wrong secret after the wrong thing.
+	code := apiErr.Code
+	if code == "AccessDenied" {
+		switch {
+		case strings.Contains(apiErr.Message, "Invalid signature"):
+			code = "SignatureDoesNotMatch"
+		case strings.Contains(apiErr.Message, "No such key"):
+			code = "InvalidAccessKeyId"
+		}
+	}
+	switch code {
 	case "InvalidAccessKeyId":
 		return detail, "the provider does not know upstream.access_key_id: check the key, " +
 			"and that it belongs to this provider and account"

@@ -338,7 +338,7 @@ jobs:
         # The script prints `export NAME=value` lines; GITHUB_ENV wants them bare.
         run: test/providers/garage.sh | sed -n 's/^export //p' >> "$GITHUB_ENV"
       - name: Run the integration tests
-        run: go test -race -count=1 ./internal/upstream/... ./internal/proxy/... ./internal/probe/... ./cmd/...
+        run: go test -race -count=1 ./internal/upstream/... ./internal/proxy/... ./internal/probe/... ./internal/doctor/... ./cmd/...
       - name: Garage logs on failure
         if: failure()
         run: docker logs blindbucket-garage
