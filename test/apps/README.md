@@ -9,6 +9,7 @@ application does.
 |---|---|---|
 | [nextcloud/](nextcloud/) | Nextcloud, S3 as primary storage | [docs/guides/nextcloud.md](../../docs/guides/nextcloud.md) |
 | [loki/](loki/) | Grafana Loki, single binary | [docs/guides/loki.md](../../docs/guides/loki.md) |
+| [mastodon/](mastodon/) | Mastodon, media storage, behind a media proxy | [docs/guides/mastodon.md](../../docs/guides/mastodon.md) |
 | [velero/](velero/) | Velero, backing up a Kubernetes namespace | [docs/guides/velero.md](../../docs/guides/velero.md) |
 
 [lib.sh](lib.sh) does what every scenario does -- the keyring, the gateway
@@ -32,4 +33,4 @@ its application. The shape every scenario keeps:
 
 [.github/workflows/apps.yml](../../.github/workflows/apps.yml) runs them on
 changes that can affect them and weekly. Locally: `make app-nextcloud`,
-`make app-loki`, `make app-velero`.
+`make app-loki`, `make app-mastodon`, `make app-velero`.

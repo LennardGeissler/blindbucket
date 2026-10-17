@@ -75,6 +75,7 @@ or corrupts anything the application does (M12). Each has a guide in
 | Application | Version tested | Status | Last measured | Guide |
 |---|---|---|---|---|
 | Grafana Loki, single binary | 3.7.8 | **Works**, new buckets only ([#151](https://github.com/LennardGeissler/blindbucket/issues/151)) | on changes to the gateway and weekly, in CI (`test/apps/loki`) | [loki.md](guides/loki.md) |
+| Mastodon, media storage | 4.7.3 | **Works** behind a media proxy that signs, such as nginx-s3-gateway: Mastodon's media URLs are unsigned, and the gateway refuses them. New buckets only ([#151](https://github.com/LennardGeissler/blindbucket/issues/151)); video and audio not measured | on changes to the gateway and weekly, in CI (`test/apps/mastodon`) | [mastodon.md](guides/mastodon.md) |
 | Nextcloud, S3 as primary storage | 35.0.2 | **Works**, new installations only: an existing bucket's objects cannot be read until [#151](https://github.com/LennardGeissler/blindbucket/issues/151) | on changes to the gateway and weekly, in CI (`test/apps/nextcloud`) | [nextcloud.md](guides/nextcloud.md) |
 | Velero, with velero-plugin-for-aws | 1.18.4, plugin 1.14.4 | **Works** for resource backups, new buckets only ([#151](https://github.com/LennardGeissler/blindbucket/issues/151)); file-system backups not measured | on changes to the gateway and weekly, in CI (`test/apps/velero`) | [velero.md](guides/velero.md) |
 
@@ -82,6 +83,14 @@ Loki, with object names in clear and encrypted: lines pushed and flushed,
 read back identical after a restart without a WAL, and a stream deleted by the
 compactor, which lists, rewrites the index and deletes a chunk through the
 gateway.
+
+Mastodon, with object names in clear and encrypted: an image posted in a
+direct message, a 5.6 MB image as a multipart upload, and an avatar, each
+served back through nginx-s3-gateway, with the originals' pixels identical;
+and `tootctl media remove-orphans`, which lists the bucket and deletes what
+belongs to no record. Mastodon hands browsers unsigned URLs, which the gateway
+answers with 403, so a media proxy that signs is part of the setup. Video and
+audio, which Mastodon converts in Sidekiq, are not measured.
 
 Nextcloud, measured with object names in clear and encrypted: upload and download,
 ranges, rename, copy, versions, the desktop client's chunked upload, multipart

@@ -1,0 +1,29 @@
+# The gateway in front of Mastodon's bucket mastodon-plain. Plain HTTP and no
+# admin listener: it is reachable only on the scenario's own network.
+server:
+  listen: "0.0.0.0:9000"
+  presign:
+    max_expiry: 1h
+admin:
+  listen: ""
+upstream:
+  endpoint: http://minio:9000
+  region: us-east-1
+  path_style: true
+  access_key_id: minioadmin
+  secret_access_key: minioadmin
+keys:
+  provider: file
+  keyring: /etc/blindbucket/keyring.json
+# Two clients: Mastodon, which writes and deletes, and the media proxy, which
+# only reads -- though nothing here can stop it from writing: a client is
+# allowed its buckets, not operations on them.
+clients:
+  - name: mastodon
+    access_key_id: MASTODONSCENARIOPLAIN
+    secret_access_key: mastodon-scenario-secret-plain
+    buckets: ["mastodon-plain"]
+  - name: media
+    access_key_id: MEDIASCENARIOPLAIN
+    secret_access_key: media-scenario-secret-plain
+    buckets: ["mastodon-plain"]

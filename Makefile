@@ -180,6 +180,10 @@ app-nextcloud: ## Run Nextcloud through the gateway (test/apps/nextcloud, M12).
 app-loki: ## Run Grafana Loki through the gateway (test/apps/loki, M12).
 	test/apps/loki/run.sh
 
+.PHONY: app-mastodon
+app-mastodon: ## Run Mastodon's media storage through the gateway (test/apps/mastodon, M12).
+	test/apps/mastodon/run.sh
+
 .PHONY: app-velero
 app-velero: ## Run Velero in kind, backing up through the gateway (test/apps/velero, M12).
 	test/apps/velero/run.sh

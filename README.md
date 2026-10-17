@@ -676,7 +676,7 @@ the gateway already costs per request.
 | [docs/FORMAT.md](docs/FORMAT.md) | Normative wire format. An independent implementation should be able to interoperate from this document alone. |
 | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | What is protected, what is not, and what the residual risks are. |
 | [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Which clients work, which settings they need, and what does not work yet. Measured, not assumed. |
-| [docs/guides/](docs/guides/) | Putting the gateway in front of an application that stores to S3, as measured by the scenarios in [test/apps/](test/apps/): Nextcloud, Grafana Loki and Velero so far. |
+| [docs/guides/](docs/guides/) | Putting the gateway in front of an application that stores to S3, as measured by the scenarios in [test/apps/](test/apps/): Nextcloud, Grafana Loki, Mastodon and Velero so far. |
 | [docs/adr/](docs/adr/) | Architecture decisions, with the alternatives that were rejected and why. |
 | [docs/adr/ADR-016-audit-log.md](docs/adr/ADR-016-audit-log.md) | The audit log: what it proves, what it does not, and what it costs. |
 | [testdata/vectors/](testdata/vectors/) | Known-answer vectors, normative alongside the format spec. |

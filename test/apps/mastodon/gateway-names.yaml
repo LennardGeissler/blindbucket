@@ -1,0 +1,36 @@
+# The gateway in front of Mastodon's bucket mastodon-names. Plain HTTP and no
+# admin listener: it is reachable only on the scenario's own network.
+server:
+  listen: "0.0.0.0:9000"
+  presign:
+    max_expiry: 1h
+admin:
+  listen: ""
+upstream:
+  endpoint: http://minio:9000
+  region: us-east-1
+  path_style: true
+  access_key_id: minioadmin
+  secret_access_key: minioadmin
+keys:
+  provider: file
+  keyring: /etc/blindbucket/keyring.json
+# Two clients: Mastodon, which writes and deletes, and the media proxy, which
+# only reads -- though nothing here can stop it from writing: a client is
+# allowed its buckets, not operations on them.
+clients:
+  - name: mastodon
+    access_key_id: MASTODONSCENARIONAMES
+    secret_access_key: mastodon-scenario-secret-names
+    buckets: ["mastodon-names"]
+  - name: media
+    access_key_id: MEDIASCENARIONAMES
+    secret_access_key: media-scenario-secret-names
+    buckets: ["mastodon-names"]
+
+# Names encrypted. Mastodon's keys say which kind of media an object is and
+# which record it belongs to -- media_attachments/files/<id>/original/...,
+# accounts/avatars/<id>/... -- and its ids are timestamps. tootctl media
+# remove-orphans finds what to delete by listing them.
+names:
+  encrypt: true

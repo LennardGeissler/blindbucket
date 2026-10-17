@@ -1,0 +1,173 @@
+# Mastodon storing its media through the gateway, in front of MinIO. Twice:
+# once with object names in clear and once with names.encrypt, each with a
+# bucket, a gateway, a Mastodon and a media proxy of its own; Postgres and
+# Redis are shared, with a database each. run.sh drives it; it is not meant to
+# be brought up by hand, because the keyring it mounts is written by run.sh
+# first.
+#
+# Mastodon hands browsers plain URLs to its media, unsigned, which the gateway
+# refuses: it serves no anonymous request. The media proxy is what an operator
+# puts in between, behind S3_ALIAS_HOST -- nginx-s3-gateway, which signs each
+# read with a credential of its own.
+#
+# The gateway image is built from this checkout by test/apps/lib.sh, once,
+# before this file is brought up, so the scenario tests the code, not a
+# release. Mastodon and the proxy are pinned by digest: what is measured is
+# that version, and COMPATIBILITY.md says which one.
+name: blindbucket-mastodon
+
+services:
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  buckets:
+    image: cgr.dev/chainguard/minio:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "mc alias set m http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing m/mastodon-plain m/mastodon-names"
+
+  gateway-plain: &gateway
+    image: blindbucket-apps-gateway
+    pull_policy: never
+    command: ["serve", "-v", "--config", "/etc/blindbucket/blindbucket.yaml"]
+    environment:
+      BLINDBUCKET_PASSPHRASE: apps-scenario-not-a-secret
+    volumes:
+      - ./gateway-plain.yaml:/etc/blindbucket/blindbucket.yaml:ro
+      - ${KEYRING:?run.sh writes the keyring}:/etc/blindbucket/keyring.json:ro
+    depends_on:
+      buckets:
+        condition: service_completed_successfully
+
+  gateway-names:
+    <<: *gateway
+    volumes:
+      - ./gateway-names.yaml:/etc/blindbucket/blindbucket.yaml:ro
+      - ${KEYRING:?run.sh writes the keyring}:/etc/blindbucket/keyring.json:ro
+
+  postgres:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_USER: mastodon
+      POSTGRES_PASSWORD: mastodon-scenario-not-a-secret
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "mastodon"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The database is prepared on every start, which on a fresh volume creates
+  # it and loads the schema. Only the web process runs: an image's upload,
+  # its processing and an avatar's are all done in the request, and nothing
+  # this scenario does waits for Sidekiq.
+  mastodon-plain: &mastodon
+    image: ghcr.io/mastodon/mastodon:v4.7.3@sha256:0bf26ebfb7d694bddd2fcf0c5769642ac29d997eb42169c540963cf0f27ee6ca
+    command: ["bash", "-c", "bundle exec rails db:prepare >/dev/null && exec bundle exec puma -C config/puma.rb"]
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment: &mastodon-env
+      RAILS_ENV: production
+      LOCAL_DOMAIN: localhost
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: mastodon
+      DB_PASS: mastodon-scenario-not-a-secret
+      DB_NAME: mastodon_plain
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY_BASE: mastodon-scenario-secret-key-base-not-a-secret-0123456789abcdef0123456789abcdef
+      ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY: scenario-deterministic-key-not-a-secret
+      ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: scenario-derivation-salt-not-a-secret
+      ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY: scenario-primary-key-not-a-secret
+      S3_ENABLED: "true"
+      S3_PROTOCOL: http
+      S3_ENDPOINT: http://gateway-plain:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: mastodon-plain
+      AWS_ACCESS_KEY_ID: MASTODONSCENARIOPLAIN
+      AWS_SECRET_ACCESS_KEY: mastodon-scenario-secret-plain
+      S3_ALIAS_HOST: localhost:8091
+      # The smallest threshold S3 allows, so that one large image goes as a
+      # multipart upload. Mastodon's default is 15 MB.
+      S3_MULTIPART_THRESHOLD: "5242880"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gateway-plain:
+        condition: service_started
+
+  mastodon-names:
+    <<: *mastodon
+    ports:
+      - "127.0.0.1:3002:3000"
+    environment:
+      <<: *mastodon-env
+      DB_NAME: mastodon_names
+      REDIS_URL: redis://redis:6379/1
+      S3_ENDPOINT: http://gateway-names:9000
+      S3_BUCKET: mastodon-names
+      AWS_ACCESS_KEY_ID: MASTODONSCENARIONAMES
+      AWS_SECRET_ACCESS_KEY: mastodon-scenario-secret-names
+      S3_ALIAS_HOST: localhost:8092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gateway-names:
+        condition: service_started
+
+  # What a browser reaches for a media URL: nginx, signing each read to the
+  # gateway with a client of its own.
+  media-plain: &media
+    image: ghcr.io/nginx/nginx-s3-gateway/nginx-oss-s3-gateway:latest-20260910@sha256:5c600e4fa7b4d8c5b6bc6af2ba02ccbfce75ff1827a81eec11fa351e5656e718
+    ports:
+      - "127.0.0.1:8091:80"
+    environment: &media-env
+      S3_SERVER: gateway-plain
+      S3_SERVER_PORT: "9000"
+      S3_SERVER_PROTO: http
+      S3_BUCKET_NAME: mastodon-plain
+      S3_REGION: us-east-1
+      S3_STYLE: path
+      S3_SERVICE: s3
+      AWS_SIGS_VERSION: "4"
+      AWS_ACCESS_KEY_ID: MEDIASCENARIOPLAIN
+      AWS_SECRET_ACCESS_KEY: media-scenario-secret-plain
+      ALLOW_DIRECTORY_LIST: "false"
+    depends_on:
+      - gateway-plain
+
+  media-names:
+    <<: *media
+    ports:
+      - "127.0.0.1:8092:80"
+    environment:
+      <<: *media-env
+      S3_SERVER: gateway-names
+      S3_BUCKET_NAME: mastodon-names
+      AWS_ACCESS_KEY_ID: MEDIASCENARIONAMES
+      AWS_SECRET_ACCESS_KEY: media-scenario-secret-names
+    depends_on:
+      - gateway-names
