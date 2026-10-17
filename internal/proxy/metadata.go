@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/LennardGeissler/blindbucket/internal/objectmeta"
+	"github.com/LennardGeissler/blindbucket/internal/s3api"
 )
 
 // The bb-* metadata encoding lives in internal/objectmeta, because
@@ -81,6 +82,17 @@ func copyResponseHeaders(dst, src http.Header) {
 	}
 	for _, name := range responseHeadersToStrip {
 		dst.Del(name)
+	}
+}
+
+// copyObjectHeaders is copyResponseHeaders for an object read, followed by the
+// headers the read asked for with response-content-type and its siblings
+// (ADR-032). Called just before the status line of a 200 or 206, so that an
+// error response carries none of them.
+func copyObjectHeaders(dst http.Header, r *http.Request, src http.Header) {
+	copyResponseHeaders(dst, src)
+	for name, value := range s3api.ResponseOverrides(r.URL.Query()) {
+		dst.Set(name, value)
 	}
 }
 

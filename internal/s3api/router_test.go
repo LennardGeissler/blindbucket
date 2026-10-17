@@ -536,3 +536,79 @@ func TestPresignParamsMatchTheVerifier(t *testing.T) {
 		t.Errorf("the router knows %d presigning parameters, the verifier has 6", got)
 	}
 }
+
+// TestRouteResponseOverrides is ADR-032: the six response-* parameters on an
+// object read, and nowhere else.
+func TestRouteResponseOverrides(t *testing.T) {
+	t.Parallel()
+
+	if got := len(responseOverrides); got != 6 {
+		t.Errorf("the router knows %d response overrides; ADR-032 decides six", got)
+	}
+
+	const disposition = "response-content-disposition=attachment%3B%20filename%3D%22a.pdf%22"
+	for _, tc := range []struct {
+		name, method, target string
+		want                 Operation
+		code                 string
+	}{
+		{"on a GET", http.MethodGet, "/bucket/key?" + disposition + "&response-content-type=text%2Fplain", OpGetObject, ""},
+		{"on a HEAD", http.MethodHead, "/bucket/key?response-cache-control=no-store", OpHeadObject, ""},
+		{"all six at once", http.MethodGet, "/bucket/key?response-cache-control=a&response-content-disposition=b" +
+			"&response-content-encoding=c&response-content-language=d&response-content-type=e&response-expires=f",
+			OpGetObject, ""},
+		{"on a PUT", http.MethodPut, "/bucket/key?response-content-type=text%2Fhtml", "", "NotImplemented"},
+		{"on a DELETE", http.MethodDelete, "/bucket/key?response-content-type=text%2Fhtml", "", "NotImplemented"},
+		{"with ?tagging", http.MethodGet, "/bucket/key?tagging&response-content-type=a", "", "NotImplemented"},
+		{"with ?uploadId", http.MethodGet, "/bucket/key?uploadId=u&response-content-type=a", "", "NotImplemented"},
+		{"a look-alike", http.MethodGet, "/bucket/key?response-content-length=1", "", "NotImplemented"},
+		{"given twice", http.MethodGet, "/bucket/key?response-content-type=a&response-content-type=b", "", "InvalidArgument"},
+		{"with a line feed", http.MethodGet, "/bucket/key?response-content-type=text%2Fplain%0D%0ASet-Cookie%3A%20x", "", "InvalidArgument"},
+		{"with a DEL", http.MethodGet, "/bucket/key?response-expires=a%7F", "", "InvalidArgument"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Route(request(t, tc.method, tc.target), "")
+			if tc.code != "" {
+				if err == nil {
+					t.Fatalf("routed as %s, want %s", got.Op, tc.code)
+				}
+				if err.Code != tc.code {
+					t.Errorf("code = %q, want %q (%s)", err.Code, tc.code, err.Message)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("refused: %v", err)
+			}
+			if got.Op != tc.want {
+				t.Errorf("routed as %s, want %s", got.Op, tc.want)
+			}
+		})
+	}
+}
+
+// TestResponseOverridesNamesTheHeaders: what the proxy sets, by header name.
+func TestResponseOverridesNamesTheHeaders(t *testing.T) {
+	t.Parallel()
+	got := ResponseOverrides(map[string][]string{
+		"response-content-type":        {"application/octet-stream"},
+		"response-content-disposition": {`attachment; filename="a.pdf"`},
+		"prefix":                       {"not an override"},
+	})
+	want := map[string]string{
+		"Content-Type":        "application/octet-stream",
+		"Content-Disposition": `attachment; filename="a.pdf"`,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for name, value := range want {
+		if got[name] != value {
+			t.Errorf("%s = %q, want %q", name, got[name], value)
+		}
+	}
+	if ResponseOverrides(map[string][]string{"prefix": {"a"}}) != nil {
+		t.Error("a query without overrides yields headers")
+	}
+}

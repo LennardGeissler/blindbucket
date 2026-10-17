@@ -38,6 +38,17 @@ func presignURL(
 	t *testing.T, h *proxytest.Harness, method, key string, expires time.Duration, signedAt time.Time,
 ) string {
 	t.Helper()
+	return presignURLWith(t, h, method, key, expires, signedAt, nil)
+}
+
+// presignURLWith signs a URL that carries extra query parameters, which the
+// signature then covers, as GitLab's download links carry
+// response-content-disposition.
+func presignURLWith(
+	t *testing.T, h *proxytest.Harness, method, key string, expires time.Duration, signedAt time.Time,
+	extra url.Values,
+) string {
+	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), method, h.URL(key), nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
@@ -45,6 +56,9 @@ func presignURL(
 	req.Host = req.URL.Host
 
 	query := req.URL.Query()
+	for name, values := range extra {
+		query[name] = values
+	}
 	query.Set(auth.QueryExpires, strconv.FormatInt(int64(expires.Seconds()), 10))
 	req.URL.RawQuery = query.Encode()
 

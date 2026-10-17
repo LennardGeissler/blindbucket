@@ -241,6 +241,8 @@ there and the documentation recommends lowering it.
 - Writes stay refused, so the browser-upload case is not served, and
   `response-content-disposition` and its siblings are refused with it — which is
   a real gap for download links that want to set a filename, named here rather
-  than discovered.
+  than discovered. *Closed by [ADR-032](ADR-032-response-header-overrides.md):
+  GitLab sends them with every download, so they are served on object reads
+  since.*
 - One more configuration block, and one more thing an operator has to decide the
   expiry policy for.

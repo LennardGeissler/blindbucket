@@ -142,6 +142,66 @@ var presignParams = map[string]bool{
 	"X-Amz-Signature":     true,
 }
 
+// responseOverrides are the query parameters with which a read sets a header
+// of its own response, mapped to that header (ADR-032). They are accepted on
+// GetObject and HeadObject only, applied by the proxy to its response, and
+// never forwarded to the provider.
+var responseOverrides = map[string]string{
+	"response-cache-control":       "Cache-Control",
+	"response-content-disposition": "Content-Disposition",
+	"response-content-encoding":    "Content-Encoding",
+	"response-content-language":    "Content-Language",
+	"response-content-type":        "Content-Type",
+	"response-expires":             "Expires",
+}
+
+// ResponseOverrides returns the response headers a read's query asks for, by
+// header name. Route has already refused a value that is not a header value,
+// and a parameter given twice, so what it returns can be set as it is.
+func ResponseOverrides(query url.Values) map[string]string {
+	var out map[string]string
+	for name, header := range responseOverrides {
+		if values, ok := query[name]; ok && len(values) > 0 {
+			if out == nil {
+				out = make(map[string]string, len(responseOverrides))
+			}
+			out[header] = values[0]
+		}
+	}
+	return out
+}
+
+// checkResponseOverrides refuses the overrides anywhere but on an object read,
+// and a value that could end one header and start another.
+func checkResponseOverrides(r *http.Request, query url.Values) *Error {
+	for name := range responseOverrides {
+		values, ok := query[name]
+		if !ok {
+			continue
+		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			return ErrNotImplemented.WithMessage(
+				"%s applies to GetObject and HeadObject only, not to a %s", name, r.Method)
+		}
+		for _, sub := range []string{"tagging", "uploads", "uploadId", "partNumber"} {
+			if _, ok := query[sub]; ok {
+				return ErrNotImplemented.WithMessage(
+					"%s applies to GetObject and HeadObject only, not with ?%s", name, sub)
+			}
+		}
+		if len(values) != 1 {
+			return ErrInvalidArgument.WithMessage("%s is given %d times", name, len(values))
+		}
+		for _, c := range values[0] {
+			if (c < 0x20 && c != '\t') || c == 0x7f {
+				return ErrInvalidArgument.WithMessage(
+					"%s holds a control character, which a header value cannot", name)
+			}
+		}
+	}
+	return nil
+}
+
 // PresignQueryParam reports whether a query parameter is part of a presigned
 // URL's signature. Exported for the proxy, which must strip them from anything
 // it forwards to the provider.
@@ -299,11 +359,14 @@ func routeObject(r *http.Request, bucket, key string) (Request, *Error) {
 	}
 	for name := range query {
 		if ignorableParams[strings.ToLower(name)] || objectQueryParams[name] ||
-			presignParams[name] {
+			presignParams[name] || responseOverrides[name] != "" {
 			continue
 		}
 		return Request{Bucket: bucket, Key: key, Op: OpUnsupported},
 			ErrNotImplemented.WithMessage("the sub-resource %q is not implemented in this build", name)
+	}
+	if apiErr := checkResponseOverrides(r, query); apiErr != nil {
+		return Request{Bucket: bucket, Key: key, Op: OpUnsupported}, apiErr
 	}
 
 	// Presence of the parameter decides, not its value. An empty ?uploadId= must

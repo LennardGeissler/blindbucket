@@ -272,7 +272,7 @@ func (p *Proxy) getMultipartObject(
 		return apiErr
 	}
 
-	copyResponseHeaders(w.Header(), out.Header)
+	copyObjectHeaders(w.Header(), r, out.Header)
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Content-Length", strconv.FormatInt(layout.TotalPlain, 10))
 	w.WriteHeader(http.StatusOK)
@@ -387,7 +387,7 @@ func (p *Proxy) getMultipartRange(
 	}
 
 	length := rangeLength(spans)
-	copyResponseHeaders(w.Header(), out.Header)
+	copyObjectHeaders(w.Header(), r, out.Header)
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, layout.TotalPlain))
 	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))

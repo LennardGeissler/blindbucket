@@ -232,7 +232,7 @@ func (p *Proxy) getObject(w http.ResponseWriter, r *http.Request, req s3api.Requ
 		return apiErr
 	}
 
-	copyResponseHeaders(w.Header(), out.Header)
+	copyObjectHeaders(w.Header(), r, out.Header)
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Content-Length", strconv.FormatInt(plainLen, 10))
 	w.WriteHeader(http.StatusOK)
@@ -374,7 +374,7 @@ func (p *Proxy) getObjectRange(
 		return apiErr
 	}
 
-	copyResponseHeaders(w.Header(), out.Header)
+	copyObjectHeaders(w.Header(), r, out.Header)
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, plainLen))
 	w.Header().Set("Content-Length", strconv.FormatInt(rng.Length, 10))
@@ -426,7 +426,7 @@ func (p *Proxy) headObject(w http.ResponseWriter, r *http.Request, req s3api.Req
 		return p.integrityError(log, "ciphertext size", err)
 	}
 
-	copyResponseHeaders(w.Header(), info.Header)
+	copyObjectHeaders(w.Header(), r, info.Header)
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Content-Length", strconv.FormatInt(plainLen, 10))
 	w.WriteHeader(http.StatusOK)

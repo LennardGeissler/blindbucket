@@ -55,6 +55,7 @@ document is gone, so they are kept here.
 | [029](ADR-029-unsigned-payloads-accepted-by-default.md) | Unsigned payloads are accepted by default, and signed ones can be required | Accepted | post-1.0 |
 | [030](ADR-030-init.md) | `init` writes what a gateway needs to start, and nothing that opens the keyring | Accepted | M11 |
 | [031](ADR-031-doctor.md) | `doctor` runs every check, and each finding names its fix | Accepted | M11 |
+| [032](ADR-032-response-header-overrides.md) | A read may set its own response headers | Accepted | M12 |
 
 Every entry is Accepted. 025 was Accepted with its code: it corrects an assumption
 010 had stated as fact, which the AWS workflow disproved, and amends 009 and 022 for
