@@ -180,6 +180,10 @@ app-nextcloud: ## Run Nextcloud through the gateway (test/apps/nextcloud, M12).
 app-loki: ## Run Grafana Loki through the gateway (test/apps/loki, M12).
 	test/apps/loki/run.sh
 
+.PHONY: app-velero
+app-velero: ## Run Velero in kind, backing up through the gateway (test/apps/velero, M12).
+	test/apps/velero/run.sh
+
 .PHONY: chart-e2e
 chart-e2e: ## Install the chart in kind and put an object through it.
 	test/helm/kind.sh

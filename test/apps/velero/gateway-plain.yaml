@@ -1,0 +1,22 @@
+# The gateway in front of Velero's bucket velero-plain. Plain HTTP and no admin
+# listener: it is reachable only inside the scenario's cluster.
+server:
+  listen: "0.0.0.0:9000"
+  presign:
+    max_expiry: 1h
+admin:
+  listen: ""
+upstream:
+  endpoint: http://minio.storage:9000
+  region: us-east-1
+  path_style: true
+  access_key_id: minioadmin
+  secret_access_key: minioadmin
+keys:
+  provider: file
+  keyring: /etc/blindbucket/keyring.json
+clients:
+  - name: velero
+    access_key_id: VELEROSCENARIOPLAIN
+    secret_access_key: velero-scenario-secret-plain
+    buckets: ["velero-plain"]

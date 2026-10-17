@@ -76,6 +76,7 @@ or corrupts anything the application does (M12). Each has a guide in
 |---|---|---|---|---|
 | Grafana Loki, single binary | 3.7.8 | **Works**, new buckets only ([#151](https://github.com/LennardGeissler/blindbucket/issues/151)) | on changes to the gateway and weekly, in CI (`test/apps/loki`) | [loki.md](guides/loki.md) |
 | Nextcloud, S3 as primary storage | 35.0.2 | **Works**, new installations only: an existing bucket's objects cannot be read until [#151](https://github.com/LennardGeissler/blindbucket/issues/151) | on changes to the gateway and weekly, in CI (`test/apps/nextcloud`) | [nextcloud.md](guides/nextcloud.md) |
+| Velero, with velero-plugin-for-aws | 1.18.4, plugin 1.14.4 | **Works** for resource backups, new buckets only ([#151](https://github.com/LennardGeissler/blindbucket/issues/151)); file-system backups not measured | on changes to the gateway and weekly, in CI (`test/apps/velero`) | [velero.md](guides/velero.md) |
 
 Loki, with object names in clear and encrypted: lines pushed and flushed,
 read back identical after a restart without a WAL, and a stream deleted by the
@@ -89,6 +90,12 @@ A multipart part size that is not a multiple of 64 KiB fails every large
 upload; Nextcloud's default of 500 MiB is one. Nextcloud closes many downloads
 early, which releases up to and including 1.4 logged at ERROR as integrity failures
 ([#150](https://github.com/LennardGeissler/blindbucket/issues/150)).
+
+Velero, in a kind cluster, with object names in clear and encrypted: a
+namespace backed up and restored into another, identical; a backup found again
+by the backup sync, which lists the bucket; and a backup deleted, after which
+the bucket is empty at the provider. Velero's file-system backup and data
+mover, which go through Kopia, are not measured.
 
 ---
 

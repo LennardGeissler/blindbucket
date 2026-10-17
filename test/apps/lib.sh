@@ -10,6 +10,8 @@
 #                             every stored object is a blindbucket segment or
 #                             manifest, there are at least <floor> of them,
 #                             and the names bucket holds no key in clear
+#   app_provider_script       the same check, as a script, for a provider
+#                             that does not run under compose
 #   app_check_gateway_logs    neither gateway logged an ERROR
 #
 # Needs Docker with compose, Go and curl.
@@ -81,39 +83,48 @@ app_check_provider() {
 	local prefix=$1 floor=$2
 	shift 2
 	echo "==> what the provider holds"
-	# Plain sh in MinIO's image, which has no grep, cut, sed or awk: a
-	# pipeline through any of them yields nothing, and a loop over nothing
-	# checks nothing. Hence the floor on the count as well.
 	compose run --rm -T -e PREFIX="$prefix" -e FLOOR="$floor" -e CLEAR="$*" \
-		--entrypoint sh buckets -c '
-		set -e
-		mc alias set m http://minio:9000 minioadmin minioadmin >/dev/null
-		for b in "$PREFIX-plain" "$PREFIX-names"; do
-			mc ls --recursive "m/$b" > /tmp/list
-			n=0 clear=0
-			while read -r line; do
-				k=${line##* }
-				magic=$(mc cat "m/$b/$k" | head -c 4)
-				case $magic in
-				BLBK | BBM2 | BBM1) ;;
-				*) echo "$b/$k starts with \"$magic\": not a blindbucket object"; exit 1 ;;
-				esac
-				for p in $CLEAR; do
-					case $k in "$p"*) clear=$((clear + 1)) ;; esac
-				done
-				n=$((n + 1))
-			done < /tmp/list
-			if [ "$n" -lt "$FLOOR" ]; then
-				echo "$b: only $n objects listed, fewer than $FLOOR; the check would prove nothing"
-				exit 1
-			fi
-			echo "$b: $n objects, every one a segment or a manifest; $clear keys in clear"
-			if [ "$b" = "$PREFIX-names" ] && [ "$clear" -ne 0 ]; then
-				echo "$b holds $clear keys in clear"
-				exit 1
-			fi
+		-e MC_HOST_m=http://minioadmin:minioadmin@minio:9000 \
+		--entrypoint sh buckets -c "$(app_provider_script)"
+}
+
+# The check itself, as a script for MinIO's own image, so that a scenario
+# whose MinIO runs elsewhere -- in a cluster -- can run it there. It reads
+# PREFIX, FLOOR and CLEAR from the environment and the provider as the mc
+# alias m (MC_HOST_m).
+#
+# Plain sh, because the image has no grep, cut, sed or awk: a pipeline
+# through any of them yields nothing, and a loop over nothing checks nothing.
+# Hence the floor on the count as well.
+app_provider_script() {
+	cat <<'SH'
+set -e
+for b in "$PREFIX-plain" "$PREFIX-names"; do
+	mc ls --recursive "m/$b" > /tmp/list
+	n=0 clear=0
+	while read -r line; do
+		k=${line##* }
+		magic=$(mc cat "m/$b/$k" | head -c 4)
+		case $magic in
+		BLBK | BBM2 | BBM1) ;;
+		*) echo "$b/$k starts with \"$magic\": not a blindbucket object"; exit 1 ;;
+		esac
+		for p in $CLEAR; do
+			case $k in "$p"*) clear=$((clear + 1)) ;; esac
 		done
-	'
+		n=$((n + 1))
+	done < /tmp/list
+	if [ "$n" -lt "$FLOOR" ]; then
+		echo "$b: only $n objects listed, fewer than $FLOOR; the check would prove nothing"
+		exit 1
+	fi
+	echo "$b: $n objects, every one a segment or a manifest; $clear keys in clear"
+	if [ "$b" = "$PREFIX-names" ] && [ "$clear" -ne 0 ]; then
+		echo "$b holds $clear keys in clear"
+		exit 1
+	fi
+done
+SH
 }
 
 app_check_gateway_logs() {

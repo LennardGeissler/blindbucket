@@ -1,0 +1,28 @@
+# The gateway in front of Velero's bucket velero-names. Plain HTTP and no admin
+# listener: it is reachable only inside the scenario's cluster.
+server:
+  listen: "0.0.0.0:9000"
+  presign:
+    max_expiry: 1h
+admin:
+  listen: ""
+upstream:
+  endpoint: http://minio.storage:9000
+  region: us-east-1
+  path_style: true
+  access_key_id: minioadmin
+  secret_access_key: minioadmin
+keys:
+  provider: file
+  keyring: /etc/blindbucket/keyring.json
+clients:
+  - name: velero
+    access_key_id: VELEROSCENARIONAMES
+    secret_access_key: velero-scenario-secret-names
+    buckets: ["velero-names"]
+
+# Names encrypted. Velero's keys name every backup and restore, and the
+# namespaces in them; it finds backups by listing backups/, which names.encrypt
+# has to answer in the client's order (ADR-017).
+names:
+  encrypt: true

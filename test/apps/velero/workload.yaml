@@ -1,0 +1,48 @@
+# What Velero backs up: a namespace with configuration, a secret, an account
+# and a deployment scaled to zero, so that no image has to be pulled.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: settings
+  namespace: app
+data:
+  database: postgres://app@db.internal:5432/orders
+  feature-flags: "checkout-v2=on,search-v3=off"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: credentials
+  namespace: app
+stringData:
+  api-token: velero-scenario-token-not-a-secret
+  password: velero-scenario-password-not-a-secret
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app
+  namespace: app
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: app
+spec:
+  replicas: 0
+  selector:
+    matchLabels: {app: web}
+  template:
+    metadata:
+      labels: {app: web}
+    spec:
+      serviceAccountName: app
+      containers:
+        - name: web
+          image: registry.k8s.io/pause:3.10
