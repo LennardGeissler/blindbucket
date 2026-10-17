@@ -38,15 +38,14 @@
 // # Exporting to SIEM
 //
 // Audit entries can be exported as they are written, over syslog (RFC 5424 over
-// TLS) or OTLP logs, in addition to the file.
+// TLS) or OTLP logs, in addition to the file (ADR-033).
 //
-// The export stream is not signed, and verification still runs on the file with
-// blindbucket audit verify. The file stays the authoritative record that
-// verifies; the export is a buffered queue for search and alerting that drops
-// entries when full to prevent downstream backpressure from blocking requests or
-// file writes. A SIEM detects missing entries by finding gaps in seq against
-// the file. Under concurrent requests, exports can arrive slightly out of seq
-// order because export runs outside the writer's lock (ADR-030).
+// The export is not signed, and verification still runs on the file with
+// blindbucket audit verify. The file stays the authoritative record; the export
+// is a queue per destination, sent in batches, that drops entries when full
+// rather than making a request wait. A SIEM finds what is missing by gaps in seq
+// within a chain. Entries can arrive out of seq order, because export runs
+// outside the writer's lock, and a syslog receiver can see one twice.
 //
 // # Concurrency
 //

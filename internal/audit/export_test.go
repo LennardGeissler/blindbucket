@@ -3,6 +3,7 @@ package audit
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -19,6 +20,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -208,16 +210,15 @@ func TestSyslogExport(t *testing.T) {
 	for i, rawMsg := range received {
 		wantEntry := fileEntries[i]
 
-		// RFC 5424: <PRI>VERSION TIMESTAMP HOSTNAME APP-NAME PROCID MSGID [SD] MSG
+		// RFC 5424: <PRI>VERSION TIMESTAMP HOSTNAME APP-NAME PROCID MSGID SD MSG
+		if !rfc5424Header.MatchString(rawMsg) {
+			t.Errorf("msg %d is not an RFC 5424 message: %q", i, rawMsg)
+		}
 		if !strings.HasPrefix(rawMsg, "<110>1 ") {
 			t.Errorf("msg %d does not start with <110>1: %q", i, rawMsg)
 		}
-		if !strings.Contains(rawMsg, "test-gateway") {
-			t.Errorf("msg %d missing app-name test-gateway: %q", i, rawMsg)
-		}
-		wantSD := fmt.Sprintf("[audit@blindbucket seq=\"%d\" chain=\"%s\"]", wantEntry.Seq, fileRes.Chain)
-		if !strings.Contains(rawMsg, wantSD) {
-			t.Errorf("msg %d missing structured data %q: %q", i, wantSD, rawMsg)
+		if !strings.Contains(rawMsg, " test-gateway - audit - {") {
+			t.Errorf("msg %d does not carry app-name test-gateway, procid -, msgid audit, sd -: %q", i, rawMsg)
 		}
 
 		// Extract MSG JSON
@@ -597,50 +598,211 @@ func TestSyslogFacilitySeverityZero(t *testing.T) {
 	}
 }
 
-// TestSyslogStructuredDataEscaping verifies that SD-PARAM values escape \, ", and ] per RFC 5424.
-func TestSyslogStructuredDataEscaping(t *testing.T) {
+// rfc5424Header is the header RFC 5424 section 6 defines, as this exporter
+// fills it: TIMESTAMP with at most six fractional digits, PROCID and
+// STRUCTURED-DATA the NILVALUE, and the JSON entry as MSG.
+var rfc5424Header = regexp.MustCompile(
+	`^<\d{1,3}>1 \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2}) ` +
+		`[!-~]{1,255} [!-~]{1,48} - audit - \{`)
+
+// TestSyslogHeaderIsRFC5424: the header holds whatever the chain is called and
+// however precise the file's clock is. A chain is free text in the
+// configuration, and the file's time has nanoseconds; neither may reach a
+// field that cannot hold it.
+func TestSyslogHeaderIsRFC5424(t *testing.T) {
 	addr, certPath, getMsgs, stop := startLocalSyslogReceiver(t)
 	defer stop()
 
-	syslogExp, err := NewSyslogExporter(SyslogConfig{
-		Endpoint: addr,
-		CACert:   certPath,
-	})
+	syslogExp, err := NewSyslogExporter(SyslogConfig{Endpoint: addr, CACert: certPath})
 	if err != nil {
 		t.Fatalf("NewSyslogExporter: %v", err)
 	}
 	defer func() { _ = syslogExp.Close() }()
 
+	chain := `gateway one "eu" [primary] \ backslash`
 	entry := &Entry{
-		Seq:    1,
-		Hash:   "abc",
-		Op:     "PutObject",
-		Bucket: "b",
-		Key:    "k",
-		Time:   time.Now().UTC().Format(time.RFC3339Nano),
-		Status: 200,
+		Seq: 7, Hash: "abc", Op: "PutObject", Bucket: "b", Key: "k", Status: 200,
+		Time: time.Date(2026, 10, 17, 12, 0, 0, 123456789, time.UTC).Format(time.RFC3339Nano),
 	}
-	specialChain := `test\chain"with]brackets`
-	if err := syslogExp.Export(specialChain, entry); err != nil {
+	if err := syslogExp.Export(chain, entry); err != nil {
 		t.Fatalf("Export: %v", err)
 	}
+	msgs := waitForMessages(t, getMsgs, 1)
 
+	if !rfc5424Header.MatchString(msgs[0]) {
+		t.Fatalf("not an RFC 5424 message: %q", msgs[0])
+	}
+	if !strings.Contains(msgs[0], " 2026-10-17T12:00:00.123456Z ") {
+		t.Errorf("timestamp not cut to microseconds: %q", msgs[0])
+	}
+	var exp ExportedEntry
+	if err := json.Unmarshal([]byte(msgs[0][strings.Index(msgs[0], " {")+1:]), &exp); err != nil {
+		t.Fatalf("message JSON: %v", err)
+	}
+	if exp.Chain != chain || exp.Seq != 7 {
+		t.Errorf("message carries chain %q seq %d, want %q seq 7", exp.Chain, exp.Seq, chain)
+	}
+}
+
+func waitForMessages(t *testing.T, getMsgs func() []string, n int) []string {
+	t.Helper()
 	var msgs []string
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		msgs = getMsgs()
-		if len(msgs) >= 1 {
-			break
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if msgs = getMsgs(); len(msgs) >= n {
+			return msgs
 		}
+	}
+	t.Fatalf("received %d messages, want %d", len(msgs), n)
+	return nil
+}
+
+// batchStub is an exporter that sends batches, as both real ones do.
+type batchStub struct {
+	stubExporter
+	onSend func(ctx context.Context, records []queued) error
+}
+
+func (b *batchStub) send(ctx context.Context, records []queued) error { return b.onSend(ctx, records) }
+
+// TestAsyncExporterBatchesKeepUpWithASlowReceiver is the throughput the export
+// lacked: a receiver that takes 5 ms a send, offered 2,000 entries a second.
+// One entry a send keeps up with 200 a second and drops the rest.
+func TestAsyncExporterBatchesKeepUpWithASlowReceiver(t *testing.T) {
+	var sent, sends, drops atomic.Int64
+	slow := &batchStub{onSend: func(_ context.Context, records []queued) error {
 		time.Sleep(5 * time.Millisecond)
+		sent.Add(int64(len(records)))
+		sends.Add(1)
+		return nil
+	}}
+	a := NewAsyncExporter(slow, "slow", 256, time.Second, func(string, error) { drops.Add(1) }, nil)
+
+	const n = 1000
+	tick := time.NewTicker(500 * time.Microsecond)
+	for i := range n {
+		<-tick.C
+		_ = a.Export("c", &Entry{Seq: uint64(i + 1)})
+	}
+	tick.Stop()
+	_ = a.Close()
+
+	if drops.Load() != 0 || sent.Load() != n {
+		t.Errorf("sent %d of %d entries, dropped %d; want all sent", sent.Load(), n, drops.Load())
+	}
+	if sends.Load() >= n/2 {
+		t.Errorf("%d sends for %d entries: the entries were not batched", sends.Load(), n)
+	}
+}
+
+// TestAsyncExporterCloseCancelsASendInFlight: a receiver that never answers
+// holds shutdown for the drain timeout, not for the send's own timeout.
+func TestAsyncExporterCloseCancelsASendInFlight(t *testing.T) {
+	started := make(chan struct{})
+	var once sync.Once
+	hung := &batchStub{onSend: func(ctx context.Context, _ []queued) error {
+		once.Do(func() { close(started) })
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	var drops atomic.Int64
+	a := NewAsyncExporter(hung, "hung", 16, 100*time.Millisecond, func(string, error) { drops.Add(1) }, nil)
+	_ = a.Export("c", &Entry{Seq: 1})
+	<-started
+
+	start := time.Now()
+	_ = a.Close()
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("Close took %v with a send hung in flight, want about the 100ms drain timeout", elapsed)
+	}
+	if drops.Load() != 1 {
+		t.Errorf("%d entries counted as failed, want the 1 in flight", drops.Load())
+	}
+}
+
+// TestOTLPExportBatchesRecords: entries that queue up go in one request, every
+// one of them arrives, and in seq order.
+func TestOTLPExportBatchesRecords(t *testing.T) {
+	var mu sync.Mutex
+	var requests int
+	var seqs []string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(20 * time.Millisecond)
+		var req otlpRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		requests++
+		for _, rl := range req.ResourceLogs {
+			for _, sl := range rl.ScopeLogs {
+				for _, lr := range sl.LogRecords {
+					for _, attr := range lr.Attributes {
+						if attr.Key == "audit.seq" {
+							seqs = append(seqs, attr.Value.IntValue)
+						}
+					}
+				}
+			}
+		}
+		mu.Unlock()
+	}))
+	defer server.Close()
+	certPath := filepath.Join(t.TempDir(), "ca.pem")
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	if err := os.WriteFile(certPath, certPEM, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	otlp, err := NewOTLPExporter(OTLPConfig{Endpoint: server.URL + "/v1/logs", CACert: certPath})
+	if err != nil {
+		t.Fatalf("NewOTLPExporter: %v", err)
+	}
+	var drops atomic.Int64
+	a := NewAsyncExporter(otlp, "otlp", 1024, 5*time.Second, func(string, error) { drops.Add(1) }, nil)
+	const n = 300
+	for i := range n {
+		_ = a.Export("c", &Entry{Seq: uint64(i + 1), Time: time.Now().UTC().Format(timeFormat)})
+	}
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 
-	if len(msgs) != 1 {
-		t.Fatalf("received %d messages, want 1", len(msgs))
+	mu.Lock()
+	defer mu.Unlock()
+	if drops.Load() != 0 || len(seqs) != n {
+		t.Fatalf("receiver got %d of %d records, %d dropped", len(seqs), n, drops.Load())
 	}
-	wantSD := `[audit@blindbucket seq="1" chain="test\\chain\"with\]brackets"]`
-	if !strings.Contains(msgs[0], wantSD) {
-		t.Errorf("message structured data missing or malformed.\nGot:  %s\nWant: %s", msgs[0], wantSD)
+	if requests >= n/2 {
+		t.Errorf("%d requests for %d records: not batched", requests, n)
+	}
+	for i, seq := range seqs {
+		if seq != strconv.Itoa(i+1) {
+			t.Fatalf("record %d has seq %s, want %d", i, seq, i+1)
+		}
+	}
+}
+
+// TestSyslogExportBatchesFrames: a batch is several frames in one write, and
+// the receiver reads each of them.
+func TestSyslogExportBatchesFrames(t *testing.T) {
+	addr, certPath, getMsgs, stop := startLocalSyslogReceiver(t)
+	defer stop()
+	syslogExp, err := NewSyslogExporter(SyslogConfig{Endpoint: addr, CACert: certPath})
+	if err != nil {
+		t.Fatalf("NewSyslogExporter: %v", err)
+	}
+	a := NewAsyncExporter(syslogExp, "syslog", 1024, 5*time.Second, nil, nil)
+	const n = 200
+	for i := range n {
+		_ = a.Export("c", &Entry{Seq: uint64(i + 1), Time: time.Now().UTC().Format(timeFormat)})
+	}
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	for i, msg := range waitForMessages(t, getMsgs, n) {
+		if !rfc5424Header.MatchString(msg) {
+			t.Fatalf("message %d is not RFC 5424: %q", i, msg)
+		}
 	}
 }
 
