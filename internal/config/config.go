@@ -125,21 +125,19 @@ func (e AuditExport) Enabled() bool {
 
 // SyslogExport configures exporting audit entries over syslog (RFC 5424 over TLS).
 type SyslogExport struct {
-	Endpoint           string `yaml:"endpoint"`
-	Network            string `yaml:"network"`
-	InsecureSkipVerify bool   `yaml:"insecure_skip_verify"`
-	CACert             string `yaml:"ca_cert"`
-	AppName            string `yaml:"app_name"`
-	Facility           int    `yaml:"facility"`
-	Severity           int    `yaml:"severity"`
+	Endpoint string `yaml:"endpoint"`
+	Network  string `yaml:"network"`
+	CACert   string `yaml:"ca_cert"`
+	AppName  string `yaml:"app_name"`
+	Facility *int   `yaml:"facility"`
+	Severity *int   `yaml:"severity"`
 }
 
-// OTLPExport configures exporting audit entries over OTLP logs (HTTP/HTTPS).
+// OTLPExport configures exporting audit entries over OTLP logs (HTTPS).
 type OTLPExport struct {
-	Endpoint           string            `yaml:"endpoint"`
-	Headers            map[string]string `yaml:"headers"`
-	InsecureSkipVerify bool              `yaml:"insecure_skip_verify"`
-	CACert             string            `yaml:"ca_cert"`
+	Endpoint string            `yaml:"endpoint"`
+	Headers  map[string]string `yaml:"headers"`
+	CACert   string            `yaml:"ca_cert"`
 }
 
 // Enabled reports whether audit logging was asked for.
@@ -426,8 +424,8 @@ func (c Client) String() string {
 		c.Name, c.AccessKeyID, c.Buckets)
 }
 
-// envRef matches a ${VARIABLE} reference.
-var envRef = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
+// envRef matches a ${VARIABLE} reference within a string.
+var envRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 // Load reads, expands and validates a configuration file.
 func Load(path string) (*Config, error) {
@@ -491,6 +489,15 @@ func Load(path string) (*Config, error) {
 			}
 		}
 	}
+	if cfg.Audit.Export.OTLP != nil {
+		for k, v := range cfg.Audit.Export.OTLP.Headers {
+			val := v
+			if err := expandEnv("audit.export.otlp.headers["+k+"]", &val); err != nil {
+				return nil, err
+			}
+			cfg.Audit.Export.OTLP.Headers[k] = val
+		}
+	}
 
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("config: %s: %w", path, err)
@@ -498,19 +505,24 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// expandEnv resolves a ${VAR} reference in place.
+// expandEnv resolves ${VAR} references in place.
 func expandEnv(name string, field *string) error {
-	match := envRef.FindStringSubmatch(*field)
-	if match == nil {
+	matches := envRef.FindAllStringSubmatch(*field, -1)
+	if len(matches) == 0 {
 		return nil
 	}
-	value, ok := os.LookupEnv(match[1])
-	if !ok {
-		return fmt.Errorf("config: %s references $%s, which is not set; set it, or load the file "+
-			"that holds it -- for a configuration `blindbucket init` wrote: "+
-			"set -a; . ./blindbucket.env; set +a", name, match[1])
+	res := *field
+	for _, match := range matches {
+		varName := match[1]
+		value, ok := os.LookupEnv(varName)
+		if !ok {
+			return fmt.Errorf("config: %s references $%s, which is not set; set it, or load the file "+
+				"that holds it -- for a configuration `blindbucket init` wrote: "+
+				"set -a; . ./blindbucket.env; set +a", name, varName)
+		}
+		res = strings.ReplaceAll(res, match[0], value)
 	}
-	*field = value
+	*field = res
 	return nil
 }
 
@@ -698,11 +710,15 @@ func (a Audit) validate() error {
 		if a.Export.Syslog.Endpoint == "" {
 			return fmt.Errorf("audit.export.syslog.endpoint is required when syslog export is configured")
 		}
-		if a.Export.Syslog.Facility < 0 || a.Export.Syslog.Facility > 23 {
-			return fmt.Errorf("audit.export.syslog.facility must be between 0 and 23")
+		if a.Export.Syslog.Facility != nil {
+			if *a.Export.Syslog.Facility < 0 || *a.Export.Syslog.Facility > 23 {
+				return fmt.Errorf("audit.export.syslog.facility must be between 0 and 23")
+			}
 		}
-		if a.Export.Syslog.Severity < 0 || a.Export.Syslog.Severity > 7 {
-			return fmt.Errorf("audit.export.syslog.severity must be between 0 and 7")
+		if a.Export.Syslog.Severity != nil {
+			if *a.Export.Syslog.Severity < 0 || *a.Export.Syslog.Severity > 7 {
+				return fmt.Errorf("audit.export.syslog.severity must be between 0 and 7")
+			}
 		}
 	}
 	if a.Export.OTLP != nil {
@@ -710,8 +726,8 @@ func (a Audit) validate() error {
 			return fmt.Errorf("audit.export.otlp.endpoint is required when otlp export is configured")
 		}
 		u, err := url.Parse(a.Export.OTLP.Endpoint)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-			return fmt.Errorf("audit.export.otlp.endpoint must be a valid http or https URL")
+		if err != nil || u.Scheme != "https" {
+			return fmt.Errorf("audit.export.otlp.endpoint must be a valid https URL")
 		}
 	}
 	return nil

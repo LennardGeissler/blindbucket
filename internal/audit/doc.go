@@ -41,9 +41,12 @@
 // TLS) or OTLP logs, in addition to the file.
 //
 // The export stream is not signed, and verification still runs on the file with
-// blindbucket audit verify. The file stays the record that verifies; the export
-// is a copy for search and alerting. An export that fails does not block requests
-// and does not stop the file from being written.
+// blindbucket audit verify. The file stays the authoritative record that
+// verifies; the export is a buffered queue for search and alerting that drops
+// entries when full to prevent downstream backpressure from blocking requests or
+// file writes. A SIEM detects missing entries by finding gaps in seq against
+// the file. Under concurrent requests, exports can arrive slightly out of seq
+// order because export runs outside the writer's lock (ADR-030).
 //
 // # Concurrency
 //
