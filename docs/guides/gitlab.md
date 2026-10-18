@@ -138,11 +138,17 @@ and an `https` endpoint.
 
 ## An existing GitLab
 
-A gateway in front of buckets that already hold GitLab's objects cannot read
+A gateway put in front of buckets that already hold GitLab's objects cannot read
 them: each object answers `ObjectNotEncrypted`, so every file stored before
-fails to download. Encrypting the objects in place is
-[#151](https://github.com/LennardGeissler/blindbucket/issues/151). Until then,
-the gateway can only be put in front of new buckets.
+fails to download. `blindbucket encrypt-existing` encrypts the objects in place
+([ADR-034](../adr/ADR-034-encrypting-existing-objects.md)): stop GitLab
+(`gitlab-ctl stop`), run it once for each of its buckets with the configuration
+the gateway will serve with, first with `--dry-run`, then point GitLab at the
+gateway and start it again.
+
+This was measured with Nextcloud ([its
+guide](nextcloud.md#an-existing-nextcloud)), not with GitLab; the command does
+not depend on the application that wrote the objects.
 
 ## What you will see
 

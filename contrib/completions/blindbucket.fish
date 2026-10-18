@@ -47,6 +47,7 @@ complete -c blindbucket -n "$without_command" -a reseal -d 'seal a keyring under
 complete -c blindbucket -n "$without_command" -a gc -d 'remove orphaned multipart manifests'
 complete -c blindbucket -n "$without_command" -a rotate -d 're-wrap data keys under a new KEK'
 complete -c blindbucket -n "$without_command" -a migrate-names -d 'move objects stored in clear to their encrypted names'
+complete -c blindbucket -n "$without_command" -a encrypt-existing -d 'encrypt the objects a bucket held before the gateway, in place'
 complete -c blindbucket -n "$without_command" -a probe -d "measure the provider's conditional writes"
 complete -c blindbucket -n "$without_command" -a scrub -d 'verify every stored object without waiting for a read'
 complete -c blindbucket -n "$without_command" -a audit -d 'verify the audit log, or print the key that verifies it'
@@ -143,6 +144,17 @@ complete -c blindbucket -n $c -l concurrency -x -d 'objects to migrate at once'
 complete -c blindbucket -n $c -l config -r -F -d 'configuration file'
 complete -c blindbucket -n $c -l dry-run -d 'report what would be migrated, change nothing'
 complete -c blindbucket -n $c -l json -d 'emit the summary as JSON'
+complete -c blindbucket -n $c -l passphrase-file -r -F -d 'read the keyring passphrase from this file'
+complete -c blindbucket -n $c -s v -d 'log at debug level'
+
+# encrypt-existing
+set c '__blindbucket_using encrypt-existing'
+complete -c blindbucket -n $c -l allow-unconditional -d 'write without the condition that keeps a client\'s write'
+complete -c blindbucket -n $c -l concurrency -x -d 'objects to encrypt at once'
+complete -c blindbucket -n $c -l config -r -F -d 'configuration file'
+complete -c blindbucket -n $c -l dry-run -d 'report what would be encrypted, change nothing'
+complete -c blindbucket -n $c -l json -d 'emit the summary as JSON'
+complete -c blindbucket -n $c -l keep-versions -d 'run on a versioned bucket, removing old versions yourself'
 complete -c blindbucket -n $c -l passphrase-file -r -F -d 'read the keyring passphrase from this file'
 complete -c blindbucket -n $c -s v -d 'log at debug level'
 

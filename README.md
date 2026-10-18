@@ -366,6 +366,25 @@ reach it. A client writing it meanwhile keeps its write, and a run that is
 interrupted is finished by the next one. Both were checked with TLA+ before the
 command was written ([ADR-022](docs/adr/ADR-022-migrating-to-encrypted-names.md)).
 
+A gateway put in front of a bucket that already holds objects refuses every one of
+them with `ObjectNotEncrypted`: it never serves plaintext it did not encrypt.
+`encrypt-existing` turns them into objects the gateway wrote, in place. It reads each
+one, encrypts it under a new data key and writes it back where the gateway looks for it,
+with its headers and metadata:
+
+```sh
+./bin/blindbucket encrypt-existing --config blindbucket.yaml --dry-run s3://blindbucket-dev
+# stop the application, or put it in maintenance, then:
+./bin/blindbucket encrypt-existing --config blindbucket.yaml s3://blindbucket-dev
+```
+
+Until the run reaches an object, the gateway refuses it, so the application waits for
+the run. A client writing through the gateway meanwhile keeps its write. A run refuses a
+bucket with versioning, whose old versions would keep the plaintext, unless told
+otherwise. Every byte passes through the command, which costs what downloading and
+uploading the bucket costs. The design and its model came first
+([ADR-034](docs/adr/ADR-034-encrypting-existing-objects.md)).
+
 ### Without a server
 
 The crypto core is also usable on its own, which is the point of having shipped it
@@ -683,7 +702,7 @@ the gateway already costs per request.
 | [ref/python/](ref/python/) | A second decoder written from the format spec alone, and the differential test that compares it against the Go one. |
 | [bench/](bench/) | Benchmark scripts, the figures they produce, and the methodology notes that came out of getting them wrong first. |
 | [demo/](demo/) | The end-to-end demo, as scripts: upload through the gateway, ciphertext at the provider, identical hash back, and `tamper.sh` — the hostile provider, by hand, in one command. |
-| [spec/tla/](spec/tla/) | The formal models of the manifest coordination and of `migrate-names`, the thirteen TLC configurations `make tla` runs, and the counterexamples written out. |
+| [spec/tla/](spec/tla/) | The formal models of the manifest coordination, of `migrate-names` and of `encrypt-existing`, the sixteen TLC configurations `make tla` runs, and the counterexamples written out. |
 | [CHANGELOG.md](CHANGELOG.md) | What each release contains, and what it does not. |
 
 ## Roadmap
@@ -714,7 +733,7 @@ the gateway already costs per request.
 | — | `scrub`: every stored object verified by the read path's own checks, without waiting for a read (ADR-028) | **done** in 1.3 |
 | — | Unsigned payloads accepted by default, so AWS CLI 2.38 works, and signed ones requirable (ADR-029) | **done** in 1.3 |
 | M11 | The first ten minutes: `blindbucket init` writes a working configuration, keyring and client credentials, `blindbucket doctor` checks configuration, provider and root-key source and names the fix, a Homebrew tap and ArtifactHub — measured by watching people who have never seen the project get to their first encrypted upload | in progress: `init`, `doctor`, startup errors that name their fix and shell completions **done** in 1.4 |
-| M12 | Works with software that cannot be changed: Nextcloud, Velero, GitLab, Loki and Mastodon storing through the gateway, each as a CI job and a guide, with what breaks written down | in progress: all five measured; encrypting a bucket's existing objects in place ([#151](https://github.com/LennardGeissler/blindbucket/issues/151)) not yet |
+| M12 | Works with software that cannot be changed: Nextcloud, Velero, GitLab, Loki and Mastodon storing through the gateway, each as a CI job and a guide, with what breaks written down, and an existing bucket's objects encrypted in place (ADR-034) | **done** |
 | M13 | A dashboard on the admin listener: instance health, keyring and root-key source, the audit log verified — read-only, nothing on it changes state | planned |
 | M14 | What is refused today, decided again: presigned uploads and encrypted object tags, each an ADR first — where the answer stays no, the ADR says why | planned |
 | M15 | Several tenants on one gateway: keys per tenant, a tenant deleted by destroying its key, OIDC sign-in for the dashboard, the audit log exported | planned |

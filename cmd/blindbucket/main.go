@@ -3,7 +3,8 @@
 // It sets a gateway up (init), checks one (doctor), runs it (serve), manages
 // keyrings (keygen, keys, reseal, rotate), removes orphaned multipart
 // manifests (gc), moves objects stored in clear to their encrypted names
-// (migrate-names), measures what a provider does with conditional writes
+// (migrate-names), encrypts the objects a bucket held before the gateway
+// (encrypt-existing), measures what a provider does with conditional writes
 // (probe), verifies the audit log (audit), reports what a stored segment's
 // header says with no key in sight (inspect), and encrypts or decrypts a
 // stream against a keyring with no provider in the way (encrypt, decrypt) --
@@ -42,6 +43,7 @@ func commands() []command {
 		{"gc", "remove orphaned multipart manifests", runGC},
 		{"rotate", "re-wrap data keys under a new KEK", runRotate},
 		{"migrate-names", "move objects stored in clear to their encrypted names", runMigrateNames},
+		{"encrypt-existing", "encrypt the objects a bucket held before the gateway, in place", runEncryptExisting},
 		{"probe", "measure the provider's conditional writes", runProbe},
 		{"scrub", "verify every stored object without waiting for a read", runScrub},
 		{"audit", "verify the audit log, or print the key that verifies it", runAudit},

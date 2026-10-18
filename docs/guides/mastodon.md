@@ -127,11 +127,18 @@ in `S3_ENDPOINT` and `S3_SERVER_PROTO`.
 
 ## An existing Mastodon
 
-A gateway in front of a bucket that already holds Mastodon's media cannot read
-it: each object answers `ObjectNotEncrypted`, and every file uploaded before
-disappears from the instance. Encrypting the objects in place is
-[#151](https://github.com/LennardGeissler/blindbucket/issues/151). Until then,
-the gateway can only be put in front of a new bucket.
+A gateway put in front of a bucket that already holds Mastodon's media cannot
+read it: each object answers `ObjectNotEncrypted`, and every file uploaded
+before disappears from the instance. `blindbucket encrypt-existing` encrypts the
+objects in place ([ADR-034](../adr/ADR-034-encrypting-existing-objects.md)):
+stop Mastodon's web and Sidekiq processes, run it with the configuration the
+gateway will serve with, first with `--dry-run`, then point Mastodon at the
+gateway and start it again.
+
+The media proxy above is what serves the encrypted media to browsers afterwards,
+as it serves new media. This was measured with Nextcloud ([its
+guide](nextcloud.md#an-existing-nextcloud)), not with Mastodon; the command does
+not depend on the application that wrote the objects.
 
 ## What you will see
 

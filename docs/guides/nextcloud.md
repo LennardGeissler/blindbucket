@@ -125,14 +125,37 @@ Nextcloud.
 
 ## An existing Nextcloud
 
-Not yet. A gateway in front of a bucket that already holds objects cannot read
-them: each one answers `ObjectNotEncrypted`, and Nextcloud shows a 503 for that
-file. The gateway never serves plaintext it did not encrypt, so this is not a
-setting. Encrypting the objects in place is
-[#151](https://github.com/LennardGeissler/blindbucket/issues/151).
+A gateway put in front of a bucket that already holds objects cannot read them:
+each one answers `ObjectNotEncrypted`, and Nextcloud shows a 503 for that file.
+The gateway never serves plaintext it did not encrypt, so this is not a setting.
+`blindbucket encrypt-existing` encrypts them in place
+([ADR-034](../adr/ADR-034-encrypting-existing-objects.md)):
 
-Until then, the way across is a new Nextcloud behind the gateway, and the
-files moved into it through Nextcloud, for instance with the desktop client.
+1. Configure the gateway for Nextcloud's bucket, as above, with the same
+   `names.encrypt` setting the gateway will serve with.
+2. Stop Nextcloud, or turn on maintenance mode (`occ maintenance:mode --on`),
+   which keeps clients and background jobs out. Until the run reaches an object,
+   the gateway refuses it.
+3. Run it, first as a dry run, which says how many objects and bytes:
+
+   ```sh
+   blindbucket encrypt-existing --config blindbucket.yaml --dry-run s3://nextcloud
+   blindbucket encrypt-existing --config blindbucket.yaml s3://nextcloud
+   ```
+
+4. Point Nextcloud's object store at the gateway: the hostname, port, key and
+   secret in `config.php`, or the `OBJECTSTORE_S3_*` variables of the Docker
+   image, which reads them at every start. Then start it, or turn maintenance
+   mode off.
+
+**Measured** with Nextcloud 35.0.2, names in clear and encrypted. An installation
+storing at MinIO directly, two files uploaded, was stopped. The run encrypted all
+67 objects, 69 MB, in a third of a second. Behind the gateway, both files
+downloaded identical, and the gateway logged no ERROR.
+
+A bucket with versioning keeps every file's plaintext as an older version, so the
+run refuses it until the old versions are dealt with (`--keep-versions`, see
+ADR-034).
 
 ## What you will see in the gateway's log
 

@@ -24,6 +24,7 @@ _blindbucket_flags() {
 	gc) echo --config --dry-run --json --min-age --passphrase-file -v ;;
 	rotate) echo --allow-unconditional --concurrency --config --dry-run --json --passphrase-file --to-kid -v ;;
 	migrate-names) echo --allow-unconditional --concurrency --config --dry-run --json --passphrase-file -v ;;
+	encrypt-existing) echo --allow-unconditional --concurrency --config --dry-run --json --keep-versions --passphrase-file -v ;;
 	probe) echo --config --json ;;
 	scrub) echo --concurrency --config --json --passphrase-file -v ;;
 	encrypt) echo --chunk-size-log2 -i --keyring -o --passphrase-file ;;
@@ -43,7 +44,7 @@ _blindbucket() {
 	COMPREPLY=()
 
 	if [ "$COMP_CWORD" -eq 1 ]; then
-		COMPREPLY=($(compgen -W "init doctor serve keygen keys reseal gc rotate migrate-names
+		COMPREPLY=($(compgen -W "init doctor serve keygen keys reseal gc rotate migrate-names encrypt-existing
 			probe scrub audit encrypt decrypt inspect version help" -- "$cur"))
 		return
 	fi

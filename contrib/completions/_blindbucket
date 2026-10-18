@@ -25,6 +25,7 @@ _blindbucket() {
     'gc:remove orphaned multipart manifests'
     'rotate:re-wrap data keys under a new KEK'
     'migrate-names:move objects stored in clear to their encrypted names'
+    'encrypt-existing:encrypt the objects a bucket held before the gateway, in place'
     "probe:measure the provider's conditional writes"
     'scrub:verify every stored object without waiting for a read'
     'audit:verify the audit log, or print the key that verifies it'
@@ -151,6 +152,18 @@ _blindbucket() {
         '--config[configuration file]:file:_files' \
         '--dry-run[report what would be migrated, change nothing]' \
         '--json[emit the summary as JSON]' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        '-v[log at debug level]' \
+        ':target (s3\://bucket/prefix)'
+      ;;
+    encrypt-existing)
+      _arguments \
+        '--allow-unconditional[write without the condition that keeps a client'"'"'s write]' \
+        '--concurrency[objects to encrypt at once]:number' \
+        '--config[configuration file]:file:_files' \
+        '--dry-run[report what would be encrypted, change nothing]' \
+        '--json[emit the summary as JSON]' \
+        '--keep-versions[run on a versioned bucket, removing old versions yourself]' \
         '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
         '-v[log at debug level]' \
         ':target (s3\://bucket/prefix)'

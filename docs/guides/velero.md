@@ -77,13 +77,18 @@ CA is given to Velero with `--cacert`, as above.
 
 ## An existing Velero
 
-A gateway in front of a bucket that already holds Velero's backups cannot read
-them: each object answers `ObjectNotEncrypted`, so the backup sync cannot read
-their metadata and they cannot be restored through it. Encrypting the objects
-in place is [#151](https://github.com/LennardGeissler/blindbucket/issues/151).
-Until then, give Velero a new location through the gateway, in a new bucket,
-and keep the old one, directly against the provider, until its backups have
-expired.
+A gateway put in front of a bucket that already holds Velero's backups cannot
+read them: each object answers `ObjectNotEncrypted`, so the backup sync cannot
+read their metadata and they cannot be restored through it. `blindbucket
+encrypt-existing` encrypts the objects in place
+([ADR-034](../adr/ADR-034-encrypting-existing-objects.md)): stop Velero, by
+scaling its deployment to zero, so that no backup, restore or sync runs
+meanwhile,, run it with the configuration the gateway will serve with, first
+with `--dry-run`, then point Velero at the gateway and start it again.
+
+This was measured with Nextcloud ([its
+guide](nextcloud.md#an-existing-nextcloud)), not with Velero; the command does
+not depend on the application that wrote the objects.
 
 ## What you will see
 

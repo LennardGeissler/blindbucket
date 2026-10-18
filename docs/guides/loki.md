@@ -66,12 +66,17 @@ give it a certificate (`server.tls`) and set `insecure: false`.
 
 ## An existing Loki
 
-A gateway in front of a bucket that already holds Loki's data cannot read it:
-each object answers `ObjectNotEncrypted`, so older logs disappear from
-queries. Encrypting the objects in place is
-[#151](https://github.com/LennardGeissler/blindbucket/issues/151). Until then,
-the gateway can only be put in front of a new bucket, and logs stored before
-are not readable through it.
+A gateway put in front of a bucket that already holds Loki's data cannot read
+it: each object answers `ObjectNotEncrypted`, so older logs disappear from
+queries. `blindbucket encrypt-existing` encrypts the objects in place
+([ADR-034](../adr/ADR-034-encrypting-existing-objects.md)): stop Loki -- a clean
+stop flushes what it holds in memory --, run it with the configuration the
+gateway will serve with, first with `--dry-run`, then point Loki at the gateway
+and start it again.
+
+This was measured with Nextcloud ([its
+guide](nextcloud.md#an-existing-nextcloud)), not with Loki; the command does not
+depend on the application that wrote the objects.
 
 ## What you will see
 

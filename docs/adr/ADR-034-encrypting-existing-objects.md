@@ -89,11 +89,12 @@ Every object is streamed, as `rotate` and `scrub` stream; none is held in memory
    data key, wrapped under the active key and bound to the key the client names
    (FORMAT §6.1), fresh salts, the configured chunk size. A 412 means the object changed
    since step 1: start over at step 1.
-3. **Check what was read**, where the provider says what it stored. For a single-part
-   object whose ETag is a plain MD5, the MD5 of the bytes read must match it, and a
-   full-object checksum (`x-amz-checksum-*`) is compared where the HEAD carries one. A
-   mismatch aborts the object as `failed`. A multipart ETag proves nothing about the
-   bytes, and such an object is encrypted as read.
+3. **Check what was read**, where the provider says what it stored. For an object
+   whose ETag is a plain MD5 -- one stored with a single PUT, not under SSE-KMS -- the
+   MD5 of the bytes read must match it before the write is completed. A mismatch aborts
+   the object as `failed`. A multipart ETag proves nothing about the bytes, and such an
+   object is encrypted as read. A full-object checksum (`x-amz-checksum-*`) would need
+   the checksum mode on every HEAD and is left for later.
 4. **Write it**, in one of two ways:
    - **Names in clear: overwrite in place**, as a rotation does. A multipart upload to
      the same key, the manifest written before the completion (R2), open uploads of the
@@ -105,17 +106,23 @@ Every object is streamed, as `rotate` and `scrub` stream; none is held in memory
    - **Names encrypted: write the encrypted key, then delete the plain one**, as a
      migration does. HEAD the encrypted key first; something there makes the plaintext
      obsolete (below). Otherwise a multipart upload to it with `If-None-Match: *` on the
-     completion, giving way to open uploads in the same way. A 412 means a client wrote
-     the encrypted key meanwhile, which also makes the plaintext obsolete. Then delete
-     the key in clear, unconditionally, as ADR-022 measured and decided.
+     completion, giving way to open uploads in the same way (`If-None-Match` alone is
+     `MCMigrateAwsOrder`). An upload to give way to leaves the object `failed` for this
+     run, and the next one finds the client's write and deletes the plaintext as
+     obsolete. A 412 means a client wrote the encrypted key meanwhile: the run looks
+     again, finds it, and deletes the plaintext as obsolete. Then delete the key in
+     clear, unconditionally, as ADR-022 measured and decided.
 5. **Carry the object across:** `Content-Type`, `Cache-Control`, `Content-Disposition`,
    `Content-Encoding`, `Content-Language` and every user metadata entry, read from the
    HEAD. ADR-022 found that rotation once carried fewer; this command carries all of
    them, and a test holds it to that.
 
-Even a small object is written as a one-part multipart upload, because the condition
-lives in the completion. Under `--allow-unconditional` a small object is one
-`PutObject`, by ADR-020's rule.
+Every object is written through a multipart upload, because the condition lives in
+the completion. An object up to the part size, 64 MiB, becomes one single-part segment
+uploaded as part 1, with no manifest -- how rotation writes a single-part object, and the
+only shape an empty object can take, since FORMAT §7.3 forbids an empty part. A larger
+object becomes a multipart object in parts of that size, more where 10,000 parts would
+not hold it, with its manifest written before the completion.
 
 ### An object at the encrypted key makes the plaintext obsolete
 
@@ -270,11 +277,10 @@ they were for, and keeping them in clear is what the gateway refuses everywhere 
 - Every byte goes through the command: a run reads and writes the whole bucket, and pays
   the provider's egress and requests for it. The dry run says how many bytes.
 - A plaintext object is trusted as the provider serves it at the moment of the read,
-  checked only against an MD5 or checksum the provider keeps for it. What the provider
+  checked only against an MD5 the provider keeps for it. What the provider
   serves then is what is authenticated from then on.
-- Objects come out as one-part multipart objects, with a manifest each, where the
-  original was a single PUT. Readable and correct, and one more object per object at the
-  provider.
+- An object over 64 MiB comes out as a multipart object with a manifest, where the
+  original may have been a single PUT: one more object at the provider for each.
 - The storage class is not carried across, as the gateway does not forward it.
 - On Garage v2.4.1, as for rotation and migration, a run needs `--allow-unconditional`
   and nothing writing.
