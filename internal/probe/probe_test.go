@@ -144,4 +144,3 @@ func TestClassify(t *testing.T) {
 		}
 	})
 }
-
