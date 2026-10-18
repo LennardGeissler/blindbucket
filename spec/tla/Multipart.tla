@@ -33,6 +33,11 @@
 (* with the last write to land always winning; AWS S3 ranks an upload by   *)
 (* when it was created instead, and acknowledges a completion it then      *)
 (* discards.                                                               *)
+(*                                                                         *)
+(* A sixth, Initial, selects what the key holds when the model starts: an  *)
+(* object the gateway wrote, or a plaintext object written before it,      *)
+(* which `blindbucket encrypt-existing` overwrites with the same final     *)
+(* write as a rotation (ADR-034).                                          *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 
@@ -65,7 +70,16 @@ CONSTANTS
                   \*   "v01"     - list, head, delete (no open-upload check)
                   \*   "swapped" - check open uploads, list, head, delete
 
-    RotateMode    \* The final write of `blindbucket rotate` (11.2).
+    Initial,      \* What the key holds when the model starts.
+                  \*   "gateway"   - a multipart object the gateway wrote,
+                  \*                 with its manifest
+                  \*   "plaintext" - a single-part object written before the
+                  \*                 gateway, with no manifest: what
+                  \*                 encrypt-existing overwrites (ADR-034)
+
+    RotateMode    \* The final write of `blindbucket rotate` (11.2), and of
+                  \* `blindbucket encrypt-existing` with names in clear,
+                  \* which overwrites in the same order (ADR-034).
                   \*   "conditional"   - If-Match on the etag read at the start,
                   \*                     after checking that no other upload of
                   \*                     the key is open (ADR-025)
@@ -95,6 +109,7 @@ ASSUME CleanupMode \in {"verify", "r3", "v01"}
 ASSUME Ordering    \in {"completion", "initiation", "either"}
 ASSUME GcMode      \in {"r4", "v01", "swapped"}
 ASSUME RotateMode  \in {"conditional", "ifmatch", "unconditional", "off"}
+ASSUME Initial     \in {"gateway", "plaintext"}
 
 \* Symmetry: the uploads are interchangeable, so TLC may quotient the state
 \* space by permutations of them.  Sound here because neither the algorithm
@@ -108,7 +123,9 @@ variables
     \* for the etag: each writer writes at most once, so "by is unchanged"
     \* means exactly "no write has landed since I read it", which is what
     \* If-Match tests in 11.2.
-    visible = [kind |-> "multi", mid |-> InitId, by |-> "init"],
+    visible = IF Initial = "gateway"
+              THEN [kind |-> "multi",  mid |-> InitId, by |-> "init"]
+              ELSE [kind |-> "single", mid |-> NoMid,  by |-> "init"],
 
     \* The order the provider ranks writes in, for Ordering = "initiation"
     \* (ADR-025).  An upload is ranked when it is created; a PUT and a DELETE
@@ -122,7 +139,7 @@ variables
     newer = 0,
 
     \* The manifest sidecar objects that exist under .blindbucket/m/<hash>/.
-    manifests = {InitId},
+    manifests = IF Initial = "gateway" THEN {InitId} ELSE {},
 
     \* Upstream multipart uploads that have been created and neither completed
     \* nor aborted.  This is what ListMultipartUploads reports in R4 step 2.
@@ -334,6 +351,13 @@ process (Del = DelId)
 (* multipart upload with M = 1, so one shape covers both.  The copy gets  *)
 (* a fresh manifest id (R1) and its own manifest, written before the      *)
 (* completion (R2).                                                      *)
+(*                                                                       *)
+(* With Initial = "plaintext" the same process is encrypt-existing with   *)
+(* names in clear (ADR-034): it reads the plaintext instead of copying     *)
+(* parts, which the model does not distinguish, and writes in this order. *)
+(* The real command skips an object the gateway wrote; this process        *)
+(* rotates one instead, which only adds behaviours, so what holds here     *)
+(* holds for the command.                                                 *)
 (*************************************************************************)
 process (Rot = RotId)
     variables rotObserved = NoMid, rotSrcBy = "init";
@@ -547,10 +571,12 @@ vars == << visible, inflight, newer, manifests, openUploads, lostUpdate, pc,
 ProcSet == (Uploads) \cup {PutId} \cup {DelId} \cup {RotId} \cup {"lifecycle"} \cup {"gc"}
 
 Init == (* Global variables *)
-        /\ visible = [kind |-> "multi", mid |-> InitId, by |-> "init"]
+        /\ visible = (IF Initial = "gateway"
+                      THEN [kind |-> "multi",  mid |-> InitId, by |-> "init"]
+                      ELSE [kind |-> "single", mid |-> NoMid,  by |-> "init"])
         /\ inflight = <<>>
         /\ newer = 0
-        /\ manifests = {InitId}
+        /\ manifests = (IF Initial = "gateway" THEN {InitId} ELSE {})
         /\ openUploads = {}
         /\ lostUpdate = FALSE
         (* Process Up *)

@@ -69,10 +69,10 @@ keeps one around is still perfectly readable.
 
 ## Configurations
 
-Six of the seven configurations of `Multipart.tla` are expected to **fail**, and five of
+Eight of the ten configurations of `Multipart.tla` are expected to **fail**, and five of
 the six of `Migrate.tla` (listed [with that model](#migrating-names--migratetla)). A model that cannot reproduce the
 two races the design already knows about is too coarse to be evidence about the races it
-does not know about, so "no counterexample" is a failing result for those eleven.
+does not know about, so "no counterexample" is a failing result for those thirteen.
 
 | Configuration | Rules | Expected |
 |---|---|---|
@@ -84,15 +84,29 @@ does not know about, so "no counterexample" is a failing result for those eleven
 | `MCUnconditionalRotate` | `rotate --allow-unconditional` | **I2 violated** |
 | `MCAwsOrder` | R3 as ADR-010 wrote it, on a provider that ranks writes as AWS does | **I1 violated** |
 | `MCAwsRotate` | rotation with `If-Match` alone, on the same provider | **I2 violated** |
+| `MCEncrypt` | `encrypt-existing` with names in clear: the key starts with a plaintext object and no manifest (`Initial = "plaintext"`), overwritten with rotation's conditional write, `Ordering = "either"`, 2 uploads | no counterexample |
+| `MCEncryptUnconditional` | `encrypt-existing --allow-unconditional` | **I2 violated** |
+| `MCEncryptAws` | `encrypt-existing` with `If-Match` alone, on a provider that ranks writes as AWS does | **I2 violated** |
 
 The I1 configurations run with `RotateMode = "off"`, so their counterexamples contain
 only operations that M4 itself implements and can replay as integration tests.
+
+**The three `MCEncrypt` configurations** check `blindbucket encrypt-existing`
+([ADR-034](../../docs/adr/ADR-034-encrypting-existing-objects.md)) with names in clear. Its
+write is a rotation's final write in the same order, so the rotation process stands for it;
+what differs is the start. The constant `Initial` makes the key hold a single-part object
+with no manifest, written before the gateway, instead of a multipart object the gateway
+wrote, and every other configuration sets it to `"gateway"`. The command skips an object the
+gateway wrote, where the process rotates one; that only adds behaviours, so what holds here
+holds for the command. With `names.encrypt` the command writes the encrypted key and deletes
+the plain one, which is `Migrate.tla`'s copy and delete, checked by its configurations as
+they are.
 
 ## Running it
 
 ```sh
 make tla-tools     # downloads tla2tools.jar into .tools/ (not committed)
-make tla           # runs the thirteen configurations of both models
+make tla           # runs the sixteen configurations of both models
 make tla-translate # re-run the PlusCal translator after editing an algorithm
 ```
 
@@ -103,8 +117,8 @@ make tla-translate # re-run the PlusCal translator after editing an algorithm
 ```
 
 `MCFixed` explores about 8.7 million distinct states and `MCMigrate` about 8.1 million,
-each in five to seven CPU-minutes; the other eleven finish in seconds, and `make tla` takes
-about two minutes on ten cores. The CI job runs on changes to `spec/tla/` or to the
+each in five to seven CPU-minutes, and `MCEncrypt` about 2.7 million; the other thirteen
+finish in seconds, and `make tla` takes about two minutes on ten cores. The CI job runs on changes to `spec/tla/` or to the
 coordination code rather than on every push.
 
 `MCFixedFull` is not among them. Until ADR-025, `MCFixed` ran three uploads under the
@@ -124,7 +138,7 @@ states there is a small chance two distinct states collide and one subtree goes 
 TLC estimates that probability itself and `check.sh` prints it — for `MCFixed` it lands
 between 1e-4 and 3e-3 depending on the run. That is a property of the hash width, not of the
 machine, so more memory does not move it; rerunning with a different `-fp` seed and getting
-the same answer is what buys extra confidence. The eleven counterexample runs are unaffected: a
+the same answer is what buys extra confidence. The thirteen counterexample runs are unaffected: a
 trace TLC prints is a trace that exists.
 
 Each checked-in module contains both its PlusCal algorithm and its translation. CI re-runs
