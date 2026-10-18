@@ -90,7 +90,10 @@ func TestPartCountFromETag(t *testing.T) {
 			wantOK:    false,
 		},
 		{
-			name:      "etag with multiple dashes",
+			// The count is what follows the first dash. A real multipart
+			// ETag's hash has no dash in it, so an ETag that does is not
+			// read as multipart: a read of it fails rather than guessing.
+			name:      "a hash with a dash in it is not read as multipart",
 			etag:      `"abc-def-3"`,
 			wantCount: 0,
 			wantOK:    false,
