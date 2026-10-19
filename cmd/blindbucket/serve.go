@@ -200,6 +200,7 @@ Flags:
 		AuditFailClosed:       cfg.Audit.FailClosed,
 		Freshness:             freshnessStore(freshIndex),
 		PresignUploadMaxSize:  uploadMax,
+		CORSOrigins:           cfg.Server.CORS.AllowedOrigins,
 	})
 	if err != nil {
 		return err
@@ -305,6 +306,9 @@ Flags:
 			// String, because slog renders a time.Duration as an integer count
 			// of nanoseconds and "604800000000000" is not a number anyone reads.
 			"setting", "server.presign.max_expiry", "max", auth.MaxPresignExpiry.String())
+	}
+	if origins := cfg.Server.CORS.AllowedOrigins; len(origins) > 0 {
+		log.Info("CORS is answered for these origins", "origins", origins)
 	}
 	if uploadMax > 0 {
 		log.Info("presigned uploads are served",

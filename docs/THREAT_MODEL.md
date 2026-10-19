@@ -444,6 +444,13 @@ What remains is **accepted risk**:
   holds where the provider enforces it, and on Garage v2.4.1 it does not.
 - **Uploads cost bandwidth and provider storage**, bounded per request but not per URL.
 
+**CORS** (`server.cors.allowed_origins`) adds the one path the gateway answers without
+authentication besides the admin listener: the browser's `OPTIONS` preflight. It says
+which methods and headers a listed origin may use, and nothing about buckets or objects;
+any other origin gets `403`. Marking responses readable by a listed origin gives a page
+on that origin what its requests already return, and nothing else: a request still needs
+a signature, and no response allows credentials.
+
 ---
 
 ## 6. Non-goals

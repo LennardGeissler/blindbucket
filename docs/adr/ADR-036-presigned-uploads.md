@@ -1,6 +1,6 @@
 # ADR-036 — Presigned uploads: served when the operator sets a size limit, with CORS for the browser
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
 **Milestone:** M14
 **Implements:** [#131](https://github.com/LennardGeissler/blindbucket/issues/131)

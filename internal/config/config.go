@@ -240,6 +240,45 @@ type Server struct {
 	RequireSignedPayload bool `yaml:"require_signed_payload"`
 
 	Presign Presign `yaml:"presign"`
+
+	// CORS lets browser pages on the listed origins call the gateway: a
+	// presigned upload from a page, above all (ADR-036). Off unless origins
+	// are listed.
+	CORS CORS `yaml:"cors"`
+}
+
+// CORS configures the gateway's own answers to browsers. The S3 bucket-CORS
+// sub-resource stays refused: the provider would store it, and it describes
+// the provider's endpoint, which a browser never reaches.
+type CORS struct {
+	// AllowedOrigins are origins exactly as a browser sends them in Origin:
+	// scheme, host and a port only if it is not the default,
+	// "https://app.example". There is no wildcard.
+	AllowedOrigins []string `yaml:"allowed_origins"`
+}
+
+func (c CORS) validate() error {
+	for _, origin := range c.AllowedOrigins {
+		if origin == "*" {
+			return fmt.Errorf("server.cors.allowed_origins: \"*\" is not accepted; list the " +
+				"origins of the pages that call the gateway")
+		}
+		u, err := url.Parse(origin)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+			u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+			return fmt.Errorf("server.cors.allowed_origins: %q is not an origin; write it as "+
+				"a browser sends it, https://app.example, with no path or trailing slash", origin)
+		}
+		if origin != strings.ToLower(origin) {
+			return fmt.Errorf("server.cors.allowed_origins: %q has capitals, and a browser "+
+				"sends an origin in lower case, so it would never match", origin)
+		}
+		if (u.Scheme == "https" && u.Port() == "443") || (u.Scheme == "http" && u.Port() == "80") {
+			return fmt.Errorf("server.cors.allowed_origins: %q names the default port, which a "+
+				"browser leaves out of Origin, so it would never match", origin)
+		}
+	}
+	return nil
 }
 
 // Presign configures presigned URLs (ADR-019).
@@ -764,6 +803,9 @@ func (c *Config) validate() error {
 		return err
 	}
 	if err := c.Server.Presign.validate(); err != nil {
+		return err
+	}
+	if err := c.Server.CORS.validate(); err != nil {
 		return err
 	}
 	// A presigned body is unsigned by construction: at signing time it did
