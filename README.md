@@ -38,7 +38,7 @@
 </sub></p>
 
 > [!NOTE]
-> **Status: `v1.4.0` — stable, and measured against AWS.** Standard S3 clients round-trip
+> **Status: `v1.5.0` — stable, and measured against AWS.** Standard S3 clients round-trip
 > through the gateway, multipart included: AWS CLI, boto3, `mc`, rclone and
 > s5cmd all work, and a 5 GiB `aws s3 cp` across two instances comes back with
 > an identical SHA-256. Key rotation, server-side copy, a signed audit log,
@@ -50,10 +50,11 @@
 > itself without a key, `scrub` verifies every stored object without waiting for a
 > read, and every release artifact carries a provenance attestation.
 >
-> **New in 1.4:** `blindbucket init` sets a gateway up -- configuration, keyring and
-> client credentials -- and `blindbucket doctor` checks one and names the fix for
-> whatever is wrong. Every startup error says which setting to change, and bash, zsh
-> and fish complete every command and flag.
+> **New in 1.5:** Nextcloud, GitLab, Grafana Loki, Mastodon and Velero store through
+> the gateway, each measured in CI and with a guide, and `blindbucket encrypt-existing`
+> encrypts what a bucket held before, so an existing installation can move behind it.
+> Audit entries can be exported to a SIEM over syslog or OTLP, and `brew install --cask
+> lennardgeissler/tap/blindbucket` installs it on macOS and Linux.
 > **Releases up to 1.1.0 were built with Go 1.24.0** and lack the standard
 > library's fixes since February 2025, in the HTTP and TLS stack among others;
 > every release since 1.2.0 is built with current Go. Upgrade.
@@ -201,7 +202,10 @@ in **[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)**.
 
 ```sh
 # Container: distroless, nonroot, no shell, 21 MB.
-docker pull ghcr.io/lennardgeissler/blindbucket:1.4.0
+docker pull ghcr.io/lennardgeissler/blindbucket:1.5.0
+
+# Or with Homebrew, on macOS and Linux, with the completions for bash, zsh and fish:
+brew install --cask lennardgeissler/tap/blindbucket
 
 # Or a binary, with checksums and an SBOM alongside it:
 #   https://github.com/LennardGeissler/blindbucket/releases
@@ -769,7 +773,7 @@ the gateway already costs per request.
 | — | Releases built with current Go, checked by `govulncheck` with the Go that builds them, and attested (SLSA provenance) | **done** in 1.2 |
 | — | `scrub`: every stored object verified by the read path's own checks, without waiting for a read (ADR-028) | **done** in 1.3 |
 | — | Unsigned payloads accepted by default, so AWS CLI 2.38 works, and signed ones requirable (ADR-029) | **done** in 1.3 |
-| M11 | The first ten minutes: `blindbucket init` writes a working configuration, keyring and client credentials, `blindbucket doctor` checks configuration, provider and root-key source and names the fix, a Homebrew tap and ArtifactHub — measured by watching people who have never seen the project get to their first encrypted upload | in progress: `init`, `doctor`, startup errors that name their fix and shell completions **done** in 1.4 |
+| M11 | The first ten minutes: `blindbucket init` writes a working configuration, keyring and client credentials, `blindbucket doctor` checks configuration, provider and root-key source and names the fix, a Homebrew tap and ArtifactHub — measured by watching people who have never seen the project get to their first encrypted upload | in progress: `init`, `doctor`, startup errors that name their fix and shell completions **done** in 1.4, the Homebrew cask and Artifact Hub in 1.5; the sessions with people new to the project remain |
 | M12 | Works with software that cannot be changed: Nextcloud, Velero, GitLab, Loki and Mastodon storing through the gateway, each as a CI job and a guide, with what breaks written down, and an existing bucket's objects encrypted in place (ADR-034) | **done** |
 | M13 | A dashboard on the admin listener: instance health, keyring and root-key source, the audit log verified — read-only, nothing on it changes state | planned |
 | M14 | What is refused today, decided again: presigned uploads and encrypted object tags, each an ADR first — where the answer stays no, the ADR says why | planned |

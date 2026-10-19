@@ -16,7 +16,7 @@ Parameters:
       instance nor its network is what a run measures.
   Version:
     Type: String
-    Default: 1.4.0
+    Default: 1.5.0
     Description: The release whose linux_arm64 archive the gateway runs, without the v.
   ScriptsRef:
     Type: String

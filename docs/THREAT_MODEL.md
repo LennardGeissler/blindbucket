@@ -1,6 +1,20 @@
 # Threat Model
 
-**Status:** Current as of `v1.3.0`, which changes one default and adds one guarantee.
+**Status:** Current as of `v1.5.0`, which adds three things this model has to name, and
+no mechanism. The audit export
+([ADR-033](adr/ADR-033-audit-export.md)) sends every entry to a SIEM, unsigned, with object
+names encrypted as in the file: the receiver is a new party that sees which client did
+what and when, and that cannot verify what it gets, so verification stays on the file. A
+read may now set its own response headers
+([ADR-032](adr/ADR-032-response-header-overrides.md)). On a presigned URL they are covered
+by the signature, so the holder of a link cannot choose them; the signer can, which gives
+a credential holder nothing it could not do by storing the object that way.
+`encrypt-existing` ([ADR-034](adr/ADR-034-encrypting-existing-objects.md)) authenticates a
+plaintext object as the provider serves it at the moment of the read, checked only
+against the provider's own MD5: an active provider (A2) that altered it before the run
+gets its version authenticated, the same first sighting §5.1 names for rollback
+detection. `v1.4.0` changed no guarantee: `init` and `doctor` set a gateway up and check
+it. `v1.3.0` changed one default and added one guarantee.
 `UNSIGNED-PAYLOAD` is now accepted by default
 ([ADR-029](adr/ADR-029-unsigned-payloads-accepted-by-default.md)). For current AWS
 clients that leaves A6's reach unchanged, because their uploads over HTTPS were

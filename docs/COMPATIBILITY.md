@@ -6,7 +6,7 @@ reading a specification.
 
 **Measured:** the client matrix on 2026-09-12 against `v0.2.0`, with object names
 in the clear. **AWS CLI and boto3 are re-run against every commit** by the
-`Client compatibility` CI job, so their rows are current for `v1.4.0`. The other
+`Client compatibility` CI job, so their rows are current for `v1.5.0`. The other
 clients were measured on the date their row gives; rclone has not been re-measured
 since `v0.2.0`.
 
@@ -74,7 +74,7 @@ or corrupts anything the application does (M12). Each has a guide in
 
 | Application | Version tested | Status | Last measured | Guide |
 |---|---|---|---|---|
-| GitLab CE, object storage (consolidated form) | 19.5.0 | **Works** from the release after 1.4.0 ([ADR-032](adr/ADR-032-response-header-overrides.md)), with the feature flag `s3_multithreaded_uploads` off and `presign.max_expiry` of at least 4h15m. An existing bucket moves across with `encrypt-existing` ([ADR-034](adr/ADR-034-encrypting-existing-objects.md)) | on changes to the gateway and weekly, in CI (`test/apps/gitlab`) | [gitlab.md](guides/gitlab.md) |
+| GitLab CE, object storage (consolidated form) | 19.5.0 | **Works** from 1.5.0 ([ADR-032](adr/ADR-032-response-header-overrides.md)), with the feature flag `s3_multithreaded_uploads` off and `presign.max_expiry` of at least 4h15m. An existing bucket moves across with `encrypt-existing` ([ADR-034](adr/ADR-034-encrypting-existing-objects.md)) | on changes to the gateway and weekly, in CI (`test/apps/gitlab`) | [gitlab.md](guides/gitlab.md) |
 | Grafana Loki, single binary | 3.7.8 | **Works**; an existing bucket moves across with `encrypt-existing` ([ADR-034](adr/ADR-034-encrypting-existing-objects.md)) | on changes to the gateway and weekly, in CI (`test/apps/loki`) | [loki.md](guides/loki.md) |
 | Mastodon, media storage | 4.7.3 | **Works** behind a media proxy that signs, such as nginx-s3-gateway: Mastodon's media URLs are unsigned, and the gateway refuses them. An existing bucket moves across with `encrypt-existing` ([ADR-034](adr/ADR-034-encrypting-existing-objects.md)); video and audio not measured | on changes to the gateway and weekly, in CI (`test/apps/mastodon`) | [mastodon.md](guides/mastodon.md) |
 | Nextcloud, S3 as primary storage | 35.0.2 | **Works**; an existing installation moves across with `encrypt-existing`, measured ([ADR-034](adr/ADR-034-encrypting-existing-objects.md)) | on changes to the gateway and weekly, in CI (`test/apps/nextcloud`) | [nextcloud.md](guides/nextcloud.md) |

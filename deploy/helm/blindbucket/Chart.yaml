@@ -6,8 +6,8 @@ type: application
 # gateway release it deploys by default, and moving it is a change to the chart
 # like any other -- a release commit bumps both. Every version is published to
 # ghcr.io once and never again with other contents (build/chart.sh).
-version: 0.1.7
-appVersion: "1.4.0"
+version: 0.1.8
+appVersion: "1.5.0"
 home: https://github.com/LennardGeissler/blindbucket
 sources:
   - https://github.com/LennardGeissler/blindbucket
@@ -23,7 +23,7 @@ annotations:
   artifacthub.io/category: security
   artifacthub.io/images: |
     - name: blindbucket
-      image: ghcr.io/lennardgeissler/blindbucket:1.4.0
+      image: ghcr.io/lennardgeissler/blindbucket:1.5.0
       platforms:
         - linux/amd64
         - linux/arm64
@@ -39,6 +39,6 @@ annotations:
     - name: support
       url: https://github.com/LennardGeissler/blindbucket/issues
   artifacthub.io/changes: |
-    - kind: added
-      description: An alert, BlindbucketAuditExportGap, for audit entries a gateway could not export to a SIEM. It fires for gateways from the release after 1.4.0, which export.
+    - kind: changed
+      description: Deploys blindbucket 1.5.0 by default.
 keywords: [s3, encryption, gateway, proxy]

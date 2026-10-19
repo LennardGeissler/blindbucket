@@ -16,19 +16,37 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-10-19
+
+**Software that cannot be changed, behind the gateway.** Five applications -- Nextcloud,
+GitLab, Grafana Loki, Mastodon and Velero -- are measured storing through the gateway,
+each with a guide and a CI job, and `blindbucket encrypt-existing` encrypts what a
+bucket held before, so an existing installation can move behind it (M12). Audit entries
+can be exported to a SIEM, a read may set its own response headers, which GitLab needs,
+and there is a Homebrew cask. All of it is additive under
+[ADR-021](docs/adr/ADR-021-what-1.0-promises.md), and the format is still `1`.
+
+**Upgrading:** nothing to do for the binaries, the image or the Helm chart. Two things
+read differently: a client that closes a download early is logged at INFO rather than
+ERROR, and audited without `IntegrityCheckFailed`; and requests carrying
+`response-content-disposition` and its siblings, which were refused with
+`NotImplemented`, are served. A gateway in front of GitLab needs `presign.max_expiry`
+of at least 4h15m, which the `1h` `blindbucket init` writes is not
+([docs/guides/gitlab.md](docs/guides/gitlab.md)).
+
 ### Added
 
-- **A Homebrew cask, on macOS and Linux.** `brew install --cask lennardgeissler/tap/blindbucket` installs the binary from the release archive, the one the provenance attestation covers, and the completions for bash, zsh and fish. It is in the tap once a release is published, never while it is a draft, and never for a prerelease.
-- **The Helm chart describes itself for Artifact Hub.** Chart 0.1.6 carries the image it deploys, a category and links to the documentation, the threat model and the format specification, which `ah lint` accepts, and names its maintainer for `helm show chart`. `make chart` fails when the image named there is not the one `appVersion` deploys.
-- **The binary is not notarised by Apple, and the cask says so.** Homebrew quarantines a cask's download, which would stop Gatekeeper from running it, so the cask removes the quarantine from that one file. What protects the download is the cask's SHA-256 and the release's attestation, and the caveat it prints gives the command that checks the archive.
-- **Nextcloud measured, with a guide.** Nextcloud 35.0.2 with S3 as primary storage works through the gateway, names in clear or encrypted: uploads including chunked and multipart ones, ranges, copies, versions, shares and deletes, with only ciphertext at the provider. [docs/guides/nextcloud.md](docs/guides/nextcloud.md) says how to set it up and what not to expect: an existing Nextcloud's bucket cannot be read until [#151](https://github.com/LennardGeissler/blindbucket/issues/151). `test/apps/nextcloud` runs it in CI on every change to the gateway and weekly.
-- **Grafana Loki measured, with a guide.** Loki 3.7.8 stores its chunks, its TSDB index and its compactor's state through the gateway, names in clear or encrypted: logs come back identical after a restart without a WAL, and the compactor's deletion of a stream lists, rewrites and deletes through the gateway. [docs/guides/loki.md](docs/guides/loki.md) says how to set it up; `test/apps/loki` runs it in CI.
-- **Velero measured, with a guide.** Velero 1.18.4 with its AWS plugin backs up a namespace through the gateway, names in clear or encrypted, and restores it identical; its backup sync finds backups by listing the bucket, and deleting a backup leaves the bucket empty at the provider. [docs/guides/velero.md](docs/guides/velero.md) says how to set it up; `test/apps/velero` runs it in kind, in CI.
-- **Mastodon measured, with a guide.** Mastodon 4.7.3 stores its media through the gateway, names in clear or encrypted, and `tootctl media remove-orphans` lists and deletes through it. Mastodon hands browsers unsigned media URLs, which the gateway refuses, so the setup includes a media proxy that signs, nginx-s3-gateway, behind `S3_ALIAS_HOST`. [docs/guides/mastodon.md](docs/guides/mastodon.md) says how to set it up; `test/apps/mastodon` runs it in CI.
-- **GitLab measured, with a guide.** GitLab CE 19.5.0 stores job artifacts, LFS objects, uploads and packages through the gateway, names in clear or encrypted, and downloads them through the presigned URLs it redirects to. It needs the `response-*` parameters above, the feature flag `s3_multithreaded_uploads` off, because fog-aws copies large files in parts one byte too long, and `presign.max_expiry` of at least 4h15m. [docs/guides/gitlab.md](docs/guides/gitlab.md) says how to set it up; `test/apps/gitlab` runs it in CI.
-- **A read may set its own response headers.** `GetObject` and `HeadObject` now serve `response-content-disposition`, `response-content-type` and the other four `response-*` parameters, presigned or not, and set those headers on the gateway's response; the provider never sees them. GitLab sends them with every download, which the gateway refused with `NotImplemented` until now ([ADR-032](docs/adr/ADR-032-response-header-overrides.md)).
 - **`blindbucket encrypt-existing` encrypts what a bucket held before the gateway, in place.** A gateway refuses such objects with `ObjectNotEncrypted`, so until now an application with existing data could not move behind it. The command reads each plaintext object, encrypts it under a new data key and writes it back where the gateway looks for it, with its headers and metadata; a client writing through the gateway during the run keeps its write, guarded as rotation and `migrate-names` are and checked in TLA+ first. It leaves alone what it cannot rewrite safely -- tagged and locked objects among them -- and refuses a versioned bucket unless `--keep-versions` says the old plaintext versions are handled ([ADR-034](docs/adr/ADR-034-encrypting-existing-objects.md)).
+- **Nextcloud measured, with a guide.** Nextcloud 35.0.2 with S3 as primary storage works through the gateway, names in clear or encrypted: uploads including chunked and multipart ones, ranges, copies, versions, shares and deletes, with only ciphertext at the provider. [docs/guides/nextcloud.md](docs/guides/nextcloud.md) says how to set it up and what not to expect: an existing Nextcloud's bucket cannot be read until [#151](https://github.com/LennardGeissler/blindbucket/issues/151). `test/apps/nextcloud` runs it in CI on every change to the gateway and weekly.
+- **GitLab measured, with a guide.** GitLab CE 19.5.0 stores job artifacts, LFS objects, uploads and packages through the gateway, names in clear or encrypted, and downloads them through the presigned URLs it redirects to. It needs the `response-*` parameters above, the feature flag `s3_multithreaded_uploads` off, because fog-aws copies large files in parts one byte too long, and `presign.max_expiry` of at least 4h15m. [docs/guides/gitlab.md](docs/guides/gitlab.md) says how to set it up; `test/apps/gitlab` runs it in CI.
+- **Grafana Loki measured, with a guide.** Loki 3.7.8 stores its chunks, its TSDB index and its compactor's state through the gateway, names in clear or encrypted: logs come back identical after a restart without a WAL, and the compactor's deletion of a stream lists, rewrites and deletes through the gateway. [docs/guides/loki.md](docs/guides/loki.md) says how to set it up; `test/apps/loki` runs it in CI.
+- **Mastodon measured, with a guide.** Mastodon 4.7.3 stores its media through the gateway, names in clear or encrypted, and `tootctl media remove-orphans` lists and deletes through it. Mastodon hands browsers unsigned media URLs, which the gateway refuses, so the setup includes a media proxy that signs, nginx-s3-gateway, behind `S3_ALIAS_HOST`. [docs/guides/mastodon.md](docs/guides/mastodon.md) says how to set it up; `test/apps/mastodon` runs it in CI.
+- **Velero measured, with a guide.** Velero 1.18.4 with its AWS plugin backs up a namespace through the gateway, names in clear or encrypted, and restores it identical; its backup sync finds backups by listing the bucket, and deleting a backup leaves the bucket empty at the provider. [docs/guides/velero.md](docs/guides/velero.md) says how to set it up; `test/apps/velero` runs it in kind, in CI.
+- **A read may set its own response headers.** `GetObject` and `HeadObject` now serve `response-content-disposition`, `response-content-type` and the other four `response-*` parameters, presigned or not, and set those headers on the gateway's response; the provider never sees them. GitLab sends them with every download, which the gateway refused with `NotImplemented` until now ([ADR-032](docs/adr/ADR-032-response-header-overrides.md)).
 - **Audit entries can be exported to a SIEM as they are written.** Besides the file, `audit.export` sends each entry over syslog (RFC 5424 over TLS) or OTLP logs over HTTPS, carrying what the file entry carries, its chain and `seq` included, with object names encrypted as in the file. The export is not signed, and verification still runs on the file with `blindbucket audit verify`; it is a copy for search and alerting, sent in batches from a queue that drops entries rather than making requests wait when a receiver is down or too slow. Dropped entries are counted in `blindbucket_audit_export_failures_total`, alerted on by `BlindbucketAuditExportGap`, and found in the SIEM by gaps in `seq` ([ADR-033](docs/adr/ADR-033-audit-export.md), [#135](https://github.com/LennardGeissler/blindbucket/issues/135)).
+- **A Homebrew cask, on macOS and Linux.** `brew install --cask lennardgeissler/tap/blindbucket` installs the binary from the release archive, the one the provenance attestation covers, and the completions for bash, zsh and fish. It is in the tap once a release is published, never while it is a draft, and never for a prerelease.
+- **The binary is not notarised by Apple, and the cask says so.** Homebrew quarantines a cask's download, which would stop Gatekeeper from running it, so the cask removes the quarantine from that one file. What protects the download is the cask's SHA-256 and the release's attestation, and the caveat it prints gives the command that checks the archive.
+- **The Helm chart describes itself for Artifact Hub.** Chart 0.1.6 carries the image it deploys, a category and links to the documentation, the threat model and the format specification, which `ah lint` accepts, and names its maintainer for `helm show chart`. `make chart` fails when the image named there is not the one `appVersion` deploys.
 
 ### Fixed
 
@@ -1344,7 +1362,8 @@ figures and the methodology are in [bench/](bench/).
   of ten seconds, so the time is the provider's; why it behaves that way under
   this access pattern is not established.
 
-[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.1.0...v1.2.0

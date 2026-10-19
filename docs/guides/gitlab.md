@@ -14,7 +14,7 @@ gateway and once a week. The row in
 [COMPATIBILITY.md](../COMPATIBILITY.md#applications) says what is current.
 
 **Needs a gateway with [ADR-032](../adr/ADR-032-response-header-overrides.md)**,
-the first release after 1.4.0. GitLab puts `response-content-disposition` on
+1.5.0 and later. GitLab puts `response-content-disposition` on
 every download, which earlier releases refuse, so no file stored through them
 can be downloaded again.
 
