@@ -38,6 +38,27 @@ func chromePath(t *testing.T) string {
 	return ""
 }
 
+// chromeProfile is a directory for Chrome's profile, removed when the test
+// ends as far as Chrome lets it be. Not t.TempDir: Chrome's helper processes
+// outlive the one the test kills and keep writing to it for a moment, which
+// t.TempDir reports as a failure of the test.
+func chromeProfile(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "blindbucket-chrome-") //nolint:usetesting // see above.
+	if err != nil {
+		t.Fatalf("a profile directory for Chrome: %v", err)
+	}
+	t.Cleanup(func() {
+		for range 20 {
+			if os.RemoveAll(dir) == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	})
+	return dir
+}
+
 // uploadPage uploads a body to a presigned URL and posts what it saw back to
 // its own origin.
 var uploadPage = template.Must(template.New("page").Parse(`<!doctype html>
@@ -88,7 +109,7 @@ func browserUpload(t *testing.T, chrome string, listed bool, body string) (strin
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	args := []string{"--headless=new", "--disable-gpu", "--no-first-run",
-		"--no-default-browser-check", "--user-data-dir=" + t.TempDir(), "--remote-debugging-port=0"}
+		"--no-default-browser-check", "--user-data-dir=" + chromeProfile(t), "--remote-debugging-port=0"}
 	// Ubuntu 24.04 restricts the user namespaces Chrome's sandbox needs, and
 	// the page is the test's own.
 	if os.Getenv("CI") != "" {
