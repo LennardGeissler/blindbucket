@@ -391,6 +391,33 @@ known, so a failure to write one cannot withhold the response it describes. With
 can therefore be served without a record, and the log shows where — the chain
 stops.
 
+### 5.9 The admin listener and the dashboard
+
+The admin listener serves `/healthz`, `/readyz`, `/metrics` and, if switched on,
+`/debug/pprof/`, over plain HTTP and without authentication. It defaults to loopback,
+but the Helm chart binds it to every interface, because the kubelet and Prometheus have
+to reach it. **Anyone who can reach the port reads the metrics**: request rates per
+operation, error codes, the key IDs in the keyring metrics, and whether the audit log
+has failed. None of it is key material or plaintext. All of it is reconnaissance, and
+profiles, when on, are memory. The chart's NetworkPolicy narrows the port to the
+scraper's namespaces (`networkPolicy.metricsFrom`), and is off by default, because it
+needs a CNI that enforces it. Without it, every pod in the cluster can reach the port.
+This is **accepted risk**.
+
+**Loopback is not private to a browser.** A web page the operator opens can reach
+`127.0.0.1` through DNS rebinding, so the operator's browser can read any loopback
+listener on the same machine -- the admin listener included.
+
+The dashboard ([ADR-035](adr/ADR-035-dashboard.md)) shows more than the metrics: what
+seals the keyring and where, the audit log's chain and whether it verifies. So it gets
+neither of those exposures. It is served on a listener of its own, which the
+configuration allows only on loopback, and is reached from elsewhere through `kubectl
+port-forward` or an SSH tunnel, whose authentication stands in front of it. It answers
+only requests that name a loopback host, which turns a rebinding page away. It renders
+no key material, credential or object name, writes nothing and runs no script. Its
+audit verification runs on a schedule, never on a request, so it cannot be used to make
+the gateway read its whole log on demand.
+
 ---
 
 ## 6. Non-goals

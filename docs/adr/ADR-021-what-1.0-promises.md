@@ -45,9 +45,10 @@ An inventory of what exists, taken from the code rather than from memory:
 | Freshness index | `internal/freshness` | file version `1` |
 | Configuration | `blindbucket.example.yaml`, `internal/config` | — |
 | CLI: commands, flags, exit codes 0 / 1 / 2 / 130 | `cmd/blindbucket` | — |
-| JSON documents: `keys list`, `gc`, `rotate`, `probe`, `migrate-names`, `inspect`, `scrub` | `cmd/blindbucket` | — |
-| Metrics: 13 names | `internal/obs` | — |
+| JSON documents: `keys list`, `gc`, `rotate`, `probe`, `migrate-names`, `inspect`, `scrub`, `encrypt-existing` | `cmd/blindbucket` | — |
+| Metrics: 14 names | `internal/obs` | — |
 | Admin endpoints: `/healthz`, `/readyz`, `/metrics`, `/debug/pprof/` | `internal/obs` | — |
+| The dashboard's address and paths, `/` and `/style.css`, not what the page shows ([ADR-035](ADR-035-dashboard.md)) | `internal/dashboard` | — |
 | S3 error codes of its own: `IntegrityCheckFailed`, `RollbackDetected`, `ObjectNotEncrypted` | `internal/s3api`, `internal/proxy` | — |
 | Environment: `BLINDBUCKET_PASSPHRASE`, `${VAR}` in configuration | `cmd/blindbucket`, `internal/config` | — |
 | Container image tags | `.goreleaser.yaml` | `X.Y.Z`, without the `v` |

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>blindbucket {{.Version}}</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>blindbucket</h1>
+  <p class="sub">{{.Version}} &middot; {{.GoVersion}} &middot; up {{.Uptime}}, since {{when .Started}}</p>
+</header>
+
+<section>
+  <h2>Health</h2>
+  {{if .Ready}}
+  <p class="state ok">Ready</p>
+  {{else}}
+  <p class="state bad">Not ready</p>
+  <p class="detail">{{.NotReady}}</p>
+  {{end}}
+  <p class="note">Checked {{when .ReadyAt}}, at most every ten seconds.</p>
+</section>
+
+<section>
+  <h2>Keyring</h2>
+  <p>Sealed by {{.Sealing}}.</p>
+  <table>
+    <thead><tr><th>Key</th><th>Created</th><th></th></tr></thead>
+    <tbody>
+    {{range .Keys}}
+      <tr><td><code>{{.ID}}</code></td><td>{{when .Created}}</td><td>{{if .Active}}<span class="tag">active</span>{{end}}</td></tr>
+    {{else}}
+      <tr><td colspan="3">No keys.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Audit log</h2>
+  {{with .Audit}}
+  {{if $.Broken}}
+  <p class="state bad">Failing: the gateway refuses requests</p>
+  <p class="detail">{{$.Broken}}</p>
+  {{else}}
+  <p class="state ok">Writing</p>
+  {{end}}
+  <dl>
+    <dt>File</dt><dd><code>{{.Path}}</code></dd>
+    <dt>Chain</dt><dd><code>{{.Chain}}</code></dd>
+    <dt>Last entry</dt><dd>{{.Seq}}</dd>
+    <dt>Last checkpoint</dt><dd>{{if .Signed.IsZero}}none yet since start{{else}}entry {{.SignedSeq}}, {{when .Signed}}{{end}}</dd>
+    <dt>Not yet signed</dt><dd>{{.Unsigned}} entries</dd>
+  </dl>
+  {{with $.Verified}}
+  {{if .OK}}
+  <p class="state ok">Verifies</p>
+  <p class="note">{{.Files}} {{if eq .Files 1}}file{{else}}files{{end}}; {{if eq .Entries 0}}the current one has no entries yet{{else if eq .SignedThrough 0}}none of the {{.Entries}} entries in the current one is signed yet{{else}}signatures checked through entry {{.SignedThrough}} of {{.Entries}} in the current one{{end}}. Verified {{when .At}}, every ten minutes.</p>
+  {{else}}
+  <p class="state bad">Does not verify</p>
+  <p class="detail">{{.Error}}</p>
+  <p class="note">Verified {{when .At}}. <code>blindbucket audit verify</code> says where it breaks.</p>
+  {{end}}
+  {{else}}
+  <p class="note">Not verified yet.</p>
+  {{end}}
+  {{else}}
+  <p>No audit log is configured.</p>
+  {{end}}
+</section>
+
+<footer>Read-only. Nothing here changes the gateway; that stays with the <code>blindbucket</code> command.</footer>
+</body>
+</html>

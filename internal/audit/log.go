@@ -110,6 +110,11 @@ type Writer struct {
 	sinceC int
 	lastC  time.Time
 	broken error
+	// signed is when this writer last signed a checkpoint, and signedSeq the
+	// last entry it covered. lastC is not that: it is also set at open, to
+	// time the checkpoint interval from.
+	signed    time.Time
+	signedSeq uint64
 
 	path        string
 	signer      ed25519.PrivateKey
@@ -274,6 +279,36 @@ func (w *Writer) Chain() string {
 	return w.chain
 }
 
+// Status is what a writer can say about itself without reading its files:
+// enough for an operator to see at a glance whether the log is being written
+// and signed. It carries no key and no entry.
+type Status struct {
+	Path  string
+	Chain string
+	// Seq is the last entry written.
+	Seq uint64
+	// Signed is when this writer last signed a checkpoint, zero if it has not
+	// yet, and SignedSeq the last entry that checkpoint covers.
+	Signed    time.Time
+	SignedSeq uint64
+	// Unsigned counts the entries written since the last checkpoint.
+	Unsigned int
+	// Broken is the sticky failure that has the gateway refusing requests, or
+	// nil.
+	Broken error
+}
+
+// Status reports the writer's state.
+func (w *Writer) Status() Status {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return Status{
+		Path: w.path, Chain: w.chain, Seq: w.seq,
+		Signed: w.signed, SignedSeq: w.signedSeq, Unsigned: w.sinceC,
+		Broken: w.broken,
+	}
+}
+
 // Err reports a sticky append failure, or nil.
 //
 // The gateway calls this before serving, not after: an entry records an outcome
@@ -402,6 +437,7 @@ func (w *Writer) checkpointLocked() error {
 		return w.fail(err)
 	}
 	w.sinceC, w.dirty, w.lastC = 0, false, w.now()
+	w.signed, w.signedSeq = w.lastC, w.seq
 
 	if w.rotateBytes > 0 && w.size >= w.rotateBytes {
 		return w.rotateLocked()

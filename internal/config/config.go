@@ -167,6 +167,36 @@ type Admin struct {
 	// Pprof exposes /debug/pprof on the admin listener. Off by default:
 	// profiles carry goroutine stacks and heap contents.
 	Pprof bool `yaml:"pprof"`
+	// Dashboard is the read-only status page, on a listener of its own
+	// (ADR-035).
+	Dashboard Dashboard `yaml:"dashboard"`
+}
+
+// Dashboard configures the read-only status page.
+type Dashboard struct {
+	// Listen is the address to serve the page on. Empty, the default, serves
+	// none. It must be a loopback address: the page is reached from elsewhere
+	// through kubectl port-forward or an SSH tunnel, never directly, until it
+	// has an authentication of its own (ADR-035).
+	Listen string `yaml:"listen"`
+}
+
+// validate refuses a dashboard address that is not loopback.
+func (d Dashboard) validate() error {
+	if d.Listen == "" {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(d.Listen)
+	if err != nil {
+		return fmt.Errorf("admin.dashboard.listen %q is not host:port: %w", d.Listen, err)
+	}
+	if ip := net.ParseIP(host); host == "localhost" || (ip != nil && ip.IsLoopback()) {
+		return nil
+	}
+	return fmt.Errorf("admin.dashboard.listen %q is not a loopback address. The dashboard "+
+		"has no authentication of its own, so it serves only on loopback, such as "+
+		"127.0.0.1:9101; reach it from elsewhere with kubectl port-forward or an SSH tunnel "+
+		"(ADR-035)", d.Listen)
 }
 
 // Client is one credential the proxy accepts from its own clients.
@@ -625,6 +655,9 @@ func (c *Config) validate() error {
 		return err
 	}
 	if err := c.Keys.validate(); err != nil {
+		return err
+	}
+	if err := c.Admin.Dashboard.validate(); err != nil {
 		return err
 	}
 	keyOwner := map[string]int{}

@@ -672,3 +672,28 @@ audit:
 		})
 	}
 }
+
+// TestDashboardListensOnLoopbackOnly is ADR-035: the page has no
+// authentication of its own, so an address anyone else could reach is refused.
+func TestDashboardListensOnLoopbackOnly(t *testing.T) {
+	for addr, ok := range map[string]bool{
+		"127.0.0.1:9101": true,
+		"[::1]:9101":     true,
+		"localhost:9101": true,
+		"127.0.0.2:9101": true,
+		"0.0.0.0:9101":   false,
+		":9101":          false,
+		"10.0.0.5:9101":  false,
+		"[::]:9101":      false,
+		"dashboard:9101": false,
+		"127.0.0.1":      false,
+	} {
+		_, err := Load(write(t, minimal+"admin:\n  dashboard:\n    listen: \""+addr+"\"\n"))
+		if (err == nil) != ok {
+			t.Errorf("admin.dashboard.listen %q: err = %v, want accepted %v", addr, err, ok)
+		}
+		if err != nil && !ok && addr != "127.0.0.1" && !strings.Contains(err.Error(), "port-forward") {
+			t.Errorf("the refusal of %q does not say how to reach the page: %v", addr, err)
+		}
+	}
+}

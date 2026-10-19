@@ -593,6 +593,22 @@ curl -s localhost:9100/metrics     # Prometheus
 upstream outage is worse than the outage. `/readyz` does, and says which half
 failed.
 
+A read-only status page shows the same at a glance -- whether the gateway is ready,
+which keys it holds and what seals them, and whether the audit log is being signed
+and still verifies:
+
+```yaml
+admin:
+  dashboard:
+    listen: "127.0.0.1:9101"   # loopback only; off when unset
+```
+
+It has no authentication of its own, so it serves only on loopback and only to
+requests that name `localhost`. From elsewhere, reach it through a tunnel: `kubectl
+port-forward pod/<gateway> 9101`, or `ssh -L 9101:127.0.0.1:9101 <host>`, then open
+`http://localhost:9101`. Nothing on it changes anything; that stays with the CLI
+([ADR-035](docs/adr/ADR-035-dashboard.md)).
+
 `blindbucket_build_info{version,go_version}` is always 1 and identifies the
 running gateway and Go toolchain, even before any requests arrive. A development
 build reports `version="dev"`, matching `blindbucket version`; the startup log
@@ -775,7 +791,7 @@ the gateway already costs per request.
 | — | Unsigned payloads accepted by default, so AWS CLI 2.38 works, and signed ones requirable (ADR-029) | **done** in 1.3 |
 | M11 | The first ten minutes: `blindbucket init` writes a working configuration, keyring and client credentials, `blindbucket doctor` checks configuration, provider and root-key source and names the fix, a Homebrew tap and ArtifactHub — measured by watching people who have never seen the project get to their first encrypted upload | **done** |
 | M12 | Works with software that cannot be changed: Nextcloud, Velero, GitLab, Loki and Mastodon storing through the gateway, each as a CI job and a guide, with what breaks written down, and an existing bucket's objects encrypted in place (ADR-034) | **done** |
-| M13 | A dashboard on the admin listener: instance health, keyring and root-key source, the audit log verified — read-only, nothing on it changes state | planned |
+| M13 | A read-only dashboard: instance health, keyring and root-key source, the audit log verified — nothing on it changes state, served on loopback only until M15 brings sign-in (ADR-035) | **done** |
 | M14 | What is refused today, decided again: presigned uploads and encrypted object tags, each an ADR first — where the answer stays no, the ADR says why | planned |
 | M15 | Several tenants on one gateway: keys per tenant, a tenant deleted by destroying its key, OIDC sign-in for the dashboard, the audit log exported | planned |
 

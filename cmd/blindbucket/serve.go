@@ -35,6 +35,7 @@ import (
 const shutdownGrace = 30 * time.Second
 
 func runServe(ctx context.Context, args []string) error {
+	started := time.Now()
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.Usage = func() {
 		_, _ = fmt.Fprintf(fs.Output(), `Usage: blindbucket serve --config <file>
@@ -242,6 +243,22 @@ Flags:
 			defer cancel()
 			if err := admin.Shutdown(shutdownCtx); err != nil {
 				log.Warn("the admin listener did not stop cleanly", "err", err)
+			}
+		}()
+	}
+
+	// The status page, on a listener of its own and only on loopback
+	// (ADR-035). Off unless admin.dashboard.listen is set.
+	dash, err := startDashboard(cfg, ring, client, auditLog, started, log)
+	if err != nil {
+		return err
+	}
+	if dash != nil {
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if err := dash.Shutdown(shutdownCtx); err != nil {
+				log.Warn("the dashboard did not stop cleanly", "err", err)
 			}
 		}()
 	}

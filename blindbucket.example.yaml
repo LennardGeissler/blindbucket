@@ -66,6 +66,12 @@ admin:
   # /debug/pprof exposes goroutine stacks and heap contents. Off unless you are
   # looking at something.
   pprof: false
+  # A read-only status page: readiness, the keyring's key IDs and what seals
+  # them, and the audit log's state. Loopback only -- it has no authentication
+  # of its own; reach it from elsewhere with kubectl port-forward or ssh -L
+  # (ADR-035). Off when unset.
+  # dashboard:
+  #   listen: "127.0.0.1:9101"
 
 upstream:
   endpoint: http://localhost:9002        # the MinIO from docker-compose.yml

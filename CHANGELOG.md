@@ -16,6 +16,10 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Added
+
+- **A read-only status page.** With `admin.dashboard.listen` set, the gateway serves one page that says whether it is ready, which keys it holds and what seals them, and whether its audit log is being signed and still verifies, checked in the background every ten minutes. It never shows key material, credentials or object names, runs no script and changes nothing. It has no authentication of its own, so it serves only on loopback and only to requests that name `localhost`, and is reached from elsewhere through `kubectl port-forward` or an SSH tunnel ([ADR-035](docs/adr/ADR-035-dashboard.md)).
+
 ## [1.5.0] — 2026-10-19
 
 **Software that cannot be changed, behind the gateway.** Five applications -- Nextcloud,
