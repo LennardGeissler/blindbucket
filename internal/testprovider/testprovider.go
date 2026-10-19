@@ -42,6 +42,10 @@ const (
 	CopySourceIfMatchEnv   = "BLINDBUCKET_TEST_S3_COPY_SOURCE_IF_MATCH"
 	CompleteIfMatchEnv     = "BLINDBUCKET_TEST_S3_COMPLETE_IF_MATCH"
 	CompleteIfNoneMatchEnv = "BLINDBUCKET_TEST_S3_COMPLETE_IF_NONE_MATCH"
+	// And with a client's own conditions on PutObject, which the gateway
+	// forwards (#168).
+	PutIfMatchEnv     = "BLINDBUCKET_TEST_S3_PUT_IF_MATCH"
+	PutIfNoneMatchEnv = "BLINDBUCKET_TEST_S3_PUT_IF_NONE_MATCH"
 
 	// KeepEnv, set to anything, leaves a run's objects in the bucket instead of
 	// sweeping them, for looking at what a failing test wrote.
@@ -85,6 +89,9 @@ type Provider struct {
 	CopySourceIfMatch   string
 	CompleteIfMatch     string
 	CompleteIfNoneMatch string
+	// PutIfMatch and PutIfNoneMatch are the same for PutObject.
+	PutIfMatch     string
+	PutIfNoneMatch string
 }
 
 // Guarded reports whether the provider is expected to enforce both conditional
@@ -122,7 +129,9 @@ func Require(t testing.TB) Provider {
 // test -- a TestMain -- that has no test to skip. Its Endpoint is empty when no
 // provider is configured.
 func FromEnv() (Provider, error) {
-	for _, name := range []string{CopySourceIfMatchEnv, CompleteIfMatchEnv, CompleteIfNoneMatchEnv} {
+	for _, name := range []string{
+		CopySourceIfMatchEnv, CompleteIfMatchEnv, CompleteIfNoneMatchEnv, PutIfMatchEnv, PutIfNoneMatchEnv,
+	} {
 		switch v := os.Getenv(name); v {
 		case "", "enforced", "ignored", "refused":
 		default:
@@ -150,6 +159,8 @@ func FromEnv() (Provider, error) {
 		CopySourceIfMatch:   envOr(CopySourceIfMatchEnv, "enforced"),
 		CompleteIfMatch:     envOr(CompleteIfMatchEnv, "enforced"),
 		CompleteIfNoneMatch: envOr(CompleteIfNoneMatchEnv, "enforced"),
+		PutIfMatch:          envOr(PutIfMatchEnv, "enforced"),
+		PutIfNoneMatch:      envOr(PutIfNoneMatchEnv, "enforced"),
 	}, nil
 }
 

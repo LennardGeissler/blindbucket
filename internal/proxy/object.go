@@ -33,6 +33,10 @@ func (p *Proxy) putObject(
 	if apiErr := rejectUnsupportedUpload(r); apiErr != nil {
 		return apiErr
 	}
+	ifMatch, ifNoneMatch, apiErr := writeConditions(r)
+	if apiErr != nil {
+		return apiErr
+	}
 
 	body, plainLen, err := auth.NewBodyReader(r, authResult)
 	if err != nil {
@@ -132,6 +136,8 @@ func (p *Proxy) putObject(
 		ContentEncoding:    passthroughContentEncoding(r),
 		ContentLanguage:    r.Header.Get("Content-Language"),
 		Metadata:           mergeMetadata(clientMeta, meta),
+		IfMatch:            ifMatch,
+		IfNoneMatch:        ifNoneMatch,
 	})
 
 	// Unblock the encrypter if the upstream refused before reading the body.

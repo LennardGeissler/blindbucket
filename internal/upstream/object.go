@@ -33,6 +33,12 @@ type PutObjectInput struct {
 
 	// Metadata holds user metadata without the x-amz-meta- prefix.
 	Metadata map[string]string
+
+	// IfMatch and IfNoneMatch make the write conditional on what the key holds:
+	// the ETag it must still have, or "*" for nothing at all. They are a
+	// client's own conditions (#168), and the provider evaluates them.
+	IfMatch     string
+	IfNoneMatch string
 }
 
 // PutObjectOutput reports what the provider recorded.
@@ -68,6 +74,8 @@ func (c *Client) PutObject(ctx context.Context, in PutObjectInput) (*PutObjectOu
 	}
 	req.ContentLength = in.ContentLength
 	applyObjectHeaders(req.Header, in)
+	setIfNotEmpty(req.Header, "If-Match", in.IfMatch)
+	setIfNotEmpty(req.Header, "If-None-Match", in.IfNoneMatch)
 
 	//nolint:bodyclose // closed by drainAndClose, which the linter cannot see through.
 	resp, err := c.do(ctx, req, "PutObject", false)

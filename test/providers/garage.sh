@@ -74,4 +74,7 @@ export BLINDBUCKET_TEST_S3_BUCKET=$BUCKET
 # both complete regardless.
 export BLINDBUCKET_TEST_S3_COMPLETE_IF_MATCH=ignored
 export BLINDBUCKET_TEST_S3_COMPLETE_IF_NONE_MATCH=ignored
+# And on PutObject, measured on 2026-10-19 (#168).
+export BLINDBUCKET_TEST_S3_PUT_IF_MATCH=ignored
+export BLINDBUCKET_TEST_S3_PUT_IF_NONE_MATCH=ignored
 ENV

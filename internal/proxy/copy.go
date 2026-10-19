@@ -68,6 +68,10 @@ func (p *Proxy) copyObject(
 		return s3api.ErrInvalidRequest.WithMessage(
 			"the %s prefix is reserved by the gateway", s3api.ReservedPrefix)
 	}
+	ifMatch, ifNoneMatch, apiErr := writeConditions(r)
+	if apiErr != nil {
+		return apiErr
+	}
 
 	directive := strings.ToUpper(strings.TrimSpace(r.Header.Get("X-Amz-Metadata-Directive")))
 	if directive == "" {
@@ -169,8 +173,20 @@ func (p *Proxy) copyObject(
 		// an object that fails authentication on the first read.
 		SourceIfMatch:    info.ETag,
 		ReplacedManifest: replaced,
+		// The client's own conditions on the destination. objcopy puts them on
+		// the write that publishes it, which takes the multipart path even for
+		// a small object, because a single CopyObject carries no destination
+		// condition.
+		DestIfMatch:     ifMatch,
+		DestIfNoneMatch: ifNoneMatch,
 	})
 	switch {
+	case errors.Is(err, objcopy.ErrPreconditionFailed) && (ifMatch != "" || ifNoneMatch != ""):
+		log.Info("a condition of the copy did not hold",
+			"source_bucket", src.Bucket, "source_key", src.Key)
+		return s3api.ErrPreconditionFailed.WithMessage(
+			"the destination's If-Match or If-None-Match did not hold, or the copy " +
+				"source changed while it was being copied")
 	case errors.Is(err, objcopy.ErrPreconditionFailed):
 		log.Info("copy source changed while it was being copied",
 			"source_bucket", src.Bucket, "source_key", src.Key)

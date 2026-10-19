@@ -65,6 +65,14 @@ func translateUpstream(err error) *s3api.Error {
 	if !ok {
 		return s3api.ErrInternal.WithMessage("upstream request failed")
 	}
+	// Two conditional writes to one key raced, and the provider asks the loser
+	// to retry. Only this 409 is passed on as it is: the others (a bucket that
+	// is not empty, an upload in progress) mean something the gateway answers
+	// itself.
+	if apiErr.StatusCode == http.StatusConflict && apiErr.Code == "ConditionalRequestConflict" {
+		return &s3api.Error{Code: apiErr.Code, Message: apiErr.Message,
+			HTTPStatus: http.StatusConflict}
+	}
 	switch apiErr.StatusCode {
 	case http.StatusNotFound:
 		if apiErr.Code == "NoSuchBucket" {

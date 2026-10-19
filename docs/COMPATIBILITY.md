@@ -396,6 +396,36 @@ condition to carry — every server-side copy, and every rotation under
 `--allow-unconditional` — is therefore copied with one `CopyObject` instead,
 which keeps the source precondition and works on both.
 
+### A client's own conditional writes
+
+A client's `If-None-Match: *` and `If-Match` on `PutObject`, on
+`CompleteMultipartUpload` and on `CopyObject` go to the provider with the write,
+against the stored key, so they hold under name encryption too. The ETag a client
+compares is the provider's: the gateway returns it unchanged from every write and
+every read. `If-None-Match` with an ETag rather than `*` is answered
+`501 NotImplemented`, as S3 answers it. Up to 1.5.0 the gateway read neither
+header, and a conditional write was carried out unconditionally without a word
+([#168](https://github.com/LennardGeissler/blindbucket/issues/168)).
+
+The provider decides, so a client gets what it would get from the provider
+directly. Measured on 2026-10-19 through the gateway, by the integration suite:
+
+| Condition | MinIO `RELEASE.2026-09-22T19-25-18Z` | Garage v2.4.1 |
+|---|---|---|
+| `If-None-Match: *` on `PutObject` | **enforced**, `412` | **ignored** — overwrites |
+| `If-Match` on `PutObject` | **enforced**, `412` | **ignored** — overwrites |
+| `If-None-Match: *` on `CompleteMultipartUpload` | **enforced**, `412` | **ignored** — completes over the object |
+| `If-None-Match: *` on `CopyObject` | **enforced**, `412` | refused with `502` for a source under 3072 bytes, see below |
+
+A conditional `CopyObject` publishes the copy with a completion, because a single
+`CopyObject` carries no condition on its destination, so it takes a part copy
+even for a small object. Garage refuses a part copy from a source it stores
+inline, as above, and so refuses such a copy. A client that needs "create only if
+absent" on Garage has no way to get it, through the gateway or without it.
+
+AWS documents both conditions on `PutObject` and on the completion; the AWS
+workflow has not measured them through the gateway yet.
+
 ### Which write a provider keeps
 
 Two writes to one key overlap whenever a multipart upload is open while anything

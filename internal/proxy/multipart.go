@@ -333,6 +333,10 @@ func (p *Proxy) completeMultipartUpload(
 	if apiErr != nil {
 		return apiErr
 	}
+	ifMatch, ifNoneMatch, apiErr := writeConditions(r)
+	if apiErr != nil {
+		return apiErr
+	}
 
 	// Step 1: the provider's own view of what was stored. The client's list says
 	// which parts to assemble; the sizes come from here, because a client could
@@ -390,9 +394,11 @@ func (p *Proxy) completeMultipartUpload(
 	}
 	out, err := p.upstream.CompleteMultipartUpload(r.Context(), upstream.CompleteMultipartUploadInput{
 		Bucket: req.Bucket, Key: storedKey, UploadID: token.UploadID, Parts: completed,
+		IfMatch: ifMatch, IfNoneMatch: ifNoneMatch,
 	})
 	if err != nil {
-		// The manifest written at step 3 is now an orphan. It is left for gc
+		// The manifest written at step 3 is now an orphan. So it is when the
+		// client's own condition failed: the completion replaced nothing. It is left for gc
 		// rather than deleted here: a delete on this path would be a delete of
 		// something never observed as visible, which is exactly what rule R3
 		// forbids, and the model shows why.

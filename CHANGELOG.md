@@ -20,6 +20,10 @@ version 1 would keep being readable.
 
 - **A read-only status page.** With `admin.dashboard.listen` set, the gateway serves one page that says whether it is ready, which keys it holds and what seals them, and whether its audit log is being signed and still verifies, checked in the background every ten minutes. It never shows key material, credentials or object names, runs no script and changes nothing. It has no authentication of its own, so it serves only on loopback and only to requests that name `localhost`, and is reached from elsewhere through `kubectl port-forward` or an SSH tunnel ([ADR-035](docs/adr/ADR-035-dashboard.md)).
 
+### Fixed
+
+- **A client's conditional write is no longer carried out unconditionally.** `If-None-Match: *` and `If-Match` on `PutObject`, `CompleteMultipartUpload` and `CopyObject` were dropped without a word, so "create only if absent" could overwrite an object. They now go to the provider with the write, under name encryption too, and a condition that does not hold is answered `412`. Where the provider ignores them, as Garage v2.4.1 does, the client gets what the provider does ([#168](https://github.com/LennardGeissler/blindbucket/issues/168), [COMPATIBILITY.md](docs/COMPATIBILITY.md#a-clients-own-conditional-writes)).
+
 ## [1.5.0] — 2026-10-19
 
 **Software that cannot be changed, behind the gateway.** Five applications -- Nextcloud,
