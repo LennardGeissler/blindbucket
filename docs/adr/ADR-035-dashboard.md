@@ -17,9 +17,11 @@ facts shape it:
 
 - **The admin listener is not private in practice.** It defaults to `127.0.0.1:9100`,
   but the Helm chart binds it to `0.0.0.0:9100`, because the kubelet's probes and
-  Prometheus have to reach `/healthz`, `/readyz` and `/metrics`. Its NetworkPolicy
-  leaves that port open inside the cluster. It speaks plain HTTP and has no
-  authentication. Anything added to it is reachable by every pod in the cluster.
+  Prometheus have to reach `/healthz`, `/readyz` and `/metrics`. The chart's
+  NetworkPolicy can narrow that port to the scraper's namespaces (`metricsFrom`), but
+  it is off by default, because it needs a CNI that enforces it. The listener speaks
+  plain HTTP and has no authentication. By default, anything added to it is reachable
+  by every pod in the cluster.
 - **What the dashboard shows is worth having to an attacker.** Key IDs and which is
   active, what seals the keyring and where (a Vault address, a KMS key ARN), whether the
   audit log verifies and when it was last signed. None of it is a secret in the sense of
