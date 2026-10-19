@@ -77,8 +77,9 @@ address them by IP from outside the pod. The threat model names what that leaves
 
 One page, for the instance:
 
-- **Health:** whether the gateway is ready (the same check as `/readyz`, cached as
-  `/readyz` caches it), the version, the Go version and how long it has been up.
+- **Health:** whether the gateway is ready -- the same check as `/readyz`, run at most
+  once every ten seconds, so that reloading the page does not make the gateway call its
+  provider -- the version, the Go version and how long it has been up.
 - **The keyring:** each key ID, which one is active and when each was created; and
   what seals the keyring -- a passphrase, Vault or OpenBao Transit with its address and
   key name, or AWS KMS with its key ARN.
