@@ -59,8 +59,10 @@ document is gone, so they are kept here.
 | [033](ADR-033-audit-export.md) | Exporting audit entries over TLS syslog and OTLP logs without blocking | Accepted | M15 |
 | [034](ADR-034-encrypting-existing-objects.md) | Encrypting the objects a bucket held before the gateway, in place | Accepted | M12 |
 | [035](ADR-035-dashboard.md) | A read-only dashboard, on a listener of its own, on loopback | Accepted | M13 |
+| [036](ADR-036-presigned-uploads.md) | Presigned uploads: served when the operator sets a size limit, with CORS for the browser | Proposed | M14 |
 
-Every entry is Accepted. 025 was Accepted with its code: it corrects an assumption
+Every entry is Accepted except 036, which is Proposed until its code lands, in
+three PRs. 025 was Accepted with its code: it corrects an assumption
 010 had stated as fact, which the AWS workflow disproved, and amends 009 and 022 for
 the same reason. 024 was Proposed until the gateway and the Helm chart
 used what it decides. 022 was Proposed between its model and its code, which

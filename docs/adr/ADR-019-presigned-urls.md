@@ -107,7 +107,9 @@ this gateway then gated behind `server.allow_unsigned_payload`, and a presigned
 upload deserves to be decided on its own rather than inheriting a switch that
 was set for a different question. (Since
 [ADR-029](ADR-029-unsigned-payloads-accepted-by-default.md) that switch is on by
-default; the argument for deciding presigned uploads separately stands.) **Presigned POST**, the form-and-policy mechanism browsers use
+default; the argument for deciding presigned uploads separately stands.) *Decided by
+[ADR-036](ADR-036-presigned-uploads.md): served when the operator sets a size limit,
+with CORS for the browser.* **Presigned POST**, the form-and-policy mechanism browsers use
 for uploads, is a different protocol from query-string SigV4 and is not in scope
 at all.
 
