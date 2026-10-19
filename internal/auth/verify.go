@@ -91,6 +91,12 @@ type Config struct {
 	// MaxPresignExpiry, which is S3's own maximum of seven days; most
 	// deployments should set something far shorter.
 	MaxPresignExpiry time.Duration
+	// MaxPresignUploadExpiry caps the window of a presigned PUT, separately:
+	// an upload URL is a write that can be used again until it expires, while
+	// a download link may need hours (ADR-036). Zero selects
+	// DefaultPresignUploadExpiry. Whether uploads are served at all is the
+	// proxy's decision, where the operation is known.
+	MaxPresignUploadExpiry time.Duration
 }
 
 // Verifier checks inbound SigV4 signatures.
@@ -100,6 +106,7 @@ type Verifier struct {
 	requireSignedPayload bool
 	allowPresign         bool
 	maxPresignExpiry     time.Duration
+	maxUploadExpiry      time.Duration
 	// now is overridable so skew handling can be tested without sleeping.
 	now func() time.Time
 }
@@ -118,8 +125,17 @@ func NewVerifier(cfg Config) (*Verifier, error) {
 		return nil, fmt.Errorf("auth: max presign expiry %s exceeds S3's own maximum of %s",
 			maxExpiry, MaxPresignExpiry)
 	}
+	uploadExpiry := cfg.MaxPresignUploadExpiry
+	if uploadExpiry <= 0 {
+		uploadExpiry = DefaultPresignUploadExpiry
+	}
+	if uploadExpiry > MaxPresignExpiry {
+		return nil, fmt.Errorf("auth: max presign upload expiry %s exceeds S3's own maximum of %s",
+			uploadExpiry, MaxPresignExpiry)
+	}
 	return &Verifier{
 		registry:             registry,
+		maxUploadExpiry:      uploadExpiry,
 		allowUnsignedPayload: cfg.AllowUnsignedPayload,
 		requireSignedPayload: cfg.RequireSignedPayload,
 		allowPresign:         cfg.AllowPresign,

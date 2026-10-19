@@ -70,6 +70,12 @@ type Config struct {
 	// rather than serving on with a record known to be incomplete.
 	AuditFailClosed bool
 
+	// PresignUploadMaxSize, when positive, serves presigned PutObject and
+	// UploadPart, and is the most one such request may upload. Zero refuses
+	// them, which is the default: there is no setting in which a URL handed to
+	// a browser uploads without a bound (ADR-036).
+	PresignUploadMaxSize int64
+
 	// Freshness detects rollback: a provider serving an older but genuine
 	// version of an object (ADR-018). Nil detects nothing, which is the default
 	// -- the index is memory proportional to live objects, and in a deployment
@@ -89,6 +95,7 @@ type Proxy struct {
 	log        *slog.Logger
 	metrics    *obs.Metrics
 	stall      time.Duration
+	uploadMax  int64
 
 	names          *names.Encrypter
 	maxListingKeys int
@@ -147,6 +154,7 @@ func New(cfg Config) (*Proxy, error) {
 		log:        logger,
 		metrics:    cfg.Metrics,
 		stall:      cfg.StallTimeout,
+		uploadMax:  cfg.PresignUploadMaxSize,
 
 		names:          cfg.Names,
 		maxListingKeys: maxListingKeys,
@@ -221,8 +229,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log = log.With("client", client)
 
 	var err *s3api.Error
-	if gate := p.presignGate(authResult.Presigned, req.Op); gate != nil {
-		log.Warn("refusing an operation a presigned URL may not reach")
+	if gate := p.presignGate(r, authResult, req.Op); gate != nil {
+		log.Warn("refusing a presigned request", "reason", gate.Message)
 		p.fail(w, r, requestID, req, gate)
 		p.metrics.Request(string(req.Op), recorder.status, time.Since(started))
 		return

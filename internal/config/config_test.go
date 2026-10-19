@@ -585,6 +585,17 @@ func TestValidationNamesTheProblem(t *testing.T) {
 			upstreamOK, clientsOK, keysOK), "must not be negative"},
 		"a presign window past S3's maximum": {doc(`server: {presign: {max_expiry: "169h"}}`,
 			upstreamOK, clientsOK, keysOK), "S3's own maximum"},
+		"an upload size in decimal units": {doc(`server: {presign: {uploads: {max_size: 100MB}}}`,
+			upstreamOK, clientsOK, keysOK), "100MiB"},
+		"an upload size past S3's single PUT": {doc(`server: {presign: {uploads: {max_size: 6GiB}}}`,
+			upstreamOK, clientsOK, keysOK), "at most 5GiB"},
+		"an upload window past S3's maximum": {doc(`server: {presign: {uploads: {max_size: 1MiB, max_expiry: 169h}}}`,
+			upstreamOK, clientsOK, keysOK), "uploads.max_expiry"},
+		"uploads with presigning off": {doc(`server: {presign: {enabled: false, uploads: {max_size: 1MiB}}}`,
+			upstreamOK, clientsOK, keysOK), "server.presign.enabled is false"},
+		"uploads where bodies must be signed": {doc(
+			`server: {require_signed_payload: true, presign: {uploads: {max_size: 1MiB}}}`,
+			upstreamOK, clientsOK, keysOK), "require_signed_payload"},
 		"a negative freshness sync interval": {doc(upstreamOK, clientsOK, keysOK,
 			`freshness: {index: /tmp/f.idx, sync_every: -1}`), "freshness.sync_every must not be negative"},
 		"a tombstone retention that does not parse": {doc(upstreamOK, clientsOK, keysOK,
@@ -695,5 +706,24 @@ func TestDashboardListensOnLoopbackOnly(t *testing.T) {
 		if err != nil && !ok && addr != "127.0.0.1" && !strings.Contains(err.Error(), "port-forward") {
 			t.Errorf("the refusal of %q does not say how to reach the page: %v", addr, err)
 		}
+	}
+}
+
+func TestPresignUploadSizes(t *testing.T) {
+	for in, want := range map[string]int64{
+		"1048576": 1 << 20, "100MiB": 100 << 20, "2 GiB": 2 << 30, "512KiB": 512 << 10, "10B": 10,
+	} {
+		got, err := PresignUploads{MaxSize: in}.Size()
+		if err != nil || got != want {
+			t.Errorf("%q: %d, %v; want %d", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"0", "-1MiB", "1.5GiB", "100MB", "lots"} {
+		if _, err := (PresignUploads{MaxSize: in}).Size(); err == nil {
+			t.Errorf("%q parsed", in)
+		}
+	}
+	if got, err := (PresignUploads{}).Size(); got != 0 || err != nil {
+		t.Errorf("an unset size is %d, %v; want 0, which serves no uploads", got, err)
 	}
 }

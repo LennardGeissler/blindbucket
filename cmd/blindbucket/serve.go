@@ -124,12 +124,25 @@ Flags:
 	if presignExpiry == 0 {
 		presignExpiry = auth.MaxPresignExpiry
 	}
+	uploadMax, err := cfg.Server.Presign.Uploads.Size()
+	if err != nil {
+		return err
+	}
+	uploadExpiry, err := cfg.Server.Presign.Uploads.Expiry()
+	if err != nil {
+		return err
+	}
+	if uploadExpiry == 0 {
+		uploadExpiry = auth.DefaultPresignUploadExpiry
+	}
 	verifier, err := auth.NewVerifier(auth.Config{
 		Clients:              clients,
 		AllowUnsignedPayload: cfg.Server.AllowUnsignedPayload,
 		RequireSignedPayload: cfg.Server.RequireSignedPayload,
 		AllowPresign:         cfg.Server.Presign.Enabled,
 		MaxPresignExpiry:     presignExpiry,
+
+		MaxPresignUploadExpiry: uploadExpiry,
 	})
 	if err != nil {
 		return err
@@ -186,6 +199,7 @@ Flags:
 		Audit:                 auditLog,
 		AuditFailClosed:       cfg.Audit.FailClosed,
 		Freshness:             freshnessStore(freshIndex),
+		PresignUploadMaxSize:  uploadMax,
 	})
 	if err != nil {
 		return err
@@ -291,6 +305,10 @@ Flags:
 			// String, because slog renders a time.Duration as an integer count
 			// of nanoseconds and "604800000000000" is not a number anyone reads.
 			"setting", "server.presign.max_expiry", "max", auth.MaxPresignExpiry.String())
+	}
+	if uploadMax > 0 {
+		log.Info("presigned uploads are served",
+			"max_size", uploadMax, "max_expiry", uploadExpiry.String())
 	}
 	if auditLog != nil && !cfg.Audit.FailClosed {
 		log.Warn("audit.fail_closed is off; the gateway will keep serving if it can no " +

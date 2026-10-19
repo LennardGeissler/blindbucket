@@ -418,6 +418,32 @@ no key material, credential or object name, writes nothing and runs no script. I
 audit verification runs on a schedule, never on a request, so it cannot be used to make
 the gateway read its whole log on demand.
 
+### 5.10 Presigned uploads
+
+With `server.presign.uploads.max_size` set, a presigned URL can upload
+([ADR-036](adr/ADR-036-presigned-uploads.md)). Its holder is by design a browser nobody
+vouches for, and is a new adversary for the gateway: not the provider, not a client
+with a credential, but whoever the URL reaches. **What the holder can do is write that
+one key**, with a body of at most `max_size` bytes, as often as they like until the
+URL expires, at most an hour by default. Each write is encrypted like any other, and the
+audit log records it under the credential that signed the URL.
+
+What the holder cannot do:
+- **Change what the URL binds.** It binds the method, the key and the window, and
+  whatever the backend signed: the exact length, a checksum, `If-None-Match: *`.
+- **Add an `x-amz-*` header the URL did not sign.** Such a header is refused, as on
+  S3, so the holder cannot store metadata the backend never agreed to.
+- **Exceed the limit.** It is judged on `Content-Length` before the body is read, and a
+  body without one, or an `aws-chunked` one, is refused.
+
+What remains is **accepted risk**:
+- **The body is unsigned**, protected by TLS between browser and gateway, and verified
+  only if the backend bound a checksum.
+- **An unconditional URL overwrites its key on every use.** In a versioned bucket every
+  use leaves a version. A backend that wants one use signs `If-None-Match: *`, which
+  holds where the provider enforces it, and on Garage v2.4.1 it does not.
+- **Uploads cost bandwidth and provider storage**, bounded per request but not per URL.
+
 ---
 
 ## 6. Non-goals

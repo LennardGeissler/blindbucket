@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -261,6 +262,76 @@ type Presign struct {
 	// clients working; most deployments should set something far shorter, and
 	// the cost of doing so is only that longer URLs are refused.
 	MaxExpiry string `yaml:"max_expiry"`
+
+	// Uploads serves presigned PutObject and UploadPart (ADR-036). Off unless
+	// its max_size is set.
+	Uploads PresignUploads `yaml:"uploads"`
+}
+
+// PresignUploads configures presigned uploads, the browser-upload pattern: a
+// backend that holds a credential hands a browser a URL to upload one file to.
+//
+// There is no default size. Setting one is what turns uploads on, so that no
+// configuration serves a URL that uploads without a bound.
+type PresignUploads struct {
+	// MaxSize is the most one presigned request may upload, in bytes or with
+	// a binary suffix: "100MiB", "2GiB". It holds per request, so for a
+	// multipart upload per part; the total stays the backend's to bound.
+	MaxSize string `yaml:"max_size"`
+	// MaxExpiry caps an upload URL's window, separately from the cap on
+	// downloads, as a Go duration. Empty selects one hour.
+	MaxExpiry string `yaml:"max_expiry"`
+}
+
+// maxPresignUpload is S3's own limit on one PUT, and on one part.
+const maxPresignUpload = 5 << 30
+
+// Size parses MaxSize. Zero means uploads are not served.
+func (u PresignUploads) Size() (int64, error) {
+	if u.MaxSize == "" {
+		return 0, nil
+	}
+	n, err := parseBytes(u.MaxSize)
+	if err != nil {
+		return 0, fmt.Errorf("server.presign.uploads.max_size: %w", err)
+	}
+	return n, nil
+}
+
+// Expiry parses MaxExpiry. Zero selects the package default.
+func (u PresignUploads) Expiry() (time.Duration, error) {
+	if u.MaxExpiry == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(u.MaxExpiry)
+	if err != nil {
+		return 0, fmt.Errorf("server.presign.uploads.max_expiry: %w", err)
+	}
+	return d, nil
+}
+
+// parseBytes reads a byte count with an optional binary suffix. Decimal ones,
+// "MB" and the like, are refused rather than guessed at.
+func parseBytes(s string) (int64, error) {
+	units := []struct {
+		suffix string
+		factor int64
+	}{{"KiB", 1 << 10}, {"MiB", 1 << 20}, {"GiB", 1 << 30}, {"B", 1}}
+	number, factor := strings.TrimSpace(s), int64(1)
+	for _, u := range units {
+		if rest, ok := strings.CutSuffix(number, u.suffix); ok {
+			number, factor = strings.TrimSpace(rest), u.factor
+			break
+		}
+	}
+	n, err := strconv.ParseInt(number, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%q is not a positive number of bytes; write it as 104857600 or 100MiB", s)
+	}
+	if n > math.MaxInt64/factor {
+		return 0, fmt.Errorf("%q is too large", s)
+	}
+	return n * factor, nil
 }
 
 // Expiry parses MaxExpiry. Zero selects the package default.
@@ -695,6 +766,12 @@ func (c *Config) validate() error {
 	if err := c.Server.Presign.validate(); err != nil {
 		return err
 	}
+	// A presigned body is unsigned by construction: at signing time it did
+	// not exist. A listener that requires signed bodies cannot serve one.
+	if c.Server.Presign.Uploads.MaxSize != "" && c.Server.RequireSignedPayload {
+		return fmt.Errorf("server.presign.uploads.max_size is set, but server.require_signed_payload " +
+			"refuses every body a signature does not cover, and a presigned upload's never is")
+	}
 	return c.Freshness.validate()
 }
 
@@ -720,6 +797,26 @@ func (p Presign) validate() error {
 	if expiry > auth.MaxPresignExpiry {
 		return fmt.Errorf("server.presign.max_expiry is %s; S3's own maximum is %s",
 			expiry, auth.MaxPresignExpiry)
+	}
+	size, err := p.Uploads.Size()
+	if err != nil {
+		return err
+	}
+	if size > maxPresignUpload {
+		return fmt.Errorf("server.presign.uploads.max_size is %d bytes; S3 takes at most 5GiB "+
+			"in one PUT, and a larger file goes up in parts", size)
+	}
+	uploadExpiry, err := p.Uploads.Expiry()
+	if err != nil {
+		return err
+	}
+	if uploadExpiry < 0 || uploadExpiry > auth.MaxPresignExpiry {
+		return fmt.Errorf("server.presign.uploads.max_expiry is %s; it must lie between 0 and %s",
+			uploadExpiry, auth.MaxPresignExpiry)
+	}
+	if size > 0 && !p.Enabled {
+		return fmt.Errorf("server.presign.uploads.max_size is set, but server.presign.enabled is " +
+			"false, which refuses every presigned URL")
 	}
 	return nil
 }

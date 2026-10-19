@@ -31,6 +31,11 @@ const (
 // gateway will accept whatever it is configured with.
 const MaxPresignExpiry = 7 * 24 * time.Hour
 
+// DefaultPresignUploadExpiry is the longest window a presigned PUT may name
+// unless configured otherwise. An hour covers what the SDKs default to -- boto3
+// 3600 seconds, JavaScript v3 900 -- and no more (ADR-036).
+const DefaultPresignUploadExpiry = time.Hour
+
 // Presigned verification failures.
 var (
 	// ErrPresignDisabled reports a query-signed request against a listener that
@@ -148,7 +153,14 @@ func parsePresign(query url.Values) (presignParams, error) {
 // The lower bound is the signer's clock running ahead of ours; the upper is the
 // window the signer chose. Both bounds are covered by the signature, so a holder
 // of the URL can lengthen neither.
-func (v *Verifier) checkWindow(p presignParams) error {
+//
+// A PUT is held to the upload cap, which is shorter by default: it can write
+// again and again until it expires.
+func (v *Verifier) checkWindow(p presignParams, method string) error {
+	if method == http.MethodPut && p.expires > v.maxUploadExpiry {
+		return fmt.Errorf("%w: %s is %s, and this gateway accepts at most %s for an upload",
+			ErrPresignExpired, QueryExpires, p.expires, v.maxUploadExpiry)
+	}
 	if p.expires > v.maxPresignExpiry {
 		return fmt.Errorf("%w: %s is %s, and this gateway accepts at most %s",
 			ErrPresignExpired, QueryExpires, p.expires, v.maxPresignExpiry)
@@ -183,7 +195,7 @@ func (v *Verifier) verifyPresigned(r *http.Request, bucket string) (*Result, err
 	if err != nil {
 		return nil, err
 	}
-	if err := v.checkWindow(p); err != nil {
+	if err := v.checkWindow(p, r.Method); err != nil {
 		return nil, err
 	}
 
@@ -222,10 +234,10 @@ func (v *Verifier) verifyPresigned(r *http.Request, bucket string) (*Result, err
 			SignedHeaders: p.signedHeaders,
 			Signature:     p.signature,
 		},
-		// A presigned request carries no body this gateway will accept, so the
-		// payload mode says what the signature says and nothing reads a body
-		// against it. The operations a presigned URL may reach are gated in the
-		// proxy, which is where the operation is known.
+		// The signature covers no body: a presigned upload's is unsigned, and
+		// what bounds it is the proxy's size limit and whatever checksum the
+		// URL binds (ADR-036). The operations a presigned URL may reach are
+		// gated in the proxy, which is where the operation is known.
 		PayloadMode: PayloadUnsigned,
 		SigningKey:  signingKey,
 		Seed:        p.signature,

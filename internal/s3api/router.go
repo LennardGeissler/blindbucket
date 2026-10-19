@@ -207,6 +207,31 @@ func checkResponseOverrides(r *http.Request, query url.Values) *Error {
 // it forwards to the provider.
 func PresignQueryParam(name string) bool { return presignParams[name] }
 
+// hoistedUploadParams are the header values a presigned upload may carry in its
+// query instead, as the AWS SDK for JavaScript v3 puts them there (ADR-036). S3
+// reads them as the headers they stand for, and so does the proxy, once the
+// signature over the query has been checked. x-amz-meta-* is matched by prefix.
+//
+// x-amz-tagging is among them so that it is refused as the header is, with the
+// reason, rather than as an unknown sub-resource.
+var hoistedUploadParams = map[string]bool{
+	"x-amz-checksum-crc32":         true,
+	"x-amz-checksum-crc32c":        true,
+	"x-amz-checksum-crc64nvme":     true,
+	"x-amz-checksum-sha1":          true,
+	"x-amz-checksum-sha256":        true,
+	"x-amz-sdk-checksum-algorithm": true,
+	"x-amz-tagging":                true,
+}
+
+// HoistedUploadParam reports whether a query parameter of a presigned PUT
+// stands for a header (ADR-036).
+func HoistedUploadParam(name string) bool {
+	lower := strings.ToLower(name)
+	return hoistedUploadParams[lower] ||
+		(strings.HasPrefix(lower, "x-amz-meta-") && len(lower) > len("x-amz-meta-"))
+}
+
 // sigV2Presigned recognises the older signature format a presigned URL can carry.
 //
 // SigV2 is not served: it is deprecated, weaker, and AWS removed it from regions
@@ -357,9 +382,14 @@ func routeObject(r *http.Request, bucket, key string) (Request, *Error) {
 	if sigV2Presigned(query) {
 		return Request{Bucket: bucket, Key: key, Op: OpUnsupported}, errSigV2()
 	}
+	// A presigned PUT may carry header values in its query. Only a presigned
+	// one: a header-signed request has headers for them, and one that put them
+	// in its query anyway would be asking for something no client sends.
+	hoisting := r.Method == http.MethodPut && query.Get("X-Amz-Signature") != ""
 	for name := range query {
 		if ignorableParams[strings.ToLower(name)] || objectQueryParams[name] ||
-			presignParams[name] || responseOverrides[name] != "" {
+			presignParams[name] || responseOverrides[name] != "" ||
+			(hoisting && HoistedUploadParam(name)) {
 			continue
 		}
 		return Request{Bucket: bucket, Key: key, Op: OpUnsupported},

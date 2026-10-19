@@ -815,9 +815,9 @@ provider's, and a milestone that would need the wire format goes through
 **What is still missing.** Object tags are refused rather than
 stored, because the provider would hold them in plaintext
 ([ADR-012](docs/adr/ADR-012-copy-semantics.md)). `ListMultipartUploads` is refused
-permanently and says why. A presigned URL can only *read*: `GET` and `HEAD` are served and
-everything else is refused, so the browser-upload case is not covered
-([ADR-019](docs/adr/ADR-019-presigned-urls.md)). And one benchmark cell is documented as
+permanently and says why. A presigned URL uploads only where the operator has set a size
+limit, and a browser on another origin cannot use one yet, because the gateway serves no
+CORS ([ADR-036](docs/adr/ADR-036-presigned-uploads.md)). And one benchmark cell is documented as
 the provider's behaviour rather than explained; the gateway's share of it is measured at
 0.13 ms per request.
 

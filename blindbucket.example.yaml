@@ -41,9 +41,9 @@ server:
   # new is that a credential holder can now delegate, which is why it can be
   # turned off.
   #
-  # Reads only. GET and HEAD are served and everything else is refused: a URL is
-  # where a bearer credential gets copied, and a link preview that issues a GET
-  # is a GET while one that issues a DELETE is data loss.
+  # Reads, and uploads only if uploads.max_size below is set. Everything else is
+  # refused: a URL is where a bearer credential gets copied, and the operations
+  # that change or remove data are kept off that path.
   #
   # Two things worth knowing before handing links out. The URL must point at
   # this gateway -- what sits at the provider is ciphertext with no key -- so
@@ -57,6 +57,15 @@ server:
     # credential for as long as it lasts, so set this to the shortest window
     # your clients actually need.
     max_expiry: 1h
+    # Presigned PutObject and UploadPart, for a backend that hands a browser a
+    # URL to upload one file to (ADR-036). Off until max_size is set: the most
+    # one request may upload, per part for a multipart upload, up to 5GiB. A
+    # browser on another origin also needs CORS, which this build does not
+    # serve yet. max_expiry caps an upload URL's window; it defaults to 1h,
+    # because an upload URL can write again until it expires.
+    # uploads:
+    #   max_size: 100MiB
+    #   max_expiry: 1h
 
 # Operator-facing listener: metrics, health and, if asked for, profiles. None of
 # it is for storage clients, which is why it is a separate address and why the

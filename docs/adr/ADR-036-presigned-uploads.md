@@ -114,6 +114,11 @@ boto3's default of 3600 seconds and JavaScript v3's 900.
   a header and in the query is refused, not merged. Every other query parameter is
   refused, as now. Like the six signing parameters, none of them is forwarded to the
   provider.
+- **An `x-amz-*` header the URL did not sign** is refused, as S3 refuses it. The
+  holder of the URL is not its signer, and an unsigned `x-amz-meta-*` would let them
+  store metadata the backend never agreed to. Headers outside `x-amz-*`, such as
+  `Content-Type`, may be sent unsigned, as on S3: JavaScript v3 does not sign
+  `Content-Type`.
 
 ### 3. CORS, from the gateway's own configuration
 
