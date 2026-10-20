@@ -327,6 +327,9 @@ func routeBucket(r *http.Request, bucket string) (Request, *Error) {
 		if ignorableParams[strings.ToLower(name)] || presignParams[name] {
 			continue
 		}
+		if name == "cors" {
+			return Request{Bucket: bucket, Op: OpUnsupported}, errBucketCORS
+		}
 		if !listingParams[name] {
 			return Request{Bucket: bucket, Op: OpUnsupported}, ErrNotImplemented.WithMessage(
 				"the bucket sub-resource %q is not implemented in this build", name)
@@ -356,6 +359,16 @@ func routeBucket(r *http.Request, bucket string) (Request, *Error) {
 	return Request{Bucket: bucket, Op: OpUnsupported}, ErrNotImplemented.WithMessage(
 		"method %s is not implemented for buckets", r.Method)
 }
+
+// errBucketCORS refuses the bucket-CORS sub-resource with its reason (ADR-036).
+// The provider would store the configuration, and it would govern the
+// provider's endpoint, which a browser never reaches; the gateway answers
+// browsers from its own configuration instead.
+var errBucketCORS = ErrNotImplemented.WithMessage(
+	"a bucket's CORS configuration is not served: the provider would store it, and it " +
+		"would govern the provider's endpoint, which a browser never reaches. The gateway " +
+		"answers browsers itself, for the origins in server.cors.allowed_origins " +
+		"(docs/adr/ADR-036-presigned-uploads.md)")
 
 // objectQueryParams are the query parameters an object request may carry. A
 // parameter outside this set names a sub-resource this build does not implement,

@@ -76,6 +76,18 @@ func TestRouteRefusesSubResources(t *testing.T) {
 	}
 }
 
+// TestRouteRefusesBucketCORSWithItsReason: ?cors is refused for every method,
+// and says where CORS comes from instead (ADR-036).
+func TestRouteRefusesBucketCORSWithItsReason(t *testing.T) {
+	t.Parallel()
+	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+		_, err := Route(request(t, method, "/bucket?cors"), "")
+		if err == nil || err.Code != "NotImplemented" || !strings.Contains(err.Message, "server.cors.allowed_origins") {
+			t.Errorf("%s ?cors: %v, want NotImplemented naming server.cors.allowed_origins", method, err)
+		}
+	}
+}
+
 // TestRoutePassesPresignedURLsThrough. The presigning parameters used to be
 // refused here alongside ?acl and ?attributes, which was right while presigned
 // URLs were unimplemented and is wrong now: the router runs before the verifier,

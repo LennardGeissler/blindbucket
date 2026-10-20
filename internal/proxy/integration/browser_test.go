@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"html/template"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -69,20 +71,34 @@ fetch({{.URL}}, {method: "PUT", body: {{.Body}}, headers: {"Content-Type": "text
   .then(result => fetch("/result", {method: "POST", body: result}));
 </script>`))
 
-// browserUpload serves the page from its own origin, opens it in Chrome and
-// returns what the page reported. listed says whether the gateway lists the
-// page's origin.
-func browserUpload(t *testing.T, chrome string, listed bool, body string) (string, *proxytest.Harness, string) {
+// partsPage uploads two parts by URL, as a browser library does for a large
+// file: 5 MiB of ones, then a short tail. It posts each part's status and ETag
+// back, one line each, for the backend to complete with.
+var partsPage = template.Must(template.New("parts").Parse(`<!doctype html>
+<script>
+const parts = [[{{.First}}, new Uint8Array({{.FirstSize}}).fill(1)], [{{.Second}}, {{.Tail}}]];
+Promise.all(parts.map(([url, body]) => fetch(url, {method: "PUT", body})
+    .then(r => r.text().then(() => r.status + " " + (r.headers.get("ETag") || "no-etag")))))
+  .then(lines => lines.join("\n"))
+  .catch(e => "error " + e)
+  .then(result => fetch("/result", {method: "POST", body: result}));
+</script>`))
+
+// runInChrome serves a page from an origin of its own, opens it in a headless
+// Chrome and returns what the page posts to /result. prepare gets the page's
+// origin before anything is served -- the gateway has to list it -- and
+// returns the page.
+func runInChrome(t *testing.T, chrome string, prepare func(origin string) []byte) string {
 	t.Helper()
 	results := make(chan string, 1)
-	var target string
-	// Unstarted, so that its address is known for the CORS list while the
-	// handler starts only once target is written.
+	var html []byte
+	// Unstarted, so that its address is known to prepare while the handler
+	// starts only once html is written.
 	page := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_ = uploadPage.Execute(w, struct{ URL, Body string }{target, body})
+			_, _ = w.Write(html)
 		case "/result":
 			b, _ := io.ReadAll(r.Body)
 			select {
@@ -94,16 +110,8 @@ func browserUpload(t *testing.T, chrome string, listed bool, body string) (strin
 		}
 	}))
 	t.Cleanup(page.Close)
-	pageURL := "http://" + page.Listener.Addr().String()
-
-	origins := []string{"http://unrelated.example"}
-	if listed {
-		origins = []string{pageURL}
-	}
-	h := proxytest.New(t, withPresign(), withUploads(uploadLimit), withCORS(origins...))
-	key := proxytest.TestKey(t, "browser")
-	h.CleanupStored(t, key)
-	target = presignPut(t, h.URL(key), 15*time.Minute, time.Now(), 0, nil, nil)
+	origin := "http://" + page.Listener.Addr().String()
+	html = prepare(origin)
 	page.Start()
 
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
@@ -115,7 +123,7 @@ func browserUpload(t *testing.T, chrome string, listed bool, body string) (strin
 	if os.Getenv("CI") != "" {
 		args = append(args, "--no-sandbox")
 	}
-	cmd := exec.CommandContext(ctx, chrome, append(args, pageURL+"/")...)
+	cmd := exec.CommandContext(ctx, chrome, append(args, origin+"/")...)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("starting Chrome: %v", err)
 	}
@@ -126,11 +134,40 @@ func browserUpload(t *testing.T, chrome string, listed bool, body string) (strin
 
 	select {
 	case got := <-results:
-		return got, h, key
+		return got
 	case <-ctx.Done():
 		t.Fatal("the page reported nothing within a minute")
-		return "", nil, ""
+		return ""
 	}
+}
+
+// render executes a page template, failing the test if it cannot.
+func render(t *testing.T, tmpl *template.Template, data any) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	if err := tmpl.Execute(&b, data); err != nil {
+		t.Fatalf("rendering the page: %v", err)
+	}
+	return b.Bytes()
+}
+
+// browserUpload has a page upload body by presigned URL. listed says whether
+// the gateway lists the page's origin.
+func browserUpload(t *testing.T, chrome string, listed bool, body string) (string, *proxytest.Harness, string) {
+	t.Helper()
+	var h *proxytest.Harness
+	key := proxytest.TestKey(t, "browser")
+	got := runInChrome(t, chrome, func(origin string) []byte {
+		origins := []string{"http://unrelated.example"}
+		if listed {
+			origins = []string{origin}
+		}
+		h = proxytest.New(t, withPresign(), withUploads(uploadLimit), withCORS(origins...))
+		h.CleanupStored(t, key)
+		target := presignPut(t, h.URL(key), 15*time.Minute, time.Now(), 0, nil, nil)
+		return render(t, uploadPage, struct{ URL, Body string }{target, body})
+	})
+	return got, h, key
 }
 
 func TestABrowserUploadsByPresignedURL(t *testing.T) {
@@ -157,4 +194,51 @@ func TestABrowserOnAnUnlistedOriginCannotUpload(t *testing.T) {
 		t.Fatalf("the page saw %q, want a refusal by the browser", got)
 	}
 	wantAbsent(t, h, key)
+}
+
+// TestABrowserUploadsInParts is the multipart case: the backend opens the
+// upload and completes it with its credential, and the browser uploads the
+// parts by URL, reading each ETag -- which carries the part's salt to the
+// completion (ADR-014) -- across origins.
+func TestABrowserUploadsInParts(t *testing.T) {
+	chrome := chromePath(t)
+	var h *proxytest.Harness
+	key := proxytest.TestKey(t, "browser-parts")
+	var token string
+	tail := "and the tail of the file"
+	got := runInChrome(t, chrome, func(origin string) []byte {
+		h = proxytest.New(t, withPresign(), withUploads(proxytest.TestPart), withCORS(origin))
+		h.CleanupStored(t, key)
+		token = h.MpuStart(t, key, nil)
+		part := func(n int) string {
+			return presignPut(t, h.URL(key)+"?partNumber="+strconv.Itoa(n)+"&uploadId="+
+				proxytest.URLQueryEscape(token), 15*time.Minute, time.Now(), 0, nil, nil)
+		}
+		return render(t, partsPage, struct {
+			First, Second, Tail string
+			FirstSize           int
+		}{part(1), part(2), tail, proxytest.TestPart})
+	})
+
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("the page saw %q, want two parts", got)
+	}
+	completed := make([]proxytest.CompletedPart, 0, 2)
+	for i, line := range lines {
+		status, etag, _ := strings.Cut(line, " ")
+		if status != "200" || etag == "no-etag" || etag == "" {
+			t.Fatalf("part %d: the page saw %q", i+1, line)
+		}
+		completed = append(completed, proxytest.CompletedPart{PartNumber: i + 1, ETag: etag})
+	}
+	resp := h.MpuComplete(t, key, token, completed)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("completing with the ETags the browser read: %d %s", resp.StatusCode, proxytest.ReadBody(t, resp))
+	}
+	want := strings.Repeat("\x01", proxytest.TestPart) + tail
+	if read := getOK(t, h, key); read != want {
+		t.Fatalf("the object does not read back as its two parts (%d bytes, want %d)", len(read), len(want))
+	}
 }
