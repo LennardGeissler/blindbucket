@@ -26,6 +26,8 @@ version 1 would keep being readable.
 
 ### Fixed
 
+- **Presigned URLs made by the AWS SDK for JavaScript v3 are accepted.** The SDK puts `X-Amz-Content-Sha256=UNSIGNED-PAYLOAD` in the query of every URL it presigns, downloads included, and the gateway refused each one as an unknown sub-resource with `501`, so no presigned URL from JavaScript v3 ever worked. It is now read as one of the signing parameters; only that value is accepted. boto3 and the AWS CLI leave it out and were not affected (measured with v3.1152.0).
+
 - **A client's conditional write is no longer carried out unconditionally.** `If-None-Match: *` and `If-Match` on `PutObject`, `CompleteMultipartUpload` and `CopyObject` were dropped without a word, so "create only if absent" could overwrite an object. They now go to the provider with the write, under name encryption too, and a condition that does not hold is answered `412`. Where the provider ignores them, as Garage v2.4.1 does, the client gets what the provider does ([#168](https://github.com/LennardGeissler/blindbucket/issues/168), [COMPATIBILITY.md](docs/COMPATIBILITY.md#a-clients-own-conditional-writes)).
 
 ## [1.5.0] — 2026-10-19

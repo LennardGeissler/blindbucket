@@ -121,13 +121,13 @@ var ignorableParams = map[string]bool{
 	"x-id": true,
 }
 
-// presignParams are the six query parameters that carry a SigV4 signature in a
-// URL rather than selecting a sub-resource (ADR-019).
+// presignParams are the query parameters that carry a SigV4 signature in a URL
+// rather than selecting a sub-resource (ADR-019).
 //
 // The router runs before authentication, so it has to know them: without this
 // every presigned URL would be refused as an unimplemented sub-resource before
-// the verifier ever saw it. Naming them weakens nothing -- five of the six stay
-// covered by the signature, because the canonical query string is built from the
+// the verifier ever saw it. Naming them weakens nothing -- all but the signature
+// itself stay covered by the signature, because the canonical query string is built from the
 // request as it arrived, which is the same reasoning ?x-id above already records.
 //
 // Repeated here rather than imported from internal/auth, so that routing does not
@@ -140,6 +140,9 @@ var presignParams = map[string]bool{
 	"X-Amz-Expires":       true,
 	"X-Amz-SignedHeaders": true,
 	"X-Amz-Signature":     true,
+	// The AWS SDK for JavaScript v3 puts X-Amz-Content-Sha256=UNSIGNED-PAYLOAD
+	// in every URL it presigns, reads included; boto3 does not.
+	"X-Amz-Content-Sha256": true,
 }
 
 // responseOverrides are the query parameters with which a read sets a header

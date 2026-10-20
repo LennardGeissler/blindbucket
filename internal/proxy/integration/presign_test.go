@@ -325,3 +325,33 @@ func TestPresignedGetIsRollbackChecked(t *testing.T) {
 		t.Errorf("answered %q, want RollbackDetected", body)
 	}
 }
+
+// TestPresignedURLWithAPayloadHashInTheQuery is the URL the AWS SDK for
+// JavaScript v3 produces: X-Amz-Content-Sha256=UNSIGNED-PAYLOAD in the query of
+// every URL it presigns, reads included. Until 1.6.0 the router refused every
+// such URL as an unknown sub-resource. Measured with v3.1152.0.
+func TestPresignedURLWithAPayloadHashInTheQuery(t *testing.T) {
+	h := proxytest.New(t, withPresign(), withUploads(uploadLimit))
+	key := proxytest.TestKey(t, "js")
+	h.CleanupStored(t, key)
+	unsigned := url.Values{auth.QueryContentSHA256: {auth.UnsignedPayload}}
+
+	put := presignPut(t, h.URL(key)+"?"+unsigned.Encode(), 15*time.Minute, time.Now(), 0, nil, nil)
+	if code, msg := sendUpload(t, h, http.MethodPut, put, []byte("from JavaScript"), nil); code != http.StatusOK {
+		t.Fatalf("an upload URL as JavaScript v3 signs it: %d %s", code, msg)
+	}
+	get := presignURLWith(t, h, http.MethodGet, key, 15*time.Minute, time.Now(), unsigned)
+	resp := fetch(t, h, http.MethodGet, get)
+	defer func() { _ = resp.Body.Close() }()
+	if body, _ := io.ReadAll(resp.Body); resp.StatusCode != http.StatusOK || string(body) != "from JavaScript" {
+		t.Fatalf("a download URL as JavaScript v3 signs it: %d %q", resp.StatusCode, body)
+	}
+
+	// A hash of a body that did not exist when the URL was signed is refused.
+	hashed := url.Values{auth.QueryContentSHA256: {strings.Repeat("ab", 32)}}
+	bad := fetch(t, h, http.MethodGet, presignURLWith(t, h, http.MethodGet, key, 15*time.Minute, time.Now(), hashed))
+	_ = bad.Body.Close()
+	if bad.StatusCode < 400 {
+		t.Fatalf("a URL with a hex payload hash: %d, want a refusal", bad.StatusCode)
+	}
+}

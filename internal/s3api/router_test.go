@@ -526,14 +526,14 @@ func TestPresignParamsMatchTheVerifier(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{
 		auth.QueryAlgorithm, auth.QueryCredential, auth.QueryDate,
-		auth.QueryExpires, auth.QuerySignedHeaders, auth.QuerySignature,
+		auth.QueryExpires, auth.QuerySignedHeaders, auth.QuerySignature, auth.QueryContentSHA256,
 	} {
 		if !PresignQueryParam(name) {
 			t.Errorf("the verifier signs over %q and the router does not know it", name)
 		}
 	}
-	if got := len(presignParams); got != 6 {
-		t.Errorf("the router knows %d presigning parameters, the verifier has 6", got)
+	if got := len(presignParams); got != 7 {
+		t.Errorf("the router knows %d presigning parameters, the verifier has 7", got)
 	}
 }
 
