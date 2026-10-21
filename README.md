@@ -759,7 +759,7 @@ the gateway already costs per request.
 | [ref/python/](ref/python/) | A second decoder written from the format spec alone, and the differential test that compares it against the Go one. |
 | [bench/](bench/) | Benchmark scripts, the figures they produce, and the methodology notes that came out of getting them wrong first. |
 | [demo/](demo/) | The end-to-end demo, as scripts: upload through the gateway, ciphertext at the provider, identical hash back, and `tamper.sh` — the hostile provider, by hand, in one command. |
-| [spec/tla/](spec/tla/) | The formal models of the manifest coordination, of `migrate-names` and of `encrypt-existing`, the sixteen TLC configurations `make tla` runs, and the counterexamples written out. |
+| [spec/tla/](spec/tla/) | The formal models of the manifest coordination, of `migrate-names`, of `encrypt-existing` and of the tag sidecars, the eighteen TLC configurations `make tla` runs, and the counterexamples written out. |
 | [CHANGELOG.md](CHANGELOG.md) | What each release contains, and what it does not. |
 
 ## Roadmap

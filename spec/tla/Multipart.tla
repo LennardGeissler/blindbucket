@@ -38,6 +38,17 @@
 (* object the gateway wrote, or a plaintext object written before it,      *)
 (* which `blindbucket encrypt-existing` overwrites with the same final     *)
 (* write as a rotation (ADR-034).                                          *)
+(*                                                                         *)
+(* Two more, Tags and TagAge, add the tag sidecars of ADR-037 and the      *)
+(* third invariant they need:                                              *)
+(*                                                                         *)
+(*   I3  Every visible object version that was written with tags has its   *)
+(*       sidecar.  An object that fails I3 is readable; its tags are gone. *)
+(*                                                                         *)
+(* A sidecar is per version, written before the version becomes visible,   *)
+(* like a manifest (R2).  What protects the one of a single-part PUT from  *)
+(* gc is not the open-upload check of R4 -- a PUT opens no upload -- but   *)
+(* gc's minimum age, so the model has to have it.                          *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 
@@ -77,6 +88,13 @@ CONSTANTS
                   \*                 gateway, with no manifest: what
                   \*                 encrypt-existing overwrites (ADR-034)
 
+    Tags,         \* Whether writes carry tags, in sidecars (ADR-037).  FALSE
+                  \* leaves every behaviour of the model as it was before.
+
+    TagAge,       \* What gc deletes of the sidecars it listed.
+                  \*   "kept"    - only those past the minimum age (R4 step 4)
+                  \*   "ignored" - any that is not the current version's
+
     RotateMode    \* The final write of `blindbucket rotate` (11.2), and of
                   \* `blindbucket encrypt-existing` with names in clear,
                   \* which overwrites in the same order (ADR-034).
@@ -110,6 +128,8 @@ ASSUME Ordering    \in {"completion", "initiation", "either"}
 ASSUME GcMode      \in {"r4", "v01", "swapped"}
 ASSUME RotateMode  \in {"conditional", "ifmatch", "unconditional", "off"}
 ASSUME Initial     \in {"gateway", "plaintext"}
+ASSUME Tags        \in BOOLEAN
+ASSUME TagAge      \in {"kept", "ignored"}
 
 \* Symmetry: the uploads are interchangeable, so TLC may quotient the state
 \* space by permutations of them.  Sound here because neither the algorithm
@@ -145,6 +165,19 @@ variables
     \* nor aborted.  This is what ListMultipartUploads reports in R4 step 2.
     openUploads = {},
 
+    \* The tag sidecars under .blindbucket/t/<hash>/ (ADR-037), named by the
+    \* writer of the version they belong to: each writer writes one version,
+    \* so its name stands in for the BindingID as it does for a manifest id.
+    sidecars = IF Tags /\ Initial = "gateway" THEN {"init"} ELSE {},
+
+    \* The sidecars younger than gc's minimum age.  One ages only once its
+    \* writer is done: the minimum age (eight days) is longer than any request
+    \* runs, which is the assumption the age stands for.
+    young = {},
+
+    \* Whether the rotation's copy carries tags: those of the version it read.
+    rotTagged = FALSE,
+
     \* History variable, not part of the system: set when a rotation overwrites
     \* a version other than the one it read, or when the provider discards a
     \* client's completion because the rotation's copy outranks it.  I2 is its
@@ -163,6 +196,9 @@ define {
         /\ manifests   \subseteq Mids
         /\ openUploads \subseteq Uploads \cup {RotId}
         /\ lostUpdate  \in BOOLEAN
+        /\ sidecars    \subseteq Writers
+        /\ young       \subseteq Writers
+        /\ rotTagged   \in BOOLEAN
 
     \* I1 (10.8): every visible multipart object has its manifest.
     I1 == (visible.kind = "multi") => (visible.mid \in manifests)
@@ -170,6 +206,16 @@ define {
     \* I2 (11.2): rotation causes no lost update -- it neither overwrites a
     \* write it did not read nor makes the provider discard one in its favour.
     I2 == ~lostUpdate
+
+    \* The versions written with tags.  Every client write carries them when
+    \* Tags is on; the rotation's copy carries what its source carried.
+    Tagged == IF ~Tags THEN {}
+              ELSE Uploads \cup {PutId}
+                   \cup (IF Initial = "gateway" THEN {"init"} ELSE {})
+                   \cup (IF rotTagged THEN {RotId} ELSE {})
+
+    \* I3 (ADR-037): a visible version written with tags has its sidecar.
+    I3 == (visible.kind # "absent" /\ visible.by \in Tagged) => visible.by \in sidecars
 
     Pos(w)     == CHOOSE i \in 1..Len(inflight) : inflight[i] = w
     Without(w) == SelectSeq(inflight, LAMBDA x : x # w)
@@ -212,7 +258,14 @@ process (Up \in Uploads)
     \* CreateMultipartUpload.  The manifest id is minted here (R1) and lives
     \* in the upload token, so it is fixed before any part is sent.  This is
     \* also where the provider ranks the write.
+    \*
+    \* With tags, the sidecar is written just before, under the data key the
+    \* token will carry (ADR-037).  The model folds the two requests into one
+    \* step.  Between them the sidecar is young and its writer still running,
+    \* so with the minimum age gc cannot take it; without the age it can, and
+    \* MCTagsNoAge shows that race on the PUT, which has the same gap.
     either {
+        if (Tags) { sidecars := sidecars \cup {self}; young := young \cup {self}; };
         openUploads := openUploads \cup {self};
         inflight := Append(inflight, self);
         newer := newer + 1;
@@ -309,6 +362,22 @@ process (Up \in Uploads)
 (*************************************************************************)
 process (Put = PutId)
 {
+  putTags:
+    \* With tags, the sidecar first (ADR-037).  A PUT opens no upload, so
+    \* nothing but gc's minimum age protects the sidecar until the object
+    \* lands.  Without tags this is the PUT itself, as it always was.
+    either {
+        if (Tags) {
+            sidecars := sidecars \cup {PutId};
+            young := young \cup {PutId};
+        } else {
+            visible := [kind |-> "single", mid |-> NoMid, by |-> PutId];
+            newer := 0;
+            goto Done;
+        };
+    }
+    or { goto Done; };
+
   putWrite:
     \* Ranked when it lands, so it is always the newest write and every
     \* upload still in flight is older than it.
@@ -369,6 +438,7 @@ process (Rot = RotId)
         } else {
             rotObserved := VisibleMid;
             rotSrcBy    := visible.by;
+            rotTagged   := visible.by \in Tagged;
         };
     }
     or { goto Done; };
@@ -382,7 +452,17 @@ process (Rot = RotId)
     or { rotObserved := NoMid; rotSrcBy := "init"; goto Done; };
 
   rotManifest:
-    either { manifests := manifests \cup {RotId}; }
+    \* The copy's manifest, and with tags its sidecar: the source's, carried
+    \* to the copy's BindingID before the copy can become visible (ADR-037).
+    \* Folded into one step for the reason given at upCreate.  A source whose
+    \* sidecar is gone leaves the copy without tags, which I3 then catches.
+    either {
+        manifests := manifests \cup {RotId};
+        if (Tags /\ rotSrcBy \in sidecars) {
+            sidecars := sidecars \cup {RotId};
+            young := young \cup {RotId};
+        };
+    }
     or     { rotObserved := NoMid; rotSrcBy := "init"; leave(RotId); goto Done; };
 
   rotUploads:
@@ -474,6 +554,19 @@ process (Life = "lifecycle")
 }
 
 (*************************************************************************)
+(* Time, as far as gc's minimum age needs it: a sidecar ages once the     *)
+(* request that wrote it is over.  Disabled while nothing is young, so    *)
+(* with Tags off it adds no state.                                        *)
+(*************************************************************************)
+process (Clock = "clock")
+{
+  clockTick:
+    while (TRUE) {
+        with (s \in {w \in young : pc[w] = "Done"}) { young := young \ {s}; };
+    };
+}
+
+(*************************************************************************)
 (* One `blindbucket gc` pass over this key, in the fixed order of R4.     *)
 (* The minimum-age condition of R4 step 4 is not modelled: it is a guard  *)
 (* against the upstream consistency assumptions failing, and this model   *)
@@ -481,7 +574,7 @@ process (Life = "lifecycle")
 (* is the part that was derived by reasoning and never checked.          *)
 (*************************************************************************)
 process (Gc = "gc")
-    variables seen = {}, current = NoMid;
+    variables seen = {}, current = NoMid, seenTags = {}, currentBy = "init";
 {
   gcStepOne:
     either {
@@ -489,8 +582,11 @@ process (Gc = "gc")
             \* ListMultipartUploads first -- see gcStepTwo.
             if (openUploads # {}) { goto Done; };
         } else {
-            \* R4 step 1: list the manifests under this key's prefix.
+            \* R4 step 1: list the manifests under this key's prefix, and the
+            \* sidecars under theirs, with how old each is.  An age read here
+            \* stays true: a sidecar listed as old is older still at step 4.
             seen := manifests;
+            seenTags := IF TagAge = "kept" THEN sidecars \ young ELSE sidecars;
         };
     }
     or { goto Done; };
@@ -499,34 +595,49 @@ process (Gc = "gc")
     either {
         if (GcMode = "swapped") {
             seen := manifests;
+            seenTags := IF TagAge = "kept" THEN sidecars \ young ELSE sidecars;
         } else {
             if (GcMode = "r4") {
                 \* R4 step 2: an upload is in flight, so any manifest listed
                 \* above may be about to become the current one.  Skip the key.
-                if (openUploads # {}) { seen := {}; goto Done; };
+                if (openUploads # {}) { seen := {}; seenTags := {}; goto Done; };
             };
             \* GcMode = "v01" checked nothing here at all.
         };
     }
-    or { seen := {}; goto Done; };
+    or { seen := {}; seenTags := {}; goto Done; };
 
   gcHead:
-    \* R4 step 3: HEAD the object for the manifest id in use right now.
-    either { current := VisibleMid; }
-    or     { seen := {}; goto Done; };
+    \* R4 step 3: HEAD the object for the manifest id in use right now, and
+    \* the bb-dek its sidecar is named by.
+    either {
+        current := VisibleMid;
+        \* Recorded only with Tags on, so that the model without them keeps
+        \* exactly the states it had.
+        currentBy := IF ~Tags THEN "init"
+                     ELSE IF visible.kind = "absent" THEN DelId ELSE visible.by;
+    }
+    or     { seen := {}; seenTags := {}; goto Done; };
 
   gcDelete:
-    \* R4 step 4: delete the listed manifests that are not the current one.
-    either { manifests := manifests \ (seen \ {current}); }
+    \* R4 step 4: delete the listed manifests that are not the current one,
+    \* and the listed sidecars that are not the current version's.
+    either {
+        manifests := manifests \ (seen \ {current});
+        sidecars := sidecars \ (seenTags \ {currentBy});
+    }
     or     { skip; };
     seen := {};
     current := NoMid;
+    seenTags := {};
+    currentBy := "init";
 }
 
 }
 *)
 \* BEGIN TRANSLATION
-VARIABLES visible, inflight, newer, manifests, openUploads, lostUpdate, pc
+VARIABLES visible, inflight, newer, manifests, openUploads, sidecars, young, 
+          rotTagged, lostUpdate, pc
 
 (* define statement *)
 VisibleMid == IF visible.kind = "multi" THEN visible.mid ELSE NoMid
@@ -540,6 +651,9 @@ TypeOK ==
     /\ manifests   \subseteq Mids
     /\ openUploads \subseteq Uploads \cup {RotId}
     /\ lostUpdate  \in BOOLEAN
+    /\ sidecars    \subseteq Writers
+    /\ young       \subseteq Writers
+    /\ rotTagged   \in BOOLEAN
 
 
 I1 == (visible.kind = "multi") => (visible.mid \in manifests)
@@ -547,6 +661,16 @@ I1 == (visible.kind = "multi") => (visible.mid \in manifests)
 
 
 I2 == ~lostUpdate
+
+
+
+Tagged == IF ~Tags THEN {}
+          ELSE Uploads \cup {PutId}
+               \cup (IF Initial = "gateway" THEN {"init"} ELSE {})
+               \cup (IF rotTagged THEN {RotId} ELSE {})
+
+
+I3 == (visible.kind # "absent" /\ visible.by \in Tagged) => visible.by \in sidecars
 
 Pos(w)     == CHOOSE i \in 1..Len(inflight) : inflight[i] = w
 Without(w) == SelectSeq(inflight, LAMBDA x : x # w)
@@ -563,12 +687,14 @@ Lands(w) == Ordering = "completion" \/ IsNewer(w)
 
 NewerAfter(w) == Len(inflight) - Pos(w)
 
-VARIABLES observed, delObserved, rotObserved, rotSrcBy, seen, current
+VARIABLES observed, delObserved, rotObserved, rotSrcBy, seen, current, 
+          seenTags, currentBy
 
-vars == << visible, inflight, newer, manifests, openUploads, lostUpdate, pc, 
-           observed, delObserved, rotObserved, rotSrcBy, seen, current >>
+vars == << visible, inflight, newer, manifests, openUploads, sidecars, young, 
+           rotTagged, lostUpdate, pc, observed, delObserved, rotObserved, 
+           rotSrcBy, seen, current, seenTags, currentBy >>
 
-ProcSet == (Uploads) \cup {PutId} \cup {DelId} \cup {RotId} \cup {"lifecycle"} \cup {"gc"}
+ProcSet == (Uploads) \cup {PutId} \cup {DelId} \cup {RotId} \cup {"lifecycle"} \cup {"clock"} \cup {"gc"}
 
 Init == (* Global variables *)
         /\ visible = (IF Initial = "gateway"
@@ -578,6 +704,9 @@ Init == (* Global variables *)
         /\ newer = 0
         /\ manifests = (IF Initial = "gateway" THEN {InitId} ELSE {})
         /\ openUploads = {}
+        /\ sidecars = (IF Tags /\ Initial = "gateway" THEN {"init"} ELSE {})
+        /\ young = {}
+        /\ rotTagged = FALSE
         /\ lostUpdate = FALSE
         (* Process Up *)
         /\ observed = [self \in Uploads |-> NoMid]
@@ -589,23 +718,31 @@ Init == (* Global variables *)
         (* Process Gc *)
         /\ seen = {}
         /\ current = NoMid
+        /\ seenTags = {}
+        /\ currentBy = "init"
         /\ pc = [self \in ProcSet |-> CASE self \in Uploads -> "upCreate"
-                                        [] self = PutId -> "putWrite"
+                                        [] self = PutId -> "putTags"
                                         [] self = DelId -> "delHead"
                                         [] self = RotId -> "rotHead"
                                         [] self = "lifecycle" -> "lifeAbort"
+                                        [] self = "clock" -> "clockTick"
                                         [] self = "gc" -> "gcStepOne"]
 
 upCreate(self) == /\ pc[self] = "upCreate"
-                  /\ \/ /\ openUploads' = (openUploads \cup {self})
+                  /\ \/ /\ IF Tags
+                              THEN /\ sidecars' = (sidecars \cup {self})
+                                   /\ young' = (young \cup {self})
+                              ELSE /\ TRUE
+                                   /\ UNCHANGED << sidecars, young >>
+                        /\ openUploads' = (openUploads \cup {self})
                         /\ inflight' = Append(inflight, self)
                         /\ newer' = newer + 1
                         /\ pc' = [pc EXCEPT ![self] = "upHead"]
                      \/ /\ pc' = [pc EXCEPT ![self] = "Done"]
-                        /\ UNCHANGED <<inflight, newer, openUploads>>
-                  /\ UNCHANGED << visible, manifests, lostUpdate, observed, 
-                                  delObserved, rotObserved, rotSrcBy, seen, 
-                                  current >>
+                        /\ UNCHANGED <<inflight, newer, openUploads, sidecars, young>>
+                  /\ UNCHANGED << visible, manifests, rotTagged, lostUpdate, 
+                                  observed, delObserved, rotObserved, rotSrcBy, 
+                                  seen, current, seenTags, currentBy >>
 
 upHead(self) == /\ pc[self] = "upHead"
                 /\ \/ /\ observed' = [observed EXCEPT ![self] = VisibleMid]
@@ -615,9 +752,10 @@ upHead(self) == /\ pc[self] = "upHead"
                       /\ inflight' = Without(self)
                       /\ pc' = [pc EXCEPT ![self] = "Done"]
                       /\ UNCHANGED observed
-                /\ UNCHANGED << visible, manifests, openUploads, lostUpdate, 
-                                delObserved, rotObserved, rotSrcBy, seen, 
-                                current >>
+                /\ UNCHANGED << visible, manifests, openUploads, sidecars, 
+                                young, rotTagged, lostUpdate, delObserved, 
+                                rotObserved, rotSrcBy, seen, current, seenTags, 
+                                currentBy >>
 
 upManifest(self) == /\ pc[self] = "upManifest"
                     /\ \/ /\ manifests' = (manifests \cup {self})
@@ -628,9 +766,10 @@ upManifest(self) == /\ pc[self] = "upManifest"
                           /\ inflight' = Without(self)
                           /\ pc' = [pc EXCEPT ![self] = "Done"]
                           /\ UNCHANGED manifests
-                    /\ UNCHANGED << visible, openUploads, lostUpdate, 
-                                    delObserved, rotObserved, rotSrcBy, seen, 
-                                    current >>
+                    /\ UNCHANGED << visible, openUploads, sidecars, young, 
+                                    rotTagged, lostUpdate, delObserved, 
+                                    rotObserved, rotSrcBy, seen, current, 
+                                    seenTags, currentBy >>
 
 upComplete(self) == /\ pc[self] = "upComplete"
                     /\ \/ /\ IF self \notin openUploads
@@ -668,8 +807,9 @@ upComplete(self) == /\ pc[self] = "upComplete"
                           /\ inflight' = Without(self)
                           /\ pc' = [pc EXCEPT ![self] = "Done"]
                           /\ UNCHANGED <<visible, openUploads, lostUpdate>>
-                    /\ UNCHANGED << manifests, delObserved, rotObserved, 
-                                    rotSrcBy, seen, current >>
+                    /\ UNCHANGED << manifests, sidecars, young, rotTagged, 
+                                    delObserved, rotObserved, rotSrcBy, seen, 
+                                    current, seenTags, currentBy >>
 
 upVerify(self) == /\ pc[self] = "upVerify"
                   /\ IF CleanupMode = "verify"
@@ -683,8 +823,9 @@ upVerify(self) == /\ pc[self] = "upVerify"
                         ELSE /\ pc' = [pc EXCEPT ![self] = "upCleanup"]
                              /\ UNCHANGED observed
                   /\ UNCHANGED << visible, inflight, newer, manifests, 
-                                  openUploads, lostUpdate, delObserved, 
-                                  rotObserved, rotSrcBy, seen, current >>
+                                  openUploads, sidecars, young, rotTagged, 
+                                  lostUpdate, delObserved, rotObserved, 
+                                  rotSrcBy, seen, current, seenTags, currentBy >>
 
 upCleanup(self) == /\ pc[self] = "upCleanup"
                    /\ \/ /\ IF CleanupMode = "v01"
@@ -698,11 +839,28 @@ upCleanup(self) == /\ pc[self] = "upCleanup"
                    /\ observed' = [observed EXCEPT ![self] = NoMid]
                    /\ pc' = [pc EXCEPT ![self] = "Done"]
                    /\ UNCHANGED << visible, inflight, newer, openUploads, 
-                                   lostUpdate, delObserved, rotObserved, 
-                                   rotSrcBy, seen, current >>
+                                   sidecars, young, rotTagged, lostUpdate, 
+                                   delObserved, rotObserved, rotSrcBy, seen, 
+                                   current, seenTags, currentBy >>
 
 Up(self) == upCreate(self) \/ upHead(self) \/ upManifest(self)
                \/ upComplete(self) \/ upVerify(self) \/ upCleanup(self)
+
+putTags == /\ pc[PutId] = "putTags"
+           /\ \/ /\ IF Tags
+                       THEN /\ sidecars' = (sidecars \cup {PutId})
+                            /\ young' = (young \cup {PutId})
+                            /\ pc' = [pc EXCEPT ![PutId] = "putWrite"]
+                            /\ UNCHANGED << visible, newer >>
+                       ELSE /\ visible' = [kind |-> "single", mid |-> NoMid, by |-> PutId]
+                            /\ newer' = 0
+                            /\ pc' = [pc EXCEPT ![PutId] = "Done"]
+                            /\ UNCHANGED << sidecars, young >>
+              \/ /\ pc' = [pc EXCEPT ![PutId] = "Done"]
+                 /\ UNCHANGED <<visible, newer, sidecars, young>>
+           /\ UNCHANGED << inflight, manifests, openUploads, rotTagged, 
+                           lostUpdate, observed, delObserved, rotObserved, 
+                           rotSrcBy, seen, current, seenTags, currentBy >>
 
 putWrite == /\ pc[PutId] = "putWrite"
             /\ \/ /\ visible' = [kind |-> "single", mid |-> NoMid, by |-> PutId]
@@ -710,11 +868,12 @@ putWrite == /\ pc[PutId] = "putWrite"
                   /\ pc' = [pc EXCEPT ![PutId] = "Done"]
                \/ /\ pc' = [pc EXCEPT ![PutId] = "Done"]
                   /\ UNCHANGED <<visible, newer>>
-            /\ UNCHANGED << inflight, manifests, openUploads, lostUpdate, 
-                            observed, delObserved, rotObserved, rotSrcBy, seen, 
-                            current >>
+            /\ UNCHANGED << inflight, manifests, openUploads, sidecars, young, 
+                            rotTagged, lostUpdate, observed, delObserved, 
+                            rotObserved, rotSrcBy, seen, current, seenTags, 
+                            currentBy >>
 
-Put == putWrite
+Put == putTags \/ putWrite
 
 delHead == /\ pc[DelId] = "delHead"
            /\ \/ /\ delObserved' = VisibleMid
@@ -722,8 +881,9 @@ delHead == /\ pc[DelId] = "delHead"
               \/ /\ pc' = [pc EXCEPT ![DelId] = "Done"]
                  /\ UNCHANGED delObserved
            /\ UNCHANGED << visible, inflight, newer, manifests, openUploads, 
-                           lostUpdate, observed, rotObserved, rotSrcBy, seen, 
-                           current >>
+                           sidecars, young, rotTagged, lostUpdate, observed, 
+                           rotObserved, rotSrcBy, seen, current, seenTags, 
+                           currentBy >>
 
 delRemove == /\ pc[DelId] = "delRemove"
              /\ \/ /\ visible' = [kind |-> "absent", mid |-> NoMid, by |-> DelId]
@@ -733,8 +893,9 @@ delRemove == /\ pc[DelId] = "delRemove"
                 \/ /\ delObserved' = NoMid
                    /\ pc' = [pc EXCEPT ![DelId] = "Done"]
                    /\ UNCHANGED <<visible, newer>>
-             /\ UNCHANGED << inflight, manifests, openUploads, lostUpdate, 
-                             observed, rotObserved, rotSrcBy, seen, current >>
+             /\ UNCHANGED << inflight, manifests, openUploads, sidecars, young, 
+                             rotTagged, lostUpdate, observed, rotObserved, 
+                             rotSrcBy, seen, current, seenTags, currentBy >>
 
 delManifest == /\ pc[DelId] = "delManifest"
                /\ \/ /\ IF delObserved # NoMid
@@ -745,23 +906,26 @@ delManifest == /\ pc[DelId] = "delManifest"
                      /\ UNCHANGED manifests
                /\ delObserved' = NoMid
                /\ pc' = [pc EXCEPT ![DelId] = "Done"]
-               /\ UNCHANGED << visible, inflight, newer, openUploads, 
-                               lostUpdate, observed, rotObserved, rotSrcBy, 
-                               seen, current >>
+               /\ UNCHANGED << visible, inflight, newer, openUploads, sidecars, 
+                               young, rotTagged, lostUpdate, observed, 
+                               rotObserved, rotSrcBy, seen, current, seenTags, 
+                               currentBy >>
 
 Del == delHead \/ delRemove \/ delManifest
 
 rotHead == /\ pc[RotId] = "rotHead"
            /\ \/ /\ IF RotateMode = "off" \/ visible.kind = "absent"
                        THEN /\ pc' = [pc EXCEPT ![RotId] = "Done"]
-                            /\ UNCHANGED << rotObserved, rotSrcBy >>
+                            /\ UNCHANGED << rotTagged, rotObserved, rotSrcBy >>
                        ELSE /\ rotObserved' = VisibleMid
                             /\ rotSrcBy' = visible.by
+                            /\ rotTagged' = (visible.by \in Tagged)
                             /\ pc' = [pc EXCEPT ![RotId] = "rotCreate"]
               \/ /\ pc' = [pc EXCEPT ![RotId] = "Done"]
-                 /\ UNCHANGED <<rotObserved, rotSrcBy>>
+                 /\ UNCHANGED <<rotTagged, rotObserved, rotSrcBy>>
            /\ UNCHANGED << visible, inflight, newer, manifests, openUploads, 
-                           lostUpdate, observed, delObserved, seen, current >>
+                           sidecars, young, lostUpdate, observed, delObserved, 
+                           seen, current, seenTags, currentBy >>
 
 rotCreate == /\ pc[RotId] = "rotCreate"
              /\ \/ /\ openUploads' = (openUploads \cup {RotId})
@@ -773,11 +937,17 @@ rotCreate == /\ pc[RotId] = "rotCreate"
                    /\ rotSrcBy' = "init"
                    /\ pc' = [pc EXCEPT ![RotId] = "Done"]
                    /\ UNCHANGED <<inflight, newer, openUploads>>
-             /\ UNCHANGED << visible, manifests, lostUpdate, observed, 
-                             delObserved, seen, current >>
+             /\ UNCHANGED << visible, manifests, sidecars, young, rotTagged, 
+                             lostUpdate, observed, delObserved, seen, current, 
+                             seenTags, currentBy >>
 
 rotManifest == /\ pc[RotId] = "rotManifest"
                /\ \/ /\ manifests' = (manifests \cup {RotId})
+                     /\ IF Tags /\ rotSrcBy \in sidecars
+                           THEN /\ sidecars' = (sidecars \cup {RotId})
+                                /\ young' = (young \cup {RotId})
+                           ELSE /\ TRUE
+                                /\ UNCHANGED << sidecars, young >>
                      /\ pc' = [pc EXCEPT ![RotId] = "rotUploads"]
                      /\ UNCHANGED <<inflight, newer, rotObserved, rotSrcBy>>
                   \/ /\ rotObserved' = NoMid
@@ -785,9 +955,10 @@ rotManifest == /\ pc[RotId] = "rotManifest"
                      /\ newer' = IF IsNewer(RotId) THEN newer - 1 ELSE newer
                      /\ inflight' = Without(RotId)
                      /\ pc' = [pc EXCEPT ![RotId] = "Done"]
-                     /\ UNCHANGED manifests
-               /\ UNCHANGED << visible, openUploads, lostUpdate, observed, 
-                               delObserved, seen, current >>
+                     /\ UNCHANGED <<manifests, sidecars, young>>
+               /\ UNCHANGED << visible, openUploads, rotTagged, lostUpdate, 
+                               observed, delObserved, seen, current, seenTags, 
+                               currentBy >>
 
 rotUploads == /\ pc[RotId] = "rotUploads"
               /\ \/ /\ IF RotateMode = "conditional" /\ (openUploads \ {RotId}) # {}
@@ -806,8 +977,9 @@ rotUploads == /\ pc[RotId] = "rotUploads"
                     /\ inflight' = Without(RotId)
                     /\ pc' = [pc EXCEPT ![RotId] = "Done"]
                     /\ UNCHANGED openUploads
-              /\ UNCHANGED << visible, manifests, lostUpdate, observed, 
-                              delObserved, seen, current >>
+              /\ UNCHANGED << visible, manifests, sidecars, young, rotTagged, 
+                              lostUpdate, observed, delObserved, seen, current, 
+                              seenTags, currentBy >>
 
 rotComplete == /\ pc[RotId] = "rotComplete"
                /\ \/ /\ IF RotId \notin openUploads
@@ -857,7 +1029,8 @@ rotComplete == /\ pc[RotId] = "rotComplete"
                      /\ inflight' = Without(RotId)
                      /\ pc' = [pc EXCEPT ![RotId] = "Done"]
                      /\ UNCHANGED <<visible, openUploads, lostUpdate>>
-               /\ UNCHANGED << manifests, observed, delObserved, seen, current >>
+               /\ UNCHANGED << manifests, sidecars, young, rotTagged, observed, 
+                               delObserved, seen, current, seenTags, currentBy >>
 
 rotCleanup == /\ pc[RotId] = "rotCleanup"
               /\ \/ /\ IF rotObserved # NoMid
@@ -869,8 +1042,9 @@ rotCleanup == /\ pc[RotId] = "rotCleanup"
               /\ rotObserved' = NoMid
               /\ rotSrcBy' = "init"
               /\ pc' = [pc EXCEPT ![RotId] = "Done"]
-              /\ UNCHANGED << visible, inflight, newer, openUploads, 
-                              lostUpdate, observed, delObserved, seen, current >>
+              /\ UNCHANGED << visible, inflight, newer, openUploads, sidecars, 
+                              young, rotTagged, lostUpdate, observed, 
+                              delObserved, seen, current, seenTags, currentBy >>
 
 Rot == rotHead \/ rotCreate \/ rotManifest \/ rotUploads \/ rotComplete
           \/ rotCleanup
@@ -879,64 +1053,90 @@ lifeAbort == /\ pc["lifecycle"] = "lifeAbort"
              /\ \E u \in openUploads:
                   openUploads' = openUploads \ {u}
              /\ pc' = [pc EXCEPT !["lifecycle"] = "lifeAbort"]
-             /\ UNCHANGED << visible, inflight, newer, manifests, lostUpdate, 
-                             observed, delObserved, rotObserved, rotSrcBy, 
-                             seen, current >>
+             /\ UNCHANGED << visible, inflight, newer, manifests, sidecars, 
+                             young, rotTagged, lostUpdate, observed, 
+                             delObserved, rotObserved, rotSrcBy, seen, current, 
+                             seenTags, currentBy >>
 
 Life == lifeAbort
+
+clockTick == /\ pc["clock"] = "clockTick"
+             /\ \E s \in {w \in young : pc[w] = "Done"}:
+                  young' = young \ {s}
+             /\ pc' = [pc EXCEPT !["clock"] = "clockTick"]
+             /\ UNCHANGED << visible, inflight, newer, manifests, openUploads, 
+                             sidecars, rotTagged, lostUpdate, observed, 
+                             delObserved, rotObserved, rotSrcBy, seen, current, 
+                             seenTags, currentBy >>
+
+Clock == clockTick
 
 gcStepOne == /\ pc["gc"] = "gcStepOne"
              /\ \/ /\ IF GcMode = "swapped"
                          THEN /\ IF openUploads # {}
                                     THEN /\ pc' = [pc EXCEPT !["gc"] = "Done"]
                                     ELSE /\ pc' = [pc EXCEPT !["gc"] = "gcStepTwo"]
-                              /\ seen' = seen
+                              /\ UNCHANGED << seen, seenTags >>
                          ELSE /\ seen' = manifests
+                              /\ seenTags' = (IF TagAge = "kept" THEN sidecars \ young ELSE sidecars)
                               /\ pc' = [pc EXCEPT !["gc"] = "gcStepTwo"]
                 \/ /\ pc' = [pc EXCEPT !["gc"] = "Done"]
-                   /\ seen' = seen
+                   /\ UNCHANGED <<seen, seenTags>>
              /\ UNCHANGED << visible, inflight, newer, manifests, openUploads, 
-                             lostUpdate, observed, delObserved, rotObserved, 
-                             rotSrcBy, current >>
+                             sidecars, young, rotTagged, lostUpdate, observed, 
+                             delObserved, rotObserved, rotSrcBy, current, 
+                             currentBy >>
 
 gcStepTwo == /\ pc["gc"] = "gcStepTwo"
              /\ \/ /\ IF GcMode = "swapped"
                          THEN /\ seen' = manifests
+                              /\ seenTags' = (IF TagAge = "kept" THEN sidecars \ young ELSE sidecars)
                               /\ pc' = [pc EXCEPT !["gc"] = "gcHead"]
                          ELSE /\ IF GcMode = "r4"
                                     THEN /\ IF openUploads # {}
                                                THEN /\ seen' = {}
+                                                    /\ seenTags' = {}
                                                     /\ pc' = [pc EXCEPT !["gc"] = "Done"]
                                                ELSE /\ pc' = [pc EXCEPT !["gc"] = "gcHead"]
-                                                    /\ seen' = seen
+                                                    /\ UNCHANGED << seen, 
+                                                                    seenTags >>
                                     ELSE /\ pc' = [pc EXCEPT !["gc"] = "gcHead"]
-                                         /\ seen' = seen
+                                         /\ UNCHANGED << seen, seenTags >>
                 \/ /\ seen' = {}
+                   /\ seenTags' = {}
                    /\ pc' = [pc EXCEPT !["gc"] = "Done"]
              /\ UNCHANGED << visible, inflight, newer, manifests, openUploads, 
-                             lostUpdate, observed, delObserved, rotObserved, 
-                             rotSrcBy, current >>
+                             sidecars, young, rotTagged, lostUpdate, observed, 
+                             delObserved, rotObserved, rotSrcBy, current, 
+                             currentBy >>
 
 gcHead == /\ pc["gc"] = "gcHead"
           /\ \/ /\ current' = VisibleMid
+                /\ currentBy' = IF ~Tags THEN "init"
+                                ELSE IF visible.kind = "absent" THEN DelId ELSE visible.by
                 /\ pc' = [pc EXCEPT !["gc"] = "gcDelete"]
-                /\ seen' = seen
+                /\ UNCHANGED <<seen, seenTags>>
              \/ /\ seen' = {}
+                /\ seenTags' = {}
                 /\ pc' = [pc EXCEPT !["gc"] = "Done"]
-                /\ UNCHANGED current
+                /\ UNCHANGED <<current, currentBy>>
           /\ UNCHANGED << visible, inflight, newer, manifests, openUploads, 
-                          lostUpdate, observed, delObserved, rotObserved, 
-                          rotSrcBy >>
+                          sidecars, young, rotTagged, lostUpdate, observed, 
+                          delObserved, rotObserved, rotSrcBy >>
 
 gcDelete == /\ pc["gc"] = "gcDelete"
             /\ \/ /\ manifests' = manifests \ (seen \ {current})
+                  /\ sidecars' = sidecars \ (seenTags \ {currentBy})
                \/ /\ TRUE
-                  /\ UNCHANGED manifests
+                  /\ UNCHANGED <<manifests, sidecars>>
             /\ seen' = {}
             /\ current' = NoMid
+            /\ seenTags' = {}
+            /\ currentBy' = "init"
             /\ pc' = [pc EXCEPT !["gc"] = "Done"]
-            /\ UNCHANGED << visible, inflight, newer, openUploads, lostUpdate, 
-                            observed, delObserved, rotObserved, rotSrcBy >>
+            /\ UNCHANGED << visible, inflight, newer, openUploads, young, 
+                            rotTagged, lostUpdate, observed, delObserved, 
+                            rotObserved, rotSrcBy >>
 
 Gc == gcStepOne \/ gcStepTwo \/ gcHead \/ gcDelete
 
@@ -944,7 +1144,7 @@ Gc == gcStepOne \/ gcStepTwo \/ gcHead \/ gcDelete
 Terminating == /\ \A self \in ProcSet: pc[self] = "Done"
                /\ UNCHANGED vars
 
-Next == Put \/ Del \/ Rot \/ Life \/ Gc
+Next == Put \/ Del \/ Rot \/ Life \/ Clock \/ Gc
            \/ (\E self \in Uploads: Up(self))
            \/ Terminating
 

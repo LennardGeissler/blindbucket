@@ -2,13 +2,14 @@
 # Runs TLC over every configuration in this directory and checks that each one
 # reports what it is supposed to report.
 #
-# Thirteen of the sixteen configurations are expected to FAIL: a model that
+# Fourteen of the eighteen configurations are expected to FAIL: a model that
 # cannot reproduce the two races ADR-010 records is too coarse to be evidence
 # for anything, so "TLC found no counterexample" is a failure there. The same
 # holds for Migrate.tla, whose failing configurations are the mistakes ADR-022's
 # design avoids and the one precondition it cannot do without, and for the
 # three that show what a provider ranking writes by when they began does to the
-# rules as they were (ADR-025).
+# rules as they were (ADR-025), and for MCTagsNoAge, gc without the minimum age
+# that alone protects a PUT's tag sidecar (ADR-037).
 #
 # Usage:  ./check.sh [config-name ...]     (default: all of them but MCFixedFull,
 #                                            which runs only when named: hours)
@@ -37,6 +38,8 @@ CASES=(
   "MCEncrypt               Multipart  holds         encrypt-existing overwrites a plaintext object and loses no client write (ADR-034)"
   "MCEncryptUnconditional  Multipart  I2            encrypt-existing --allow-unconditional"
   "MCEncryptAws            Multipart  I2            encrypt-existing with If-Match alone, against an upload in flight"
+  "MCTags                  Multipart  holds         tag sidecars keep I1-I3: written first, carried by rotation, gc past its minimum age (ADR-037)"
+  "MCTagsNoAge             Multipart  I3            gc deleting sidecars younger than its minimum age"
   "MCMigrate               Migrate    holds         migrate-names keeps every write and converges, whichever write is kept"
   "MCMigrateNoCreateGuard  Migrate    NoLostWrite   the copy published without If-None-Match"
   "MCMigrateLeaveOnResume  Migrate    Converged     a restart that leaves P when it finds the copy"
@@ -84,8 +87,9 @@ run_one() {
 # Run only when named: MCFixed with three uploads instead of two.
 FULL_CASES=(
   "MCFixedFull             Multipart  holds         MCFixed with three uploads"
+  "MCTagsFull              Multipart  holds         MCTags with two uploads"
 )
-FULL_NAMES="MCFixedFull"
+FULL_NAMES="MCFixedFull MCTagsFull"
 
 failed=0
 for case in "${CASES[@]}" "${FULL_CASES[@]}"; do

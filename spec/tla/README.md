@@ -24,7 +24,8 @@ checked here before M4 turned them into Go.
 | The visible object version for one key | Anything cryptographic: data keys, segments, chunk tags |
 | The set of manifest sidecar objects | Part contents, part sizes, `ListParts` |
 | Open multipart uploads at the upstream | More than one key — manifests and gc are per key |
-| Two to three concurrent uploads, a single-part PUT, a `DeleteObject`, a rotation, one `gc` pass | The minimum-age condition in R4 step 4 (see below) |
+| Two to three concurrent uploads, a single-part PUT, a `DeleteObject`, a rotation, one `gc` pass | The minimum-age condition in R4 step 4, for manifests (see below) |
+| The tag sidecars of ADR-037, and which are younger than `gc`'s minimum age (`Tags`) | `PutObjectTagging` and `DeleteObjectTagging` on a version already visible |
 | A crash of any process after any step, losing that process's local state | Network retries: a retried call is a repeat of the same step |
 | The bucket lifecycle rule aborting an open upload at any time | |
 | Which write the provider keeps when an upload completes after a newer one (`Ordering`) | When a write began, beyond the order: the model keeps the order of the uploads in flight, not a clock |
@@ -35,6 +36,22 @@ failing — it does nothing if they hold, and the model assumes they hold. Model
 therefore make R4 look safe for a reason that has nothing to do with its ordering, which is
 the part that was never checked. The ordering argument stands on its own here, and the
 threshold remains a second line of defence rather than the first.
+
+**Why it is in for sidecars.** A tag sidecar is written before the object version it
+belongs to, as a manifest is ([ADR-037](../../docs/adr/ADR-037-encrypted-object-tags.md)).
+For a manifest, the open upload is what keeps `gc` away in the meantime. A single-part PUT
+opens no upload, so for its sidecar the minimum age is the only guard, not a second one,
+and the model has to have it. A sidecar starts young and ages once the process that wrote
+it is done: that is the assumption the eight days stand for, that no request runs longer.
+`gc` records at its listing which sidecars were old, as the listing's `LastModified`
+does, and deletes only those. `MCTagsNoAge` is the same model with the age ignored.
+
+Two steps are folded. For an upload, the sidecar and `CreateMultipartUpload` are one
+step, and for the rotation the sidecar and the copy's manifest. Between the two real
+requests the sidecar is young and its writer still running, so with the age `gc` cannot
+take it, and without the age the PUT already shows the race. `PutObjectTagging` and
+`DeleteObjectTagging` are left out: they write or remove the sidecar of a version they
+have just read, which can only leave an orphan.
 
 **The upstream assumptions themselves** are assumptions of the model, not results of
 it: read-after-write consistency for HEAD, LIST and `ListMultipartUploads`, and a completed
@@ -59,6 +76,9 @@ found under.
   against it fails.
 - **I2** — rotation never replaces a newer version of an object with an older one, and
   never makes the provider discard a client's write in favour of its copy.
+- **I3** — every visible object version that was written with tags has its sidecar. An
+  object that fails I3 reads as before; its tags are gone. Checked by the `MCTags`
+  configurations; with `Tags = FALSE`, as everywhere else, it holds trivially.
 
 The liveness property listed as optional — that orphaned manifests eventually disappear
 under fairness — is **not** modelled. It would need a `gc` that loops rather than making one
@@ -69,10 +89,10 @@ keeps one around is still perfectly readable.
 
 ## Configurations
 
-Eight of the ten configurations of `Multipart.tla` are expected to **fail**, and five of
-the six of `Migrate.tla` (listed [with that model](#migrating-names--migratetla)). A model that cannot reproduce the
+Nine of the thirteen configurations of `Multipart.tla` are expected to **fail**, and five
+of the six of `Migrate.tla` (listed [with that model](#migrating-names--migratetla)). A model that cannot reproduce the
 two races the design already knows about is too coarse to be evidence about the races it
-does not know about, so "no counterexample" is a failing result for those thirteen.
+does not know about, so "no counterexample" is a failing result for those fourteen.
 
 | Configuration | Rules | Expected |
 |---|---|---|
@@ -87,6 +107,9 @@ does not know about, so "no counterexample" is a failing result for those thirte
 | `MCEncrypt` | `encrypt-existing` with names in clear: the key starts with a plaintext object and no manifest (`Initial = "plaintext"`), overwritten with rotation's conditional write, `Ordering = "either"`, 2 uploads | no counterexample |
 | `MCEncryptUnconditional` | `encrypt-existing --allow-unconditional` | **I2 violated** |
 | `MCEncryptAws` | `encrypt-existing` with `If-Match` alone, on a provider that ranks writes as AWS does | **I2 violated** |
+| `MCTags` | `MCFixed` with tags (`Tags = TRUE`): every client write tagged, the rotation carrying its source's tags, `gc` deleting only sidecars past its minimum age, 1 upload | no counterexample |
+| `MCTagsFull` | the same with 2 uploads — run only when named, see below | no counterexample |
+| `MCTagsNoAge` | `MCTags` with 2 uploads and `gc` ignoring the minimum age for sidecars (`TagAge = "ignored"`) | **I3 violated** |
 
 The I1 configurations run with `RotateMode = "off"`, so their counterexamples contain
 only operations that M4 itself implements and can replay as integration tests.
@@ -106,7 +129,7 @@ they are.
 
 ```sh
 make tla-tools     # downloads tla2tools.jar into .tools/ (not committed)
-make tla           # runs the sixteen configurations of both models
+make tla           # runs the eighteen configurations of both models
 make tla-translate # re-run the PlusCal translator after editing an algorithm
 ```
 
@@ -117,8 +140,8 @@ make tla-translate # re-run the PlusCal translator after editing an algorithm
 ```
 
 `MCFixed` explores about 8.7 million distinct states and `MCMigrate` about 8.1 million,
-each in five to seven CPU-minutes, and `MCEncrypt` about 2.7 million; the other thirteen
-finish in seconds, and `make tla` takes about two minutes on ten cores. The CI job runs on changes to `spec/tla/` or to the
+each in five to seven CPU-minutes, `MCEncrypt` about 2.7 million and `MCTags` about 1.2
+million; the other fourteen finish in seconds, and `make tla` takes about two minutes on ten cores. The CI job runs on changes to `spec/tla/` or to the
 coordination code rather than on every push.
 
 `MCFixedFull` is not among them. Until ADR-025, `MCFixed` ran three uploads under the
@@ -138,7 +161,7 @@ states there is a small chance two distinct states collide and one subtree goes 
 TLC estimates that probability itself and `check.sh` prints it — for `MCFixed` it lands
 between 1e-4 and 3e-3 depending on the run. That is a property of the hash width, not of the
 machine, so more memory does not move it; rerunning with a different `-fp` seed and getting
-the same answer is what buys extra confidence. The thirteen counterexample runs are unaffected: a
+the same answer is what buys extra confidence. The fourteen counterexample runs are unaffected: a
 trace TLC prints is a trace that exists.
 
 Each checked-in module contains both its PlusCal algorithm and its translation. CI re-runs
@@ -446,6 +469,33 @@ its own was created does: u1 is open at step 4, and the rotation gives way.
 Twelve states. The same shape as 10 at the other key, and the same fix.
 
 **Integration test:** `TestIntegrationMigrateYieldsToAnUploadInProgress`.
+
+## Tag sidecars — ADR-037
+
+The tag sidecars of [ADR-037](../../docs/adr/ADR-037-encrypted-object-tags.md) are in
+`Multipart.tla` behind the constant `Tags`, so that every configuration above runs exactly
+the states it ran before: `MCFixed` explores the same 8,666,276 with `Tags = FALSE`. With
+`Tags = TRUE`, `MCTags` holds with one upload in about 1.2 million states and `MCTagsFull`
+with two in 55.8 million, and the one rule the sidecars add over the manifests is the one
+`MCTagsNoAge` breaks.
+
+### 12. `gc` without the minimum age — `MCTagsNoAge`
+
+Seven states, with nothing in flight but a PUT and a `gc` pass:
+
+1. The PUT writes its sidecar, the step before the object (ADR-037).
+2. `gc` lists the key's sidecars, the PUT's among them.
+3. No upload is open, because a PUT opens none.
+4. `gc` HEADs the key and finds the version before the PUT current.
+5. The PUT lands. Its version is now the visible one.
+6. `gc` deletes the sidecars it listed that were not current at its HEAD: the PUT's.
+
+The object reads as it should, and its tags are gone. R4's order cannot prevent it: the
+listing comes first and the HEAD after it, as R4 requires, and the PUT lands between the
+HEAD and the delete. For a multipart upload the open upload covers that window; for a PUT
+nothing does. The minimum age is what does. A sidecar listed as younger than eight days
+is never deleted, and no PUT takes that long between its sidecar and its object. The code
+has to carry the same age check for sidecars that it carries for manifests.
 
 ## Where the rules ended up in the code
 
