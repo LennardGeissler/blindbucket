@@ -14,6 +14,7 @@ pip install --require-hashes -r requirements.txt
 
 python3 test_vectors.py                  # the normative known-answer vectors
 python3 test_names_vectors.py            # the same, for the object name mapping
+python3 test_tags_vectors.py             # the same, for the tag sidecar of §17
 python3 difftest.py --count 100000       # against the Go decoder
 python3 difftest_names.py --count 100000 # the same, for the name mapping
 
@@ -43,6 +44,11 @@ than depend on a Go library with no release tags whose last commit is from 2018.
 That is a defensible choice only if the composition is checked by something other
 than the code implementing it, and this is that something.
 
+**Section 17, the tag sidecar, in `tags_ref.py`** — both directions as well, for
+the same reason: the vectors fix the sealed bytes, so reproducing them takes an
+encoder. It is small, because the sidecar composes nothing; it is here because a
+format section nobody implemented from the text alone is a claim, not a check.
+
 The multipart manifest (§10) and the upload token (§11) are not implemented. They
 are coordination structures rather than content format, and the interesting
 property there — the lifecycle rules — is checked by the TLA+ model in
@@ -52,9 +58,10 @@ property there — the lifecycle rules — is checked by the TLA+ model in
 
 **Known-answer vectors.** §13 makes the ten segment vectors in
 [`testdata/vectors/`](../../testdata/vectors/) a normative part of the
-specification, and §15.6 does the same for the fifteen name-mapping vectors. The
-reference decoder opens all ten segments to exactly their recorded plaintext, and
-reproduces all fifteen stored keys character for character.
+specification, §15.6 does the same for the fifteen name-mapping vectors, and §17.5
+for the eight tag vectors. The reference decoder opens all ten segments to exactly
+their recorded plaintext, reproduces all fifteen stored keys character for
+character, and all eight sidecars and their paths byte for byte.
 
 **Differential fuzzing.** `difftest.py` generates valid segments with the Go
 encoder, mutates them, and feeds every result to both decoders. The only thing

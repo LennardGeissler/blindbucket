@@ -1,0 +1,192 @@
+{
+  "note": "docs/FORMAT.md section 17. Normative: reproduce encoded, sidecar and path byte for byte. tags are listed in their canonical order; wrapped_dek stands in for an object's bb-dek, and the path is derived from it and stored_key.",
+  "vectors": [
+    {
+      "name": "empty set",
+      "dek": "35dd35b9bbd088c10dd7a87ed881eb3dd9d8cec287f6dba2a2e85cd46ac2df54",
+      "nonce": "595ae43b7d940e18e9267a41",
+      "bucket": "bucket",
+      "key": "report.pdf",
+      "stored_key": "report.pdf",
+      "wrapped_dek": "86c50082be2b25a87a9d8d1e1bfe3768724b7209caa402ad61f803e628c4981f",
+      "tags": [],
+      "encoded": "00",
+      "sidecar": "42425431595ae43b7d940e18e9267a41d0de34f3882155a6212b7ff14efc083542",
+      "path": ".blindbucket/t/6466e450a16b77b865c5829d6b6c56d9f892956475642dbeb9ccc4340fe01b15/uFcSQ5Fq7ZfgbygR3LgaXw"
+    },
+    {
+      "name": "one tag",
+      "dek": "07512dfa4416ec4eb3e4ac780f95643059ecb32aaee06ac0ce1dfd69818f58c5",
+      "nonce": "a91b6a9adbf94568cd9d2436",
+      "bucket": "bucket",
+      "key": "report.pdf",
+      "stored_key": "report.pdf",
+      "wrapped_dek": "8ec6ec5549581e3e5f4baaedfef41dc6962e4897d10beef4916b53ee03d29b6d",
+      "tags": [
+        {
+          "key": "project",
+          "value": "blue"
+        }
+      ],
+      "encoded": "01000770726f6a6563740004626c7565",
+      "sidecar": "42425431a91b6a9adbf94568cd9d24363d0536495b32e66f53841bc3f22a2c3cced470063ffaff324c324ad3ccc3d5ea",
+      "path": ".blindbucket/t/6466e450a16b77b865c5829d6b6c56d9f892956475642dbeb9ccc4340fe01b15/LOixwEhkLzk-uIVXYz5ZnQ"
+    },
+    {
+      "name": "given unsorted",
+      "dek": "d75a3789108a2608c7356700994cab4d4cb69303d56bd38f9a3b3c94eca0de8d",
+      "nonce": "43823311ccf5251d4b7f73d8",
+      "bucket": "bucket",
+      "key": "a/b.txt",
+      "stored_key": "a/b.txt",
+      "wrapped_dek": "c717977aa6fb37d7374962ddad2876bbe354f24ea44c928109fad248d953ca6f",
+      "tags": [
+        {
+          "key": "alpha",
+          "value": "1"
+        },
+        {
+          "key": "mid",
+          "value": "2"
+        },
+        {
+          "key": "zeta",
+          "value": "3"
+        }
+      ],
+      "encoded": "030005616c70686100013100036d696400013200047a657461000133",
+      "sidecar": "4242543143823311ccf5251d4b7f73d8a5ca4d1eccd32dde2986cbdf84bd68858f2b727fc9d46cd6d904811e84d4324865af3d50d00ff9c6ed6081ee",
+      "path": ".blindbucket/t/5550000d3b1cf1ff9d8ad3380f759f84f8abda4b5032ee735bdfef6766d6919f/r3BfAIm6Pr6X7Dbn9ozmuQ"
+    },
+    {
+      "name": "an empty value",
+      "dek": "0a97b71785181d8e8ca4b932714648e58a2caf294eb225c23aa6e1963fcbfc15",
+      "nonce": "aa2333611b638d804240ace0",
+      "bucket": "bucket",
+      "key": "a/b.txt",
+      "stored_key": "a/b.txt",
+      "wrapped_dek": "00eae0285617decf6d14e673f1790135b023b7fd967a83f3338e9a9a968137f1",
+      "tags": [
+        {
+          "key": "archived",
+          "value": ""
+        }
+      ],
+      "encoded": "01000861726368697665640000",
+      "sidecar": "42425431aa2333611b638d804240ace0f6e5d31ec20ffb465d7a90ec357f4cd54d7cf01c6ef7fe9bd6d818ea60",
+      "path": ".blindbucket/t/5550000d3b1cf1ff9d8ad3380f759f84f8abda4b5032ee735bdfef6766d6919f/AkNzjMfqzQcojWvMDyLxXA"
+    },
+    {
+      "name": "utf-8",
+      "dek": "970314044e5f7c9eba85112277c0763def1dfdafe1009cc0634837634605b790",
+      "nonce": "9ef570dbe0ea8c3903e2d95a",
+      "bucket": "bucket",
+      "key": "urlaub/münchen.jpg",
+      "stored_key": "urlaub/münchen.jpg",
+      "wrapped_dek": "702619a280429e7d02efdae4a746da0c34f9f72f642a878248727571e9b33dec",
+      "tags": [
+        {
+          "key": "Ort",
+          "value": "München"
+        },
+        {
+          "key": "Straße",
+          "value": "Ü 1"
+        }
+      ],
+      "encoded": "0200034f727400084dc3bc6e6368656e000753747261c39f650004c39c2031",
+      "sidecar": "424254319ef570dbe0ea8c3903e2d95a718365ee1b1b8018fb38c9e8d4cd98d6e219dd6bf3ab48ad84c17338f8f8c9d8cda1ffcba06d289b3b360aa7d0dbfb",
+      "path": ".blindbucket/t/25ba5f6b9fecbe6afaa84e8f7fcc544f4137361d6a40d666df6cbb25ef920286/vUDaHpOW8kVeIs5hyFtNTw"
+    },
+    {
+      "name": "stored key differs from the key",
+      "dek": "13edf933ce1664f1b9410f3d95a1c54af067a4bb63182b68bc40dd2ad4dec369",
+      "nonce": "736cd4fcc35aadd152bc1a45",
+      "bucket": "bucket",
+      "key": "photos/beach.jpg",
+      "stored_key": "OBUGK3DPMRZQ/MJSWC4TBMNUA",
+      "wrapped_dek": "bcdff5e7a72e4630d0ddae8b21f1f58ef5d423799246ad8d0b2ed4dacc3d436e",
+      "tags": [
+        {
+          "key": "owner",
+          "value": "alice"
+        }
+      ],
+      "encoded": "0100056f776e65720005616c696365",
+      "sidecar": "42425431736cd4fcc35aadd152bc1a45030320bd7d15d4ca5e76a00d3839a6068cd320980c15b23994dd29614e7ee5",
+      "path": ".blindbucket/t/c1053ad291c8b38c41b835ca0da8674f6a759c050bcb9255137b74b95af1bed2/j2JxERZdUeZ4t2CCKbY91Q"
+    },
+    {
+      "name": "ten tags",
+      "dek": "6095562c417675f2841e72b608a42827ba7aba6e3d2fd25f49f380d50e26086e",
+      "nonce": "f7422b4ad3d9eff8fcbaea71",
+      "bucket": "bucket",
+      "key": "full",
+      "stored_key": "full",
+      "wrapped_dek": "4249936acdd2ab4d289e4caef3933ad16df1a8a1545ae57ff204f462a894f5ed",
+      "tags": [
+        {
+          "key": "key-0",
+          "value": "value 0"
+        },
+        {
+          "key": "key-1",
+          "value": "value 1"
+        },
+        {
+          "key": "key-2",
+          "value": "value 2"
+        },
+        {
+          "key": "key-3",
+          "value": "value 3"
+        },
+        {
+          "key": "key-4",
+          "value": "value 4"
+        },
+        {
+          "key": "key-5",
+          "value": "value 5"
+        },
+        {
+          "key": "key-6",
+          "value": "value 6"
+        },
+        {
+          "key": "key-7",
+          "value": "value 7"
+        },
+        {
+          "key": "key-8",
+          "value": "value 8"
+        },
+        {
+          "key": "key-9",
+          "value": "value 9"
+        }
+      ],
+      "encoded": "0a00056b65792d30000776616c7565203000056b65792d31000776616c7565203100056b65792d32000776616c7565203200056b65792d33000776616c7565203300056b65792d34000776616c7565203400056b65792d35000776616c7565203500056b65792d36000776616c7565203600056b65792d37000776616c7565203700056b65792d38000776616c7565203800056b65792d39000776616c75652039",
+      "sidecar": "42425431f7422b4ad3d9eff8fcbaea71bec3679f9c761bb4fe239314d64f8cd8dc033db48628035bfefd7450340ebbfb36a0d83684c7a34e26f03049a780beffeb9fddda3c3cfb082043f944f14dabbf5dd08658f86faf1d3aff8c56c7fb351f42adae6dc799a3727cd16818cf36c48cca217d1a008d5e6bd7f84c12eb392e3ba231441427c06e282e0efb0775067d1815272e5080ad724af5a7ef49457924941e90c523b1b1e459b99784cb4de0f820da6bfd54c6944401537f7e3cf601a9219f",
+      "path": ".blindbucket/t/a18b869b2e81c0c529552a3c4fa5c92ed08b98a4e146aed778d71d27517f83ac/7myQuV6Vw8aNB-ISYf3KSg"
+    },
+    {
+      "name": "longest key and value",
+      "dek": "3e7da297dfc9780b42db2e5f2c24e50a1c5007a7f4dd497ec15909f0db399e89",
+      "nonce": "72b07fcc0b049c8766c0dbaa",
+      "bucket": "bucket",
+      "key": "long",
+      "stored_key": "long",
+      "wrapped_dek": "1b9924a3fe04417543f202613836835a689fab1af7c4fcc69fe7f35f05542b08",
+      "tags": [
+        {
+          "key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+          "value": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        }
+      ],
+      "encoded": "0100806b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b010076767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676",
+      "sidecar": "4242543172b07fcc0b049c8766c0dbaa1ad338a7bcc1a99bbaa6f5fa6403b4dd9346ddf68bd9d834e43ec8cfac0ad356207411dae5161469d5656add8b2480bee713597d4322caa8d58ab58db0897c0ee3d8a22146d8e533f4f1833bb619d463df16cb191c46e16ff0177b614d6e2cf238feeb840ebb2cfe6a49f9b5b3ebb3a23a518f06af24804f029cfaa0c1885a8931d419dfb85aa3c8f655e749226097f40fb5c97bc931253d0df08bb97df9e338486c1a529b936a15320dbebe63db09a261ae1f69f55a00f4578c56d73f32ec44bc242554a9001290726e9738153d203e6ba75883b25b8b1015c68b94548c9484d8db3593d379a275bfe84a5843af7aa67ad5780328796235a0dda468fbe9bbb7882ebeeb85f28d97736006db5ac846e03613a110deaca2fdb86099e1f39cf640219e60edc578d0514898d165a8289d6a083fcfeb967162403f44ca3316c6ac70e8da63bbbaa9fc5a808569e7734f22b941a0e96c7ae8fc3f7f6ad7b16923d11f39429f89524e5d19acffc65438eeb27d37e4d8c348bbb9b8161d8e0b78c4d65cf9a03d105f139e692a78ff24a654e9eeb41d285999",
+      "path": ".blindbucket/t/fc66f021c67d064c1490a12b5a4d4d2f5167ca692a16ca12f1f3a4cda29a6fa9/CRs1AASZeIeIaepxHOW-5w"
+    }
+  ]
+}

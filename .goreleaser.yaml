@@ -141,7 +141,7 @@ homebrew_casks:
 release:
   draft: true
   prerelease: auto
-  # The known-answer vectors of FORMAT.md §13 and §15.6, for anyone writing a
+  # The known-answer vectors of FORMAT.md §13, §15.6 and §17.5, for anyone writing a
   # second implementation to test against. Named by the format version they
   # pin rather than the release: segment_v1.json is the same file in every
   # release that writes format 1, which is the point.
@@ -169,7 +169,7 @@ release:
     gh attestation verify blindbucket_{{ .Version }}_linux_amd64.tar.gz --repo LennardGeissler/blindbucket --bundle blindbucket_{{ .Version }}_provenance.intoto.jsonl
     ```
 
-    `segment_v1.json` and `names_v1.json` are the known-answer vectors of `docs/FORMAT.md`, for testing another implementation against format 1.
+    `segment_v1.json`, `names_v1.json` and `tags_v1.json` are the known-answer vectors of `docs/FORMAT.md`, for testing another implementation against format 1.
 
     The container image is `distroless/static:nonroot`: no shell, no package manager, and it runs as uid 65532. Mount the keyring read-only and give the container a read-only root filesystem.
 
