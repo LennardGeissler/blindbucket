@@ -30,6 +30,16 @@ version 1 would keep being readable.
 
 - **A client's conditional write is no longer carried out unconditionally.** `If-None-Match: *` and `If-Match` on `PutObject`, `CompleteMultipartUpload` and `CopyObject` were dropped without a word, so "create only if absent" could overwrite an object. They now go to the provider with the write, under name encryption too, and a condition that does not hold is answered `412`. Where the provider ignores them, as Garage v2.4.1 does, the client gets what the provider does ([#168](https://github.com/LennardGeissler/blindbucket/issues/168), [COMPATIBILITY.md](docs/COMPATIBILITY.md#a-clients-own-conditional-writes)).
 
+## [1.5.1] — 2026-10-21
+
+**A security fix.** Three request bodies are now checked against the signature
+([GHSA-h6g6-fvvh-3r88](https://github.com/LennardGeissler/blindbucket/security/advisories/GHSA-h6g6-fvvh-3r88)).
+Nothing else changes from 1.5.0.
+
+### Security
+
+- **The bodies of `DeleteObjects`, `CompleteMultipartUpload` and bucket requests are checked against the signature.** They were read without being compared to the `x-amz-content-sha256` the signature covers, so a request whose headers were signed was served with any body. Someone able to alter traffic on an unprotected hop between client and gateway, or holding a signed request within its 15-minute window, could change which objects a `DeleteObjects` removed or which parts a completion assembled. These bodies now go through the same verifying reader as an upload, which also checks `Content-MD5` and `x-amz-checksum-*`. Every release from 0.1.0 through 1.5.0 is affected ([GHSA-h6g6-fvvh-3r88](https://github.com/LennardGeissler/blindbucket/security/advisories/GHSA-h6g6-fvvh-3r88)).
+
 ## [1.5.0] — 2026-10-19
 
 **Software that cannot be changed, behind the gateway.** Five applications -- Nextcloud,
@@ -1376,7 +1386,8 @@ figures and the methodology are in [bench/](bench/).
   of ten seconds, so the time is the provider's; why it behaves that way under
   this access pattern is not established.
 
-[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.2.0...v1.3.0
