@@ -172,11 +172,18 @@ Measured on 2026-10-14 against MinIO ([#114](https://github.com/LennardGeissler/
 | Gateway | CRT | classic |
 |---|---|---|
 | 1.3 and later, default | works | works |
-| 1.2 and earlier, default | `GetObject` and multipart refused | works |
+| 1.2 and earlier, default | `GetObject` and multipart refused, and an empty file | works |
 | `require_signed_payload: true` | refused | works over HTTP only |
 
-With a gateway at 1.2 or earlier, either set `allow_unsigned_payload: true`, or
-make the CLI use its previous transfer client:
+An empty file is the case `allow_unsigned_payload` does not reach: the CRT
+client sends it as an aws-chunked body with nothing but a trailer, and the parser
+of a gateway at 1.2 or earlier misreads that, answering `IncompleteBody`,
+*"expected CRLF after chunk data"*. Measured on 2026-10-21 with 2.38.1 against
+every release from 0.1.0 to 1.2.0; 1.3 and later take it.
+
+With a gateway at 1.2 or earlier, make the CLI use its previous transfer client,
+which covers both; `allow_unsigned_payload: true` alone leaves empty files
+failing:
 
 ```sh
 aws configure set default.s3.preferred_transfer_client classic
