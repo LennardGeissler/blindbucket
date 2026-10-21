@@ -279,7 +279,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case s3api.OpListObjectsV2, s3api.OpListObjects:
 		err = p.listObjects(w, r, req, log)
 	case s3api.OpDeleteObjects:
-		err = p.deleteObjects(w, r, req, log)
+		err = p.deleteObjects(w, r, req, authResult, log)
 	case s3api.OpCreateMultipartUpload:
 		err = p.createMultipartUpload(w, r, req, log)
 	case s3api.OpUploadPart:
@@ -287,7 +287,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case s3api.OpUploadPartCopy:
 		err = p.uploadPartCopy(w, r, req, authResult, log)
 	case s3api.OpCompleteMultipartUpload:
-		err = p.completeMultipartUpload(w, r, req, log)
+		err = p.completeMultipartUpload(w, r, req, authResult, log)
 	case s3api.OpAbortMultipartUpload:
 		err = p.abortMultipartUpload(w, r, req, log)
 	case s3api.OpListParts:
@@ -296,7 +296,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err = p.listMultipartUploads(w, r, req)
 	case s3api.OpListBuckets, s3api.OpHeadBucket, s3api.OpCreateBucket,
 		s3api.OpDeleteBucket, s3api.OpGetBucketLocation:
-		err = p.passthrough(w, r, req, log)
+		err = p.passthrough(w, r, req, authResult, log)
 	default:
 		err = s3api.ErrNotImplemented
 	}

@@ -317,7 +317,7 @@ func (p *Proxy) uploadPart(
 //  5. HEAD, DELETE     -- only the id observed at step 2, only now, and only
 //     once a HEAD shows that version is no longer visible (R3, ADR-025)
 func (p *Proxy) completeMultipartUpload(
-	w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger,
+	w http.ResponseWriter, r *http.Request, req s3api.Request, authResult *auth.Result, log *slog.Logger,
 ) *s3api.Error {
 	token, storedKey, apiErr := p.openToken(r, req)
 	if apiErr != nil {
@@ -329,7 +329,7 @@ func (p *Proxy) completeMultipartUpload(
 	}
 	defer clear(dek)
 
-	requested, apiErr := readCompleteRequest(r)
+	requested, apiErr := readCompleteRequest(r, authResult)
 	if apiErr != nil {
 		return apiErr
 	}
@@ -574,10 +574,12 @@ func (p *Proxy) unwrapTokenDEK(
 }
 
 // readCompleteRequest parses the part list a client sent.
-func readCompleteRequest(r *http.Request) ([]completeReqPart, *s3api.Error) {
-	raw, err := io.ReadAll(io.LimitReader(r.Body, maxCompleteBody))
-	if err != nil {
-		return nil, s3api.ErrIncompleteBody.WithMessage("could not read the request body")
+func readCompleteRequest(r *http.Request, authResult *auth.Result) ([]completeReqPart, *s3api.Error) {
+	// Verified first: the body decides which parts become the object, and in
+	// which order.
+	raw, apiErr := readVerifiedBody(r, authResult, maxCompleteBody)
+	if apiErr != nil {
+		return nil, apiErr
 	}
 	var in completeRequest
 	if err := xml.Unmarshal(raw, &in); err != nil {
