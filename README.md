@@ -38,7 +38,7 @@
 </sub></p>
 
 > [!NOTE]
-> **Status: `v1.5.0` — stable, and measured against AWS.** Standard S3 clients round-trip
+> **Status: `v1.5.1` — stable, and measured against AWS.** Standard S3 clients round-trip
 > through the gateway, multipart included: AWS CLI, boto3, `mc`, rclone and
 > s5cmd all work, and a 5 GiB `aws s3 cp` across two instances comes back with
 > an identical SHA-256. Key rotation, server-side copy, a signed audit log,
@@ -202,7 +202,7 @@ in **[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)**.
 
 ```sh
 # Container: distroless, nonroot, no shell, 21 MB.
-docker pull ghcr.io/lennardgeissler/blindbucket:1.5.0
+docker pull ghcr.io/lennardgeissler/blindbucket:1.5.1
 
 # Or with Homebrew, on macOS and Linux, with the completions for bash, zsh and fish:
 brew install --cask lennardgeissler/tap/blindbucket

@@ -114,7 +114,7 @@ spec:
               valueFrom: { secretKeyRef: { name: app-s3-credentials, key: secret_access_key } }
 
         - name: blindbucket
-          image: ghcr.io/lennardgeissler/blindbucket:1.5.0
+          image: ghcr.io/lennardgeissler/blindbucket:1.5.1
           args: ["serve", "--config", "/etc/blindbucket/blindbucket.yaml"]
 
           env:

@@ -1,7 +1,12 @@
 # Threat Model
 
-**Status:** Current as of `v1.5.0`, which adds three things this model has to name, and
-no mechanism. The audit export
+**Status:** Current as of `v1.5.1`, which makes one guarantee hold that was stated without
+holding. The bodies of `DeleteObjects`, `CompleteMultipartUpload` and bucket requests were
+not checked against the signature, so `require_signed_payload` did not cover them, and a
+signed request could be served with another body
+([GHSA-h6g6-fvvh-3r88](https://github.com/LennardGeissler/blindbucket/security/advisories/GHSA-h6g6-fvvh-3r88));
+now every body the gateway acts on is. `v1.5.0` added three things this model has to name,
+and no mechanism. The audit export
 ([ADR-033](adr/ADR-033-audit-export.md)) sends every entry to a SIEM, unsigned, with object
 names encrypted as in the file: the receiver is a new party that sees which client did
 what and when, and that cannot verify what it gets, so verification stays on the file. A
