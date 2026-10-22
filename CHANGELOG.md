@@ -68,6 +68,9 @@ version 1 would keep being readable.
   [docs/guides/tenants.md](docs/guides/tenants.md) gives the order of operations, and
   THREAT_MODEL §5.12 what a destruction promises and what it does not. That includes one
   limit: in a versioned bucket, the census and `rotate` see current objects only.
+- **Build details in `blindbucket version`.** The version remains the first line; when
+  present in Go's build info, the output also reports the Go version, VCS revision and
+  timestamp, modified-tree status, and target platform. Missing metadata is omitted.
 
 ### Fixed
 
