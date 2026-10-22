@@ -318,7 +318,8 @@ func TestPresignedUploadCarriesQueryMetadata(t *testing.T) {
 }
 
 // TestPresignedUploadRefusesWhatTheSignerDidNotChoose: an unsigned x-amz-*
-// header, a value given both ways, and an aws-chunked body. Tags in the query
+// header, a value given both ways, a reserved bb- key, and an aws-chunked body.
+// Tags in the query
 // are served since ADR-037; tags_test.go has them.
 func TestPresignedUploadRefusesWhatTheSignerDidNotChoose(t *testing.T) {
 	h := proxytest.New(t, withPresign(), withUploads(uploadLimit))
@@ -336,6 +337,18 @@ func TestPresignedUploadRefusesWhatTheSignerDidNotChoose(t *testing.T) {
 			signHeaders: map[string]string{"X-Amz-Meta-Owner": "bob"},
 			sendHeaders: map[string]string{"X-Amz-Meta-Owner": "bob"},
 			query:       url.Values{"x-amz-meta-owner": {"alice"}}, want: http.StatusBadRequest,
+		},
+		// A reserved key hoisted out of the query (#91). The signature covers
+		// it, so the signer did choose it -- and it is still refused, because
+		// hoistUploadHeaders only turns it into a header and clientMetadata
+		// runs afterwards. Signing a bb-* key is not a way to set one.
+		"a reserved metadata key in the query": {
+			query: url.Values{"x-amz-meta-bb-kid": {"forged"}}, want: http.StatusBadRequest,
+		},
+		"a reserved metadata key signed as a header": {
+			signHeaders: map[string]string{"X-Amz-Meta-Bb-Dek": "forged"},
+			sendHeaders: map[string]string{"X-Amz-Meta-Bb-Dek": "forged"},
+			want:        http.StatusBadRequest,
 		},
 		"an aws-chunked body": {
 			sendHeaders: map[string]string{"Content-Encoding": "aws-chunked"}, want: http.StatusBadRequest,
