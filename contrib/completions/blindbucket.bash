@@ -38,7 +38,7 @@ _blindbucket_flags() {
 	"tenants census") echo --concurrency --config --json --passphrase-file -v ;;
 	"tenants destroy") echo --concurrency --config --dry-run --force --passphrase-file -v ;;
 	"keys remove") echo --config --force --keyring --passphrase-file ;;
-	"audit verify") echo --config --expect --keyring --passphrase-file --print --public-key ;;
+	"audit verify") echo --config --expect --json --keyring --passphrase-file --print --public-key ;;
 	"audit pubkey") echo --config --keyring --open --passphrase-file ;;
 	esac
 }

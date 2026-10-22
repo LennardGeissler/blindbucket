@@ -16,6 +16,18 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Added
+
+- **`audit verify --json`.** A job that checks the audit log, such as a cron job comparing
+  it against a checkpoint recorded elsewhere, can read a document instead of only the exit
+  code: per file the chain, the entries and checkpoints, the last checkpoint as `seq` and
+  `hash`, and how many entries sit past the last signature, `null` when signatures were not
+  checked. `verdict` is `verified`, `signatures_not_checked`, `nothing_signed` or `failed`,
+  so the three outcomes that exit 0 stay apart, and a failed run still prints its document
+  with the reason in `error`. `--json` with `--print` is refused, and the default output is
+  unchanged ([#69](https://github.com/LennardGeissler/blindbucket/issues/69),
+  [ADR-016](docs/adr/ADR-016-audit-log.md), [ADR-021](docs/adr/ADR-021-what-1.0-promises.md)).
+
 ### Measured
 
 - **The litmus tests, through 1.9.0.** `test/litmus/` was run again through the gateway, now v1.9.0, in front of MinIO and of Garage, five times each, with the stores directly as the control. Every result is the one 1.6.0 gave: the gateway takes the store's semantics, conditions enforced in front of MinIO and ignored in front of Garage ([test/litmus/README.md](test/litmus/README.md#through-the-gateway-2026-11-06)).
