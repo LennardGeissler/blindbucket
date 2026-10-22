@@ -18,6 +18,8 @@ version 1 would keep being readable.
 
 ### Added
 
+- **Build details in `blindbucket version`.** The version remains the first line; when present in Go's build info, the output also reports the Go version, VCS revision and timestamp, modified-tree status, and target platform. Missing metadata is omitted.
+
 - **A read-only status page.** With `admin.dashboard.listen` set, the gateway serves one page that says whether it is ready, which keys it holds and what seals them, and whether its audit log is being signed and still verifies, checked in the background every ten minutes. It never shows key material, credentials or object names, runs no script and changes nothing. It has no authentication of its own, so it serves only on loopback and only to requests that name `localhost`, and is reached from elsewhere through `kubectl port-forward` or an SSH tunnel ([ADR-035](docs/adr/ADR-035-dashboard.md)).
 
 - **Presigned uploads, where the operator sets a size limit.** With `server.presign.uploads.max_size` set, a presigned URL can `PutObject` or `UploadPart`, so a backend can hand a client a URL to upload one file to. The limit is judged on `Content-Length` before the body is read, and an upload URL's window is capped at an hour unless `uploads.max_expiry` says otherwise. A checksum or `If-None-Match` the URL binds is honoured, `x-amz-*` values in the query are read as headers, and an `x-amz-*` header the URL did not sign is refused. [browser-uploads.md](docs/guides/browser-uploads.md) shows the backend's side, for JavaScript v3 and boto3, and the browser's ([ADR-036](docs/adr/ADR-036-presigned-uploads.md)).
