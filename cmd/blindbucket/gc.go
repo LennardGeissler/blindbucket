@@ -19,12 +19,13 @@ func runGC(ctx context.Context, args []string) error {
 	fs.Usage = func() {
 		_, _ = fmt.Fprintf(fs.Output(), `Usage: blindbucket gc --config <file> s3://<bucket>[/<prefix>]
 
-Removes orphaned multipart manifests.
+Removes orphaned multipart manifests and tag sidecars.
 
 A manifest is orphaned when the object version it describes is no longer the
 visible one: a single-part upload replaced a multipart object, an upload crashed
-before completing, or the object was deleted in a batch. Orphans hold no
-plaintext; they only cost storage.
+before completing, or the object was deleted in a batch. A tag sidecar is
+orphaned the same way, by an overwrite or a delete of the version it holds the
+tags of (ADR-037). Orphans hold no plaintext; they only cost storage.
 
 The pass follows a fixed order (ADR-010, rule R4): list the manifests,
 then ask for open uploads and skip any key that has one, then read the manifest
@@ -35,7 +36,9 @@ only read -- is enough to make an object unreadable.
 Manifests younger than --min-age are left alone whatever the other steps say.
 This is a second line of defence for providers whose read-after-write
 consistency does not hold as assumed; the default suits the seven-day lifecycle
-rule for incomplete uploads that the README recommends.
+rule for incomplete uploads that the README recommends. For a tag sidecar it is
+the first: a PUT writes its sidecar before its object and opens no upload, so
+nothing else keeps gc from it until the object lands.
 
 Flags:
 `)
@@ -124,6 +127,16 @@ Flags:
 	if result.KeptUnreadable > 0 {
 		fmt.Printf("  kept, unreadable: %d (not written by this gateway)\n", result.KeptUnreadable)
 	}
+	if result.SidecarsSeen > 0 {
+		fmt.Printf("%d tag sidecars seen\n", result.SidecarsSeen)
+		fmt.Printf("  %s:        %d\n", verb, result.SidecarsDeleted)
+		fmt.Printf("  kept, current:  %d\n", result.SidecarsKeptCurrent)
+		fmt.Printf("  kept, too new:  %d\n", result.SidecarsKeptTooYoung)
+		if result.SidecarsKeptUnreadable > 0 {
+			fmt.Printf("  kept, unreadable: %d (naming no key that hashes to their place)\n",
+				result.SidecarsKeptUnreadable)
+		}
+	}
 	return gcErrors(result)
 }
 
@@ -164,6 +177,14 @@ type gcJSON struct {
 	KeysSkipped     int     `json:"keys_skipped"`
 	KeptUnreadable  int     `json:"kept_unreadable"`
 	Errors          int     `json:"errors"`
+
+	// The same for tag sidecars (ADR-037). The fields above count manifests,
+	// as they always have.
+	SidecarsSeen           int `json:"tag_sidecars_seen"`
+	SidecarsDeleted        int `json:"tag_sidecars_deleted"`
+	SidecarsKeptCurrent    int `json:"tag_sidecars_kept_current"`
+	SidecarsKeptTooNew     int `json:"tag_sidecars_kept_too_new"`
+	SidecarsKeptUnreadable int `json:"tag_sidecars_kept_unreadable"`
 }
 
 // marshalGCJSON renders a run's summary as newline-terminated JSON, with the
@@ -181,6 +202,12 @@ func marshalGCJSON(run gcRun, result *gc.Result) ([]byte, error) {
 		KeysSkipped:     result.KeysSkipped,
 		KeptUnreadable:  result.KeptUnreadable,
 		Errors:          result.Errors,
+
+		SidecarsSeen:           result.SidecarsSeen,
+		SidecarsDeleted:        result.SidecarsDeleted,
+		SidecarsKeptCurrent:    result.SidecarsKeptCurrent,
+		SidecarsKeptTooNew:     result.SidecarsKeptTooYoung,
+		SidecarsKeptUnreadable: result.SidecarsKeptUnreadable,
 	})
 	if err != nil {
 		return nil, err

@@ -76,6 +76,50 @@ func Path(storedKey, wrappedDEK string) string {
 	return PrefixFor(storedKey) + BindingID(wrappedDEK)
 }
 
+// KeyMetadata is the metadata, without the x-amz-meta- prefix, in which a
+// sidecar carries its object's stored key (FORMAT.md section 17.1).
+const KeyMetadata = "bb-key"
+
+// Metadata is what a sidecar of the object at storedKey is written with.
+func Metadata(storedKey string) map[string]string {
+	return map[string]string{KeyMetadata: base64.RawURLEncoding.EncodeToString([]byte(storedKey))}
+}
+
+// StoredKeyOf reads the stored key a sidecar names, and accepts it only if it
+// hashes back to the sidecar's own location: the value is not authenticated,
+// so a sidecar must not be able to point a reader at another object.
+func StoredKeyOf(sidecarKey string, md map[string]string) (string, bool) {
+	for name, value := range md {
+		if !strings.EqualFold(name, KeyMetadata) {
+			continue
+		}
+		raw, err := base64.RawURLEncoding.DecodeString(value)
+		if err != nil {
+			return "", false
+		}
+		key := string(raw)
+		if !strings.HasPrefix(sidecarKey, PrefixFor(key)) {
+			return "", false
+		}
+		return key, true
+	}
+	return "", false
+}
+
+// SplitPath takes a sidecar's own key apart into the hash directory and the
+// BindingID, or reports that it is not a sidecar's key.
+func SplitPath(key string) (hash, binding string, ok bool) {
+	rest, found := strings.CutPrefix(key, Prefix)
+	if !found {
+		return "", "", false
+	}
+	hash, binding, found = strings.Cut(rest, "/")
+	if !found || len(hash) != 64 || len(binding) != 22 || strings.Contains(binding, "/") {
+		return "", "", false
+	}
+	return hash, binding, true
+}
+
 // Encode writes a tag set canonically: sorted by key, bytewise, each key once.
 // An empty set encodes as a single zero byte.
 func Encode(set []Tag) ([]byte, error) {

@@ -40,7 +40,7 @@ func commands() []command {
 		{"keygen", "create a keyring, or add a key to an existing one", runKeygen},
 		{"keys", "list the keys in a keyring, or retire one", runKeys},
 		{"reseal", "seal a keyring under another passphrase, Vault or KMS", runReseal},
-		{"gc", "remove orphaned multipart manifests", runGC},
+		{"gc", "remove orphaned multipart manifests and tag sidecars", runGC},
 		{"rotate", "re-wrap data keys under a new KEK", runRotate},
 		{"migrate-names", "move objects stored in clear to their encrypted names", runMigrateNames},
 		{"encrypt-existing", "encrypt the objects a bucket held before the gateway, in place", runEncryptExisting},

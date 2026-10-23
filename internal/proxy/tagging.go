@@ -70,8 +70,9 @@ type tagSetXML struct {
 // tagTarget is the object version a tag operation acts on: where its sidecar
 // is, and the data key that seals it.
 type tagTarget struct {
-	path string
-	dek  []byte
+	storedKey string
+	path      string
+	dek       []byte
 }
 
 // errUntaggable reports an object the gateway did not write. It has no data
@@ -100,7 +101,11 @@ func (p *Proxy) findTagTarget(r *http.Request, req s3api.Request, log *slog.Logg
 	if apiErr != nil {
 		return nil, apiErr, nil
 	}
-	return &tagTarget{path: tags.Path(storedKey, objectmeta.StoredDEK(info.Metadata)), dek: dek}, nil, nil
+	return &tagTarget{
+		storedKey: storedKey,
+		path:      tags.Path(storedKey, objectmeta.StoredDEK(info.Metadata)),
+		dek:       dek,
+	}, nil, nil
 }
 
 // getObjectTagging answers with the object's tags, from its sidecar.
@@ -210,6 +215,7 @@ func (p *Proxy) writeTags(
 	if _, err := p.upstream.PutObject(ctx, upstream.PutObjectInput{
 		Bucket: bucket, Key: target.path,
 		Body: bytes.NewReader(sealed), ContentLength: int64(len(sealed)),
+		Metadata: tags.Metadata(target.storedKey),
 	}); err != nil {
 		log.Warn("the upstream refused the tag sidecar", "err", err)
 		return translateUpstream(err)
@@ -270,7 +276,7 @@ func (p *Proxy) writeTagsBeforeObject(
 	if len(set) == 0 {
 		return nil
 	}
-	target := &tagTarget{path: tags.Path(storedKey, objectmeta.StoredDEKOf(meta)), dek: dek}
+	target := &tagTarget{storedKey: storedKey, path: tags.Path(storedKey, objectmeta.StoredDEKOf(meta)), dek: dek}
 	return p.writeTags(ctx, bucket, key, target, set, log)
 }
 

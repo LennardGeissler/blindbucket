@@ -1,6 +1,6 @@
 # ADR-037 — Object tags, sealed in a sidecar bound to the object version
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-21
 **Milestone:** M14
 **Implements:** [#132](https://github.com/LennardGeissler/blindbucket/issues/132)
@@ -77,6 +77,13 @@ write mints a new data key, so every object version has its own sidecar name, an
 anything that can read the object's metadata can compute it, `gc` included,
 without the keyring. The wrapped key is not secret; its hash reveals nothing the
 metadata does not.
+
+A sidecar also carries its object's stored key, as the metadata `bb-key`, so that
+`gc`, which finds sidecars by listing them, learns which object a directory belongs
+to without listing the bucket. It is not authenticated and is used only once it
+hashes back to the directory, as a manifest's key is. *Added while building `gc`,
+before §17 was released: the sealed body names the key the client used, not the
+stored one, so `gc` had no other way to know which object to HEAD.*
 
 ### Sealing
 

@@ -299,8 +299,8 @@ aws s3 ls s3://blindbucket-dev/5GiB.bin      # 5368709120 — the plaintext size
 The gateway keeps no state for any of it: the upload id a client gets back is a
 sealed token carrying the data key and the manifest id, so parts can be spread
 across instances and an instance can restart mid-upload. Orphaned manifests — from
-a crashed upload, or from a plain PUT over a multipart object — are cleaned up out
-of band:
+a crashed upload, or from a plain PUT over a multipart object — and the tag sidecars
+of versions that are gone are cleaned up out of band:
 
 ```sh
 ./bin/blindbucket gc --config blindbucket.yaml --dry-run s3://blindbucket-dev

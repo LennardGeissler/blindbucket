@@ -650,6 +650,7 @@ func writeTags(ctx context.Context, deps Deps, req Request, next objectmeta.Meta
 	if _, err := deps.Upstream.PutObject(ctx, upstream.PutObjectInput{
 		Bucket: dst.Bucket, Key: tags.Path(dst.StoredKey, objectmeta.StoredDEKOf(next)),
 		Body: bytes.NewReader(sealed), ContentLength: int64(len(sealed)),
+		Metadata: tags.Metadata(dst.StoredKey),
 	}); err != nil {
 		return fmt.Errorf("writing the destination's tag sidecar: %w", err)
 	}

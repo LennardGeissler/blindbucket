@@ -961,6 +961,15 @@ stored, its 80 characters, and `base64url` is unpadded (22 characters). Every wr
 mints a new data key, so every object version has its own `BindingID`. Anything
 that can read the object's metadata can compute it, without any key.
 
+A sidecar carries its object's `StoredKey` in its metadata, as
+`x-amz-meta-bb-key`: the key's bytes in unpadded base64url, because a key may hold
+bytes a metadata value may not. It is there for a reader without the object's key in
+hand -- `gc`, which finds sidecars by listing -- to learn which object a directory
+belongs to. The value is not authenticated, and a reader MUST use it only once it
+hashes back to the directory the sidecar was found in, as a manifest's key is checked
+(section 10.1). It tells the provider nothing new: it is the name the provider stores
+the object under.
+
 The rules of section 10.1 for the `.blindbucket/` prefix apply: a proxy MUST refuse
 client access to it and MUST omit it from listings.
 

@@ -1,4 +1,4 @@
-// Package gc collects orphaned multipart manifests.
+// Package gc collects orphaned multipart manifests and tag sidecars.
 //
 // A manifest becomes an orphan whenever an object version stops being visible
 // without its manifest being removed: a single-part PUT over a multipart object
@@ -35,7 +35,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LennardGeissler/blindbucket/internal/crypto/tags"
 	"github.com/LennardGeissler/blindbucket/internal/manifest"
+	"github.com/LennardGeissler/blindbucket/internal/objectmeta"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
@@ -109,6 +111,15 @@ type Result struct {
 	// they name, which means they were not written by this gateway.
 	KeptUnreadable int
 	Errors         int
+
+	// The same for tag sidecars (ADR-037), which are collected in the same
+	// order and under the same minimum age. KeysSkipped and Errors count them
+	// too.
+	SidecarsSeen           int
+	SidecarsDeleted        int
+	SidecarsKeptCurrent    int
+	SidecarsKeptTooYoung   int
+	SidecarsKeptUnreadable int
 }
 
 // Run performs one collection pass.
@@ -136,6 +147,13 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The tag sidecars in the same step, before any upload is checked: a
+	// sidecar is written before its version is visible, as a manifest is, and
+	// the same ordering argument holds for it (spec/tla, MCTags).
+	sidecars, err := listSidecars(ctx, cfg, result)
+	if err != nil {
+		return nil, err
+	}
 	cfg.at(HookList, "")
 
 	for _, entries := range groups {
@@ -144,7 +162,24 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		}
 		collectKey(ctx, cfg, entries, result)
 	}
+	for _, entries := range sidecars {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		collectSidecars(ctx, cfg, entries, result)
+	}
 	return result, nil
+}
+
+// tooYoung reports whether something stamped at modified is younger than the
+// minimum age. The comparison is between the provider's clock and this host's,
+// which is noise at days and visible only with the guard off, which is why
+// switching it off skips the comparison rather than setting it to zero.
+func (c Config) tooYoung(modified time.Time) bool {
+	if c.DisableMinAge {
+		return false
+	}
+	return modified.IsZero() || modified.After(c.Now().Add(-c.MinAge))
 }
 
 // manifestEntry is one manifest as the listing reports it.
@@ -239,20 +274,12 @@ func collectKey(ctx context.Context, cfg Config, entries []manifestEntry, result
 	// days -- that is noise. It is only visible when the guard is switched off,
 	// which is why switching it off skips the comparison rather than setting the
 	// threshold to zero.
-	cutoff := cfg.Now().Add(-cfg.MinAge)
-	tooYoung := func(entry manifestEntry) bool {
-		if cfg.DisableMinAge {
-			return false
-		}
-		return entry.lastModified.IsZero() || entry.lastModified.After(cutoff)
-	}
-
 	for _, entry := range entries {
 		if hasCurrent && entry.id == current {
 			result.KeptCurrent++
 			continue
 		}
-		if tooYoung(entry) {
+		if cfg.tooYoung(entry.lastModified) {
 			result.KeptTooYoung++
 			continue
 		}
@@ -349,4 +376,134 @@ func splitManifestKey(key string) (hash string, id manifest.ID, ok bool) {
 		return "", manifest.ID{}, false
 	}
 	return hash, parsed, true
+}
+
+// sidecarEntry is one tag sidecar as the listing reports it.
+type sidecarEntry struct {
+	objectKey    string // the sidecar's own key, under .blindbucket/t/
+	binding      string
+	lastModified time.Time
+}
+
+// listSidecars is step 1 for tag sidecars: every one under their prefix,
+// grouped by the hash directory that stands for one object key.
+func listSidecars(ctx context.Context, cfg Config, result *Result) (map[string][]sidecarEntry, error) {
+	groups := make(map[string][]sidecarEntry)
+	query := url.Values{"list-type": {"2"}, "prefix": {tags.Prefix}, "max-keys": {"1000"}}
+	for {
+		page, err := cfg.Upstream.ListObjects(ctx, cfg.Bucket, query)
+		if err != nil {
+			return nil, fmt.Errorf("gc: listing tag sidecars: %w", err)
+		}
+		for _, entry := range page.Contents {
+			hash, binding, ok := tags.SplitPath(entry.Key)
+			if !ok {
+				cfg.Log.Debug("ignoring an object under the tag prefix", "key", entry.Key)
+				continue
+			}
+			modified, _ := time.Parse(time.RFC3339, entry.LastModified)
+			groups[hash] = append(groups[hash], sidecarEntry{
+				objectKey: entry.Key, binding: binding, lastModified: modified,
+			})
+			result.SidecarsSeen++
+		}
+		if !page.IsTruncated || page.NextContinuationToken == "" {
+			break
+		}
+		query.Set("continuation-token", page.NextContinuationToken)
+	}
+	return groups, nil
+}
+
+// collectSidecars runs steps 2 to 4 for the tag sidecars of one object key,
+// as collectKey does for its manifests: the object's open uploads, then which
+// sidecar the visible version uses, then the others past the minimum age.
+func collectSidecars(ctx context.Context, cfg Config, entries []sidecarEntry, result *Result) {
+	objectKey, ok := resolveSidecarKey(ctx, cfg, entries)
+	if !ok {
+		result.SidecarsKeptUnreadable += len(entries)
+		return
+	}
+	if cfg.Prefix != "" && !strings.HasPrefix(objectKey, cfg.Prefix) {
+		return
+	}
+	log := cfg.Log.With("key", objectKey)
+
+	// Step 2: an upload in flight wrote its sidecar at its create, before its
+	// object exists, and nothing here can tell which sidecar is its.
+	uploads, err := cfg.Upstream.ListMultipartUploads(ctx, cfg.Bucket, objectKey)
+	if err != nil {
+		log.Warn("could not list open uploads; skipping the key's tag sidecars", "err", err)
+		result.Errors++
+		return
+	}
+	cfg.at(HookUploads, objectKey)
+	for _, upload := range uploads {
+		if upload.Key == objectKey {
+			result.KeysSkipped++
+			return
+		}
+	}
+
+	// Step 3: the sidecar the visible version is named by. As for manifests,
+	// only a HEAD that says the object is gone means none is current.
+	info, err := cfg.Upstream.HeadObject(ctx, cfg.Bucket, objectKey)
+	current := ""
+	switch {
+	case upstream.NotFound(err):
+	case err != nil:
+		log.Warn("could not read the object; skipping the key's tag sidecars", "err", err)
+		result.Errors++
+		return
+	default:
+		if stored := objectmeta.StoredDEK(info.Metadata); stored != "" {
+			current = tags.BindingID(stored)
+		}
+	}
+	cfg.at(HookHead, objectKey)
+
+	// Step 4: every other one, once it is past the minimum age. The age is the
+	// only guard a PUT's sidecar has between being written and its object
+	// landing, because a PUT opens no upload (MCTagsNoAge in spec/tla).
+	for _, entry := range entries {
+		if entry.binding == current {
+			result.SidecarsKeptCurrent++
+			continue
+		}
+		if cfg.tooYoung(entry.lastModified) {
+			result.SidecarsKeptTooYoung++
+			continue
+		}
+		if cfg.DryRun {
+			log.Info("would delete an orphaned tag sidecar", "binding", entry.binding)
+			result.SidecarsDeleted++
+			continue
+		}
+		if err := cfg.Upstream.DeleteObject(ctx, cfg.Bucket, entry.objectKey); err != nil {
+			log.Warn("could not delete an orphaned tag sidecar", "binding", entry.binding, "err", err)
+			result.Errors++
+			continue
+		}
+		log.Info("deleted an orphaned tag sidecar", "binding", entry.binding)
+		result.SidecarsDeleted++
+	}
+	cfg.at(HookDelete, objectKey)
+}
+
+// resolveSidecarKey learns which object a sidecar directory belongs to, from
+// the stored key a sidecar carries, accepted only if it hashes back to the
+// directory (FORMAT.md section 17.1).
+func resolveSidecarKey(ctx context.Context, cfg Config, entries []sidecarEntry) (string, bool) {
+	for _, entry := range entries {
+		info, err := cfg.Upstream.HeadObject(ctx, cfg.Bucket, entry.objectKey)
+		if err != nil {
+			continue
+		}
+		if key, ok := tags.StoredKeyOf(entry.objectKey, info.Metadata); ok {
+			return key, true
+		}
+		cfg.Log.Warn("a tag sidecar names no key that hashes to its own location; ignoring it",
+			"sidecar", entry.objectKey)
+	}
+	return "", false
 }
