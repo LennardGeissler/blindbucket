@@ -222,6 +222,7 @@ _blindbucket() {
       _arguments \
         '--config[configuration file naming the root-key provider]:file:_files' \
         '--expect[require the chain to reach at least this checkpoint]:seq\:hash' \
+        '--json[emit the verification result as JSON]' \
         '--keyring[keyring file: verifies, and decrypts the object names]:file:_files' \
         '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
         '--print[print every entry]' \

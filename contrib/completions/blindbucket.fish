@@ -206,6 +206,7 @@ set c '__blindbucket_using audit verify'
 complete -c blindbucket -n $c -F
 complete -c blindbucket -n $c -l config -r -F -d 'configuration file naming the root-key provider'
 complete -c blindbucket -n $c -l expect -x -d 'require the chain to reach at least this checkpoint, as seq:hash'
+complete -c blindbucket -n $c -l json -d 'emit the verification result as JSON'
 complete -c blindbucket -n $c -l keyring -r -F -d 'keyring file: verifies, and decrypts the object names'
 complete -c blindbucket -n $c -l passphrase-file -r -F -d 'read the keyring passphrase from this file'
 complete -c blindbucket -n $c -l print -d 'print every entry'

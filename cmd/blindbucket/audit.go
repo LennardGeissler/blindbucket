@@ -157,8 +157,9 @@ Flags:
 		conf   = fs.String("config", "", "configuration file naming the root-key provider")
 		expect = fs.String("expect", "",
 			"require the chain to reach at least this checkpoint, as <seq>:<hash>")
-		list = fs.Bool("print", false, "print every entry")
-		pass passphraseFlags
+		list    = fs.Bool("print", false, "print every entry")
+		jsonOut = jsonFlag(fs, "the verification result")
+		pass    passphraseFlags
 	)
 	pass.register(fs)
 	if err := fs.Parse(args); err != nil {
@@ -169,6 +170,14 @@ Flags:
 	if len(paths) == 0 {
 		fs.Usage()
 		return errors.New("name at least one log file")
+	}
+	// --print writes every entry to stdout, and the document has to be the only
+	// thing there. Folding an unbounded entry stream into it would turn a
+	// monitoring document into a log dump; refusing the combination says so
+	// rather than quietly dropping one of the two.
+	if *jsonOut && *list {
+		return errors.New("--json and --print cannot be combined: --print writes every " +
+			"entry to stdout, and --json needs the document to be the only thing there")
 	}
 
 	pub, coder, err := auditVerifyKeys(ctx, *pubFlag, *keyring, *conf, &pass)
@@ -202,17 +211,39 @@ Flags:
 		},
 	})
 	if err != nil {
-		// What verified before the break is still worth printing -- it says
+		// What verified before the break is still worth reporting -- it says
 		// where the log stops being trustworthy -- but the verdict must not be.
+		if *jsonOut {
+			return writeAuditVerifyJSON(ordered, results, pub != nil, err, expectOutcome{})
+		}
 		reportAudit(ordered, results, pub != nil, false)
 		return err
 	}
-	reportAudit(ordered, results, pub != nil, true)
 
+	// --expect is compared before anything is printed, so that the document can
+	// carry its outcome and the text path can keep printing in the order it did.
+	var (
+		outcome   expectOutcome
+		expectErr error
+	)
 	if *expect != "" {
-		if err := checkExpected(*expect, seen, pub != nil); err != nil {
-			return err
-		}
+		outcome, expectErr = checkExpected(*expect, seen, pub != nil)
+	}
+
+	if *jsonOut {
+		return writeAuditVerifyJSON(ordered, results, pub != nil, expectErr, outcome)
+	}
+
+	// Unchanged from before --json existed: the chain's verdict is printed, and
+	// a failing --expect follows it as the error. Only the document below
+	// folds the two into one answer, because it has only one verdict to give.
+	reportAudit(ordered, results, pub != nil, true)
+	if expectErr != nil {
+		return expectErr
+	}
+	if outcome.matched != nil {
+		fmt.Printf("matches the checkpoint recorded elsewhere: %s at %d:%s\n",
+			outcome.matched.chain, outcome.seq, outcome.hash)
 	}
 	return nil
 }
@@ -463,19 +494,22 @@ func reportAudit(paths []string, results []*audit.Result, signaturesChecked, ok 
 // entries were cut from its end, but it cannot agree with a checkpoint it no
 // longer reaches either -- so the comparison is with something the attacker did
 // not hold.
-func checkExpected(expect string, seen []seenCheckpoint, signaturesChecked bool) error {
+func checkExpected(
+	expect string, seen []seenCheckpoint, signaturesChecked bool,
+) (expectOutcome, error) {
 	if !signaturesChecked {
-		return errors.New("--expect needs --public-key or --keyring: comparing against a " +
+		return expectOutcome{}, errors.New("--expect needs --public-key or --keyring: comparing against a " +
 			"checkpoint means nothing if the checkpoints in the file were never verified")
 	}
 	seqText, hash, ok := strings.Cut(expect, ":")
 	if !ok {
-		return fmt.Errorf("--expect must be <seq>:<hash>, got %q", expect)
+		return expectOutcome{}, fmt.Errorf("--expect must be <seq>:<hash>, got %q", expect)
 	}
 	var seq uint64
 	if _, err := fmt.Sscanf(seqText, "%d", &seq); err != nil {
-		return fmt.Errorf("--expect: %q is not a sequence number", seqText)
+		return expectOutcome{}, fmt.Errorf("--expect: %q is not a sequence number", seqText)
 	}
+	asked := expectOutcome{seq: seq, hash: hash}
 
 	// Matched on the hash rather than on position. A chain hash is unique to the
 	// exact sequence of entries that produced it, so finding one is proof the
@@ -486,14 +520,27 @@ func checkExpected(expect string, seen []seenCheckpoint, signaturesChecked bool)
 			continue
 		}
 		if point.hash == hash {
-			fmt.Printf("matches the checkpoint recorded elsewhere: %s at %d:%s\n",
-				point.chain, seq, hash)
-			return nil
+			asked.matched = &point
+			return asked, nil
 		}
-		return fmt.Errorf("a checkpoint at entry %d exists in chain %s, but its hash is "+
+		return asked, fmt.Errorf("a checkpoint at entry %d exists in chain %s, but its hash is "+
 			"%s where the one recorded elsewhere says %s: this is not the same log",
 			seq, point.chain, point.hash, hash)
 	}
-	return fmt.Errorf("none of the files given contains the checkpoint recorded elsewhere "+
+	return asked, fmt.Errorf("none of the files given contains the checkpoint recorded elsewhere "+
 		"(entry %d); entries have been removed from the end, or a file is missing", seq)
 }
+
+// expectOutcome is what --expect asked for and what it found, so that the
+// caller can print it or put it in the document rather than checkExpected
+// having to know which.
+type expectOutcome struct {
+	seq  uint64
+	hash string
+	// matched is the checkpoint that agreed, or nil. Nil with a hash set means
+	// --expect was given and did not match; a zero outcome means it was absent.
+	matched *seenCheckpoint
+}
+
+// asked reports whether --expect was given and parsed.
+func (o expectOutcome) asked() bool { return o.hash != "" }

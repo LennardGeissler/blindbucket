@@ -32,7 +32,7 @@ _blindbucket_flags() {
 	inspect) echo --json ;;
 	"keys list") echo --config --json --keyring --passphrase-file ;;
 	"keys remove") echo --config --force --keyring --passphrase-file ;;
-	"audit verify") echo --config --expect --keyring --passphrase-file --print --public-key ;;
+	"audit verify") echo --config --expect --json --keyring --passphrase-file --print --public-key ;;
 	"audit pubkey") echo --config --keyring --open --passphrase-file ;;
 	esac
 }
