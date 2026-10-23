@@ -219,8 +219,16 @@ func collectKey(ctx context.Context, cfg Config, entries []manifestEntry, result
 		}
 	}
 
-	// Step 3: which manifest the visible object actually uses.
-	current, hasCurrent := currentManifestID(ctx, cfg, objectKey)
+	// Step 3: which manifest the visible object actually uses. Only a HEAD
+	// that says the object is gone licenses deleting every manifest of the key;
+	// one that failed says nothing, and taking it for "gone" would delete the
+	// manifest of a visible object -- the failure I1 forbids.
+	current, hasCurrent, err := currentManifestID(ctx, cfg, objectKey)
+	if err != nil {
+		log.Warn("could not read the object's manifest id; skipping the key", "err", err)
+		result.Errors++
+		return
+	}
 	cfg.at(HookHead, objectKey)
 
 	// Step 4: everything else, once it is old enough.
@@ -299,13 +307,17 @@ func resolveObjectKey(ctx context.Context, cfg Config, entries []manifestEntry) 
 }
 
 // currentManifestID reports the manifest id of the visible object, if it is a
-// multipart one.
-func currentManifestID(ctx context.Context, cfg Config, objectKey string) (manifest.ID, bool) {
+// multipart one. An error is a HEAD that failed for any reason but the object
+// being gone.
+func currentManifestID(ctx context.Context, cfg Config, objectKey string) (manifest.ID, bool, error) {
 	info, err := cfg.Upstream.HeadObject(ctx, cfg.Bucket, objectKey)
-	if err != nil {
+	if upstream.NotFound(err) {
 		// A missing object means every manifest here is an orphan, which is the
 		// ordinary case after a delete.
-		return manifest.ID{}, false
+		return manifest.ID{}, false, nil
+	}
+	if err != nil {
+		return manifest.ID{}, false, err
 	}
 	for name, value := range info.Metadata {
 		if !strings.EqualFold(name, "bb-mid") {
@@ -313,11 +325,13 @@ func currentManifestID(ctx context.Context, cfg Config, objectKey string) (manif
 		}
 		id, err := manifest.ParseID(value)
 		if err != nil {
-			return manifest.ID{}, false
+			// A bb-mid that does not parse names no manifest, and nothing is
+			// gained by deleting the ones there are.
+			return manifest.ID{}, false, fmt.Errorf("the object's bb-mid %q does not parse: %w", value, err)
 		}
-		return id, true
+		return id, true, nil
 	}
-	return manifest.ID{}, false
+	return manifest.ID{}, false, nil
 }
 
 // splitManifestKey takes a manifest's own object key apart.

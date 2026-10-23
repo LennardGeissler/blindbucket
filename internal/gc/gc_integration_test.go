@@ -3,7 +3,9 @@ package gc_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -223,4 +225,64 @@ func TestIntegrationGcLeavesForeignObjectsAlone(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("GET on the reserved prefix returned %d, want 403", resp.StatusCode)
 	}
+}
+
+// failingHead answers a HEAD of one object key with a 503 and passes every
+// other request on, manifests included.
+type failingHead struct {
+	key  string
+	base http.RoundTripper
+	hits int
+}
+
+func (f *failingHead) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method == http.MethodHead && strings.HasSuffix(r.URL.Path, "/"+f.key) {
+		f.hits++
+		body := `<?xml version="1.0" encoding="UTF-8"?><Error><Code>ServiceUnavailable</Code><Message>injected</Message></Error>`
+		return &http.Response{
+			Status: "503 Service Unavailable", StatusCode: http.StatusServiceUnavailable,
+			Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
+			Header:        http.Header{"Content-Type": {"application/xml"}},
+			Body:          io.NopCloser(strings.NewReader(body)),
+			ContentLength: int64(len(body)), Request: r,
+		}, nil
+	}
+	return f.base.RoundTrip(r)
+}
+
+// TestIntegrationGcKeepsManifestsWhenTheHeadFails: a HEAD that fails says
+// nothing about whether the object is there. Taken for "gone", it made gc
+// delete the manifest of a visible multipart object, which then could not be
+// read (invariant I1). Only a 404 means gone.
+func TestIntegrationGcKeepsManifestsWhenTheHeadFails(t *testing.T) {
+	h := proxytest.New(t)
+	key := proxytest.TestKey(t, "live.bin")
+	h.MpuStore(t, key, [][]byte{proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, 64)})
+	current, _ := h.ManifestKeyOf(t, key)
+
+	transport := &failingHead{key: key, base: http.DefaultTransport}
+	cfg := proxytest.UpstreamConfig(t)
+	cfg.HTTPClient = &http.Client{Transport: transport}
+	cfg.MaxRetries = 1
+	client, err := upstream.New(cfg)
+	if err != nil {
+		t.Fatalf("upstream.New: %v", err)
+	}
+	result, err := gc.Run(t.Context(), gc.Config{
+		Upstream: client, Bucket: proxytest.Bucket, Prefix: key,
+		DisableMinAge: true, Log: proxytest.DiscardLogger(),
+	})
+	if err != nil {
+		t.Fatalf("gc: %v", err)
+	}
+	if transport.hits == 0 {
+		t.Fatal("the failing HEAD was never sent")
+	}
+	if result.Deleted != 0 || result.Errors == 0 {
+		t.Fatalf("gc with a failing HEAD: %+v, want nothing deleted and an error counted", *result)
+	}
+	if _, err := h.Upstream.HeadObject(t.Context(), proxytest.Bucket, current); err != nil {
+		t.Fatalf("the live manifest is gone: %v", err)
+	}
+	h.MustRead(t, key, "after a gc pass whose HEAD failed")
 }
