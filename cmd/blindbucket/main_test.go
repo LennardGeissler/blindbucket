@@ -251,7 +251,6 @@ func assertAbsent(t *testing.T, path string) {
 	}
 }
 
-
 func TestVersionDetails(t *testing.T) {
 	t.Run("missing build info", func(t *testing.T) {
 		if got := versionDetails(nil); len(got) != 0 {
