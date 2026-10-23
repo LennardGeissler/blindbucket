@@ -801,7 +801,7 @@ the gateway already costs per request.
 | M11 | The first ten minutes: `blindbucket init` writes a working configuration, keyring and client credentials, `blindbucket doctor` checks configuration, provider and root-key source and names the fix, a Homebrew tap and ArtifactHub — measured by watching people who have never seen the project get to their first encrypted upload | **done** |
 | M12 | Works with software that cannot be changed: Nextcloud, Velero, GitLab, Loki and Mastodon storing through the gateway, each as a CI job and a guide, with what breaks written down, and an existing bucket's objects encrypted in place (ADR-034) | **done** |
 | M13 | A read-only dashboard: instance health, keyring and root-key source, the audit log verified — nothing on it changes state, served on loopback only until M15 brings sign-in (ADR-035) | **done** |
-| M14 | What is refused today, decided again: presigned uploads and encrypted object tags, each an ADR first — where the answer stays no, the ADR says why | planned |
+| M14 | What is refused today, decided again: presigned uploads, served where the operator sets a size limit and with CORS for the browser (ADR-036), and object tags, stored sealed in a sidecar per object version (ADR-037) | **done** |
 | M15 | Several tenants on one gateway: keys per tenant, a tenant deleted by destroying its key, OIDC sign-in for the dashboard, the audit log exported | planned |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
