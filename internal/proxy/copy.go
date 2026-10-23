@@ -13,9 +13,7 @@ import (
 	"github.com/LennardGeissler/blindbucket/internal/crypto/tags"
 	"github.com/LennardGeissler/blindbucket/internal/manifest"
 	"github.com/LennardGeissler/blindbucket/internal/objcopy"
-	"github.com/LennardGeissler/blindbucket/internal/objectmeta"
 	"github.com/LennardGeissler/blindbucket/internal/s3api"
-	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
 // copyObjectResult is the body S3 answers a copy with.
@@ -127,20 +125,12 @@ func (p *Proxy) copyObject(
 		return p.integrityError(log, "object metadata", err)
 	}
 
-	// Tags are not carried by a copy yet; objcopy learns to carry the sidecar
-	// in ADR-037's next step. Until then a copy that would drop tags, or set
-	// new ones, is refused rather than made without them.
-	if r.Header.Get("X-Amz-Tagging") != "" ||
-		strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Amz-Tagging-Directive")), "REPLACE") {
-		return s3api.ErrNotImplemented.WithMessage(
-			"setting tags on a copy is not served yet; copy, then PutObjectTagging")
-	}
-	if _, err := p.upstream.HeadObject(r.Context(), src.Bucket,
-		tags.Path(srcStored, objectmeta.StoredDEK(info.Metadata))); err == nil {
-		return s3api.ErrNotImplemented.WithMessage(
-			"the copy source has tags, and a copy does not carry them yet; it would arrive without them")
-	} else if !upstream.NotFound(err) {
-		return translateUpstream(err)
+	// The destination's tags, as S3 decides them: the source's under the
+	// tagging directive COPY, the default, and x-amz-tagging's under REPLACE.
+	// objcopy carries the sidecar either way (ADR-037).
+	tagMode, newTags, apiErr := copyTagging(r)
+	if apiErr != nil {
+		return apiErr
 	}
 
 	// A self-copy keeps its own manifest chain: the destination version it
@@ -198,6 +188,8 @@ func (p *Proxy) copyObject(
 		// condition.
 		DestIfMatch:     ifMatch,
 		DestIfNoneMatch: ifNoneMatch,
+		TagMode:         tagMode,
+		Tags:            newTags,
 	})
 	switch {
 	case errors.Is(err, objcopy.ErrPreconditionFailed) && (ifMatch != "" || ifNoneMatch != ""):
@@ -206,6 +198,8 @@ func (p *Proxy) copyObject(
 		return s3api.ErrPreconditionFailed.WithMessage(
 			"the destination's If-Match or If-None-Match did not hold, or the copy " +
 				"source changed while it was being copied")
+	case errors.Is(err, objcopy.ErrTagSidecar):
+		return p.integrityError(log, "tag sidecar", err)
 	case errors.Is(err, objcopy.ErrPreconditionFailed):
 		log.Info("copy source changed while it was being copied",
 			"source_bucket", src.Bucket, "source_key", src.Key)
@@ -377,4 +371,28 @@ func userMetadataOf(md map[string]string) map[string]string {
 		out[name] = value
 	}
 	return out
+}
+
+// copyTagging reads the tagging directive of a CopyObject. x-amz-tagging is
+// what the destination gets under REPLACE; under COPY it would be ignored, and
+// a header that is ignored is a tag set the client believes it set, so it is
+// refused with the reason instead.
+func copyTagging(r *http.Request) (objcopy.TagMode, []tags.Tag, *s3api.Error) {
+	switch directive := strings.ToUpper(strings.TrimSpace(r.Header.Get("X-Amz-Tagging-Directive"))); directive {
+	case "", "COPY":
+		if r.Header.Get("X-Amz-Tagging") != "" {
+			return 0, nil, s3api.ErrInvalidArgument.WithMessage(
+				"x-amz-tagging on a copy takes effect only with x-amz-tagging-directive: REPLACE")
+		}
+		return objcopy.TagsCarry, nil, nil
+	case "REPLACE":
+		set, apiErr := tagsFromHeader(r)
+		if apiErr != nil {
+			return 0, nil, apiErr
+		}
+		return objcopy.TagsReplace, set, nil
+	default:
+		return 0, nil, s3api.ErrInvalidArgument.WithMessage(
+			"x-amz-tagging-directive must be COPY or REPLACE, not %q", directive)
+	}
 }

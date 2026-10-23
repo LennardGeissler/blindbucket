@@ -319,32 +319,86 @@ func TestAnEarlierTagSetOfTheSameVersionIsNotDetected(t *testing.T) {
 	wantTags(t, h, key, "state=draft")
 }
 
-// TestACopyDoesNotDropTags: until objcopy carries the sidecar (ADR-037, step
-// 4), a copy that would arrive without the source's tags, or set new ones, is
-// refused rather than made.
-func TestACopyDoesNotDropTags(t *testing.T) {
-	h := proxytest.New(t)
-	tagged, plain := proxytest.TestKey(t, "tagged"), proxytest.TestKey(t, "plain")
-	h.CleanupStored(t, tagged)
-	put := h.Put(t, tagged, []byte("tagged source"), map[string]string{"X-Amz-Tagging": "keep=me"})
-	_ = put.Body.Close()
-	h.Store(t, plain, []byte("untagged source"))
+// TestACopyCarriesTags: a copy gets the source's tags under the tagging
+// directive COPY, the default, and x-amz-tagging's under REPLACE, for a small
+// object copied whole and a multipart one copied part by part (ADR-037).
+func TestACopyCarriesTags(t *testing.T) {
+	for _, encrypted := range []bool{false, true} {
+		t.Run(map[bool]string{false: "names in clear", true: "names encrypted"}[encrypted], func(t *testing.T) {
+			h := proxytest.New(t)
+			if encrypted {
+				option, _ := proxytest.WithEncryptedNames(t)
+				h = proxytest.New(t, option)
+			}
+			small, multi := proxytest.TestKey(t, "small"), proxytest.TestKey(t, "multi")
+			put := h.Put(t, small, []byte("a small tagged source"), map[string]string{"X-Amz-Tagging": "size=small"})
+			_ = put.Body.Close()
+			t.Cleanup(func() { deleteThrough(h, small) })
+			token := h.MpuStart(t, multi, map[string]string{"X-Amz-Tagging": "size=multi"})
+			etag, resp := h.MpuPart(t, multi, token, 1, proxytest.RandomBytes(t, proxytest.TestPart))
+			_ = resp.Body.Close()
+			done := h.MpuComplete(t, multi, token, []proxytest.CompletedPart{{PartNumber: 1, ETag: etag}})
+			_ = done.Body.Close()
+			t.Cleanup(func() { deleteThrough(h, multi) })
 
-	resp := copyTo(t, h, tagged, proxytest.TestKey(t, "dst1"), nil)
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNotImplemented {
-		t.Fatalf("a copy of a tagged source: %d, want 501", resp.StatusCode)
+			for src, want := range map[string]string{small: "size=small", multi: "size=multi"} {
+				dst := src + "-copy"
+				resp := copyTo(t, h, src, dst, nil)
+				_ = resp.Body.Close()
+				t.Cleanup(func() { deleteThrough(h, dst) })
+				if resp.StatusCode != http.StatusOK {
+					t.Fatalf("copying %s: %d", src, resp.StatusCode)
+				}
+				wantTags(t, h, dst, want)
+			}
+
+			replaced := small + "-replaced"
+			resp = copyTo(t, h, small, replaced, map[string]string{
+				"X-Amz-Tagging-Directive": "REPLACE", "X-Amz-Tagging": "state=new",
+			})
+			_ = resp.Body.Close()
+			t.Cleanup(func() { deleteThrough(h, replaced) })
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("copy with REPLACE: %d", resp.StatusCode)
+			}
+			wantTags(t, h, replaced, "state=new")
+
+			untagged := small + "-untagged"
+			resp = copyTo(t, h, small, untagged, map[string]string{"X-Amz-Tagging-Directive": "REPLACE"})
+			_ = resp.Body.Close()
+			t.Cleanup(func() { deleteThrough(h, untagged) })
+			wantTags(t, h, untagged)
+		})
 	}
-	resp = copyTo(t, h, plain, proxytest.TestKey(t, "dst2"), map[string]string{"X-Amz-Tagging": "new=tag"})
+}
+
+// TestACopyRefusesWhatItWouldIgnore: x-amz-tagging without REPLACE would be
+// ignored, so it is refused; a source whose sidecar does not open is not copied.
+func TestACopyRefusesWhatItWouldIgnore(t *testing.T) {
+	h := proxytest.New(t)
+	src := proxytest.TestKey(t, "src")
+	h.CleanupStored(t, src)
+	put := h.Put(t, src, []byte("tagged source"), map[string]string{"X-Amz-Tagging": "keep=me"})
+	_ = put.Body.Close()
+
+	resp := copyTo(t, h, src, proxytest.TestKey(t, "ignored"), map[string]string{"X-Amz-Tagging": "new=tag"})
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNotImplemented {
-		t.Fatalf("a copy that sets tags: %d, want 501", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("x-amz-tagging without REPLACE: %d, want 400", resp.StatusCode)
 	}
-	resp = copyTo(t, h, plain, proxytest.TestKey(t, "dst3"), nil)
+
+	path := sidecarPath(t, h, src)
+	sealed := readAtProvider(t, h, path)
+	altered := bytes.Clone(sealed)
+	altered[len(altered)-1] ^= 1
+	writeAtProvider(t, h, path, altered)
+	dst := proxytest.TestKey(t, "from-altered")
+	resp = copyTo(t, h, src, dst, nil)
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("a copy of an untagged source: %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("a copy of a source with an altered sidecar: %d, want 502", resp.StatusCode)
 	}
+	wantAbsent(t, h, dst)
 }
 
 // TestAnObjectTheGatewayDidNotWriteTakesNoSealedTags: it has no data key of the
@@ -358,5 +412,18 @@ func TestAnObjectTheGatewayDidNotWriteTakesNoSealedTags(t *testing.T) {
 	}
 	if code, _ := tagsOf(t, h, key); code != http.StatusOK {
 		t.Fatalf("GetObjectTagging on a foreign object, forwarded: %d", code)
+	}
+}
+
+// deleteThrough deletes key through the gateway, for a cleanup: the test's own
+// context is cancelled by the time cleanups run, and under name encryption the
+// stored key is the gateway's to know.
+func deleteThrough(h *proxytest.Harness, key string) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, h.URL(key), nil)
+	if err != nil {
+		return
+	}
+	if resp, err := h.Client.Do(req); err == nil {
+		_ = resp.Body.Close()
 	}
 }

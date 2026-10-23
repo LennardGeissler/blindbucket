@@ -822,8 +822,7 @@ provider's, and a milestone that would need the wire format goes through
 [FORMAT.md](docs/FORMAT.md) first, like any other change to it.
 
 **What is still missing.** Object tags are stored sealed, so no provider feature can act
-on them, and a copy of a tagged object is refused until copies carry the tags
-([ADR-037](docs/adr/ADR-037-encrypted-object-tags.md)). `ListMultipartUploads` is refused
+on them ([ADR-037](docs/adr/ADR-037-encrypted-object-tags.md)). `ListMultipartUploads` is refused
 permanently and says why. A presigned URL uploads only where the operator has set a size
 limit ([ADR-036](docs/adr/ADR-036-presigned-uploads.md)). And one benchmark cell is documented as
 the provider's behaviour rather than explained; the gateway's share of it is measured at
