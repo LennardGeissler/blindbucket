@@ -10,9 +10,12 @@ import (
 	"time"
 
 	"github.com/LennardGeissler/blindbucket/internal/auth"
+	"github.com/LennardGeissler/blindbucket/internal/crypto/tags"
 	"github.com/LennardGeissler/blindbucket/internal/manifest"
 	"github.com/LennardGeissler/blindbucket/internal/objcopy"
+	"github.com/LennardGeissler/blindbucket/internal/objectmeta"
 	"github.com/LennardGeissler/blindbucket/internal/s3api"
+	"github.com/LennardGeissler/blindbucket/internal/upstream"
 )
 
 // copyObjectResult is the body S3 answers a copy with.
@@ -122,6 +125,22 @@ func (p *Proxy) copyObject(
 	}
 	if err != nil {
 		return p.integrityError(log, "object metadata", err)
+	}
+
+	// Tags are not carried by a copy yet; objcopy learns to carry the sidecar
+	// in ADR-037's next step. Until then a copy that would drop tags, or set
+	// new ones, is refused rather than made without them.
+	if r.Header.Get("X-Amz-Tagging") != "" ||
+		strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Amz-Tagging-Directive")), "REPLACE") {
+		return s3api.ErrNotImplemented.WithMessage(
+			"setting tags on a copy is not served yet; copy, then PutObjectTagging")
+	}
+	if _, err := p.upstream.HeadObject(r.Context(), src.Bucket,
+		tags.Path(srcStored, objectmeta.StoredDEK(info.Metadata))); err == nil {
+		return s3api.ErrNotImplemented.WithMessage(
+			"the copy source has tags, and a copy does not carry them yet; it would arrive without them")
+	} else if !upstream.NotFound(err) {
+		return translateUpstream(err)
 	}
 
 	// A self-copy keeps its own manifest chain: the destination version it

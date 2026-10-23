@@ -140,6 +140,9 @@ must reside in the same trust domain as the clients it serves.
 - Timestamps of uploads, downloads and deletions.
 - Access patterns: which objects, which byte ranges, how often.
 - The number of parts of a multipart object.
+- Whether an object version has tags, and roughly how long its tag set is: the sidecar
+  holding it ([ADR-037](adr/ADR-037-encrypted-object-tags.md)) is an object of its own,
+  of a size that follows the tag set's. Not the tags themselves.
 - The id of the KEK in use — not the KEK itself.
 - The chunk size the object was written with (`bb-c`). This is a deployment-wide
   constant rather than a property of the data, and it is recorded so that
@@ -455,6 +458,20 @@ which methods and headers a listed origin may use, and nothing about buckets or 
 any other origin gets `403`. Marking responses readable by a listed origin gives a page
 on that origin what its requests already return, and nothing else: a request still needs
 a signature, and no response allows credentials.
+
+### 5.11 Object tags
+
+A tag set is sealed in a sidecar beside its object version, under a key the object's
+data key derives, with the bucket and key in the associated data
+([ADR-037](adr/ADR-037-encrypted-object-tags.md)). An active provider (A2) cannot read a
+tag, forge a tag set, or move one to another object or another version of the same
+object: a sidecar that does not open is refused as any integrity failure is. Two things it
+can do are **accepted risk**:
+- **Drop a tag set**, by deleting its sidecar. The object then reads as having none.
+- **Serve an earlier tag set of the same version**, one the client replaced since. Both
+  were sealed for that version, and rollback detection (§5.1) does not cover sidecars.
+
+Either looks like the client's own change.
 
 ---
 

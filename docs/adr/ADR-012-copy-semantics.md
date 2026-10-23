@@ -82,6 +82,9 @@ gateway exists for.
 
 ### Object tags are refused on write and forwarded on read
 
+*Decided again by [ADR-037](ADR-037-encrypted-object-tags.md): tags are stored sealed, in a
+sidecar bound to the object version, and a tag set never reaches the provider in plaintext.*
+
 Answering `GetObjectTagging` became necessary because the AWS CLI asks for the
 source's tags before a server-side copy. It is forwarded to the provider, which
 is where tags live; the gateway writes none, so for anything it stored the answer

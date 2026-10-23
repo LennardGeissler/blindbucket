@@ -276,6 +276,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err = p.deleteObject(w, r, req, log)
 	case s3api.OpGetObjectTagging:
 		err = p.getObjectTagging(w, r, req, log)
+	case s3api.OpPutObjectTagging:
+		err = p.putObjectTagging(w, r, req, authResult, log)
+	case s3api.OpDeleteObjectTagging:
+		err = p.deleteObjectTagging(w, r, req, log)
 	case s3api.OpListObjectsV2, s3api.OpListObjects:
 		err = p.listObjects(w, r, req, log)
 	case s3api.OpDeleteObjects:

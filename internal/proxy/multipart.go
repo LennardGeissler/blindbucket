@@ -82,6 +82,10 @@ func (p *Proxy) createMultipartUpload(
 	if apiErr := rejectUnsupportedUpload(r); apiErr != nil {
 		return apiErr
 	}
+	tagSet, apiErr := tagsFromHeader(r)
+	if apiErr != nil {
+		return apiErr
+	}
 	clientMeta, err := clientMetadata(r.Header)
 	if err != nil {
 		return s3api.ErrInvalidArgument.WithMessage("%v", err)
@@ -123,6 +127,14 @@ func (p *Proxy) createMultipartUpload(
 		Log2ChunkSize: p.log2C,
 		ManifestID:    manifestID,
 		Multipart:     true,
+	}
+
+	// The tags now, under the data key the token carries, before the upload
+	// exists: the object it becomes is never visible without them, and an
+	// upload never completed leaves the sidecar for gc (FORMAT.md section 17.4).
+	if apiErr := p.writeTagsBeforeObject(r.Context(), req.Bucket, req.Key, storedKey,
+		meta, dek.Bytes(), tagSet, log); apiErr != nil {
+		return apiErr
 	}
 
 	uploadID, err := p.upstream.CreateMultipartUpload(r.Context(), upstream.CreateMultipartUploadInput{

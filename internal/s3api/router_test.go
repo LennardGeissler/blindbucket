@@ -58,7 +58,6 @@ func TestRouteRefusesSubResources(t *testing.T) {
 
 	targets := []string{
 		"/bucket/key?acl",
-		"/bucket/key?tagging",
 		"/bucket/key?versionId=null",
 		"/bucket/key?attributes",
 	}
@@ -73,6 +72,26 @@ func TestRouteRefusesSubResources(t *testing.T) {
 				t.Errorf("code = %q, want NotImplemented", err.Code)
 			}
 		})
+	}
+}
+
+// TestRouteObjectTagging: the tagging sub-resource takes the three methods S3
+// serves it with (ADR-037), and refuses the rest by name.
+func TestRouteObjectTagging(t *testing.T) {
+	t.Parallel()
+	for method, want := range map[string]Operation{
+		http.MethodGet:    OpGetObjectTagging,
+		http.MethodHead:   OpGetObjectTagging,
+		http.MethodPut:    OpPutObjectTagging,
+		http.MethodDelete: OpDeleteObjectTagging,
+	} {
+		got, err := Route(request(t, method, "/bucket/key?tagging"), "")
+		if err != nil || got.Op != want {
+			t.Errorf("%s ?tagging: %v, %v; want %s", method, got.Op, err, want)
+		}
+	}
+	if _, err := Route(request(t, http.MethodPost, "/bucket/key?tagging"), ""); err == nil || err.Code != "NotImplemented" {
+		t.Errorf("POST ?tagging: %v, want NotImplemented", err)
 	}
 }
 

@@ -28,9 +28,12 @@ const (
 	OpGetObject    Operation = "GetObject"
 	OpHeadObject   Operation = "HeadObject"
 	OpDeleteObject Operation = "DeleteObject"
-	// OpGetObjectTagging reads an object's tags. The gateway writes none, so
-	// for anything it stored the answer is an empty set.
-	OpGetObjectTagging Operation = "GetObjectTagging"
+	// OpGetObjectTagging, OpPutObjectTagging and OpDeleteObjectTagging read,
+	// replace and remove an object's tags, which the gateway keeps sealed in a
+	// sidecar beside the object (ADR-037).
+	OpGetObjectTagging    Operation = "GetObjectTagging"
+	OpPutObjectTagging    Operation = "PutObjectTagging"
+	OpDeleteObjectTagging Operation = "DeleteObjectTagging"
 
 	OpListObjectsV2 Operation = "ListObjectsV2"
 	OpListObjects   Operation = "ListObjects"
@@ -57,7 +60,8 @@ const (
 func (o Operation) IsObject() bool {
 	switch o {
 	case OpPutObject, OpCopyObject, OpGetObject, OpHeadObject, OpDeleteObject,
-		OpGetObjectTagging, OpCreateMultipartUpload, OpUploadPart, OpUploadPartCopy,
+		OpGetObjectTagging, OpPutObjectTagging, OpDeleteObjectTagging,
+		OpCreateMultipartUpload, OpUploadPart, OpUploadPartCopy,
 		OpCompleteMultipartUpload, OpAbortMultipartUpload, OpListParts:
 		return true
 	default:
@@ -491,9 +495,12 @@ func routeTagging(r *http.Request, bucket, key string) (Request, *Error) {
 	case http.MethodGet, http.MethodHead:
 		req.Op = OpGetObjectTagging
 		return req, nil
-	case http.MethodPut, http.MethodDelete:
-		return unsupported(req), ErrNotImplemented.WithMessage(
-			"object tags are not accepted: the provider would store them in plaintext")
+	case http.MethodPut:
+		req.Op = OpPutObjectTagging
+		return req, nil
+	case http.MethodDelete:
+		req.Op = OpDeleteObjectTagging
+		return req, nil
 	}
 	return unsupported(req), ErrNotImplemented.WithMessage(
 		"method %s is not implemented for the tagging sub-resource", r.Method)

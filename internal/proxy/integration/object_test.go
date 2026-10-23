@@ -386,7 +386,7 @@ func TestIntegrationRefusesUnsupported(t *testing.T) {
 	// asks for an object's tags before a server-side copy and a refusal there
 	// breaks every large copy. Writing is refused: the provider would store the
 	// tag in plaintext (ADR-012).
-	t.Run("tagging is readable and not writable", func(t *testing.T) {
+	t.Run("tagging is readable", func(t *testing.T) {
 		resp, err := h.Client.Get(h.URL(key) + "?tagging")
 		if err != nil {
 			t.Fatalf("GET: %v", err)
@@ -395,29 +395,7 @@ func TestIntegrationRefusesUnsupported(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("GET ?tagging returned %d, want 200", resp.StatusCode)
 		}
-
-		for _, method := range []string{http.MethodPut, http.MethodDelete} {
-			req, err := http.NewRequestWithContext(t.Context(), method, h.URL(key)+"?tagging", nil)
-			if err != nil {
-				t.Fatalf("building request: %v", err)
-			}
-			resp, err := h.Client.Do(req)
-			if err != nil {
-				t.Fatalf("%s: %v", method, err)
-			}
-			_ = resp.Body.Close()
-			if resp.StatusCode != http.StatusNotImplemented {
-				t.Errorf("%s ?tagging returned %d, want 501", method, resp.StatusCode)
-			}
-		}
-
-		// And the header form on an ordinary upload.
-		put := h.Put(t, proxytest.TestKey(t, "tagged.bin"), []byte("tagged"),
-			map[string]string{"X-Amz-Tagging": "team=platform"})
-		_ = put.Body.Close()
-		if put.StatusCode != http.StatusNotImplemented {
-			t.Errorf("PUT with x-amz-tagging returned %d, want 501", put.StatusCode)
-		}
+		// Writing tags is served since ADR-037; tags_test.go has it.
 	})
 
 	// The multipart sub-resources are implemented since M4, so a malformed one
@@ -765,7 +743,15 @@ func TestIntegrationTaggingOnAProviderWithout(t *testing.T) {
 	f := newFaultyProvider(t)
 	h := proxytest.New(t, f.option(t))
 	key := proxytest.TestKey(t, "tags.bin")
-	h.Store(t, key, []byte("tagged, or not"))
+	// Written at the provider directly, as before the gateway: an object the
+	// gateway wrote has its tags in a sidecar, and only one it did not write
+	// has them asked of the provider (ADR-037).
+	if _, err := h.Upstream.PutObject(t.Context(), upstream.PutObjectInput{
+		Bucket: proxytest.Bucket, Key: key, Body: strings.NewReader("tagged, or not"), ContentLength: 14,
+	}); err != nil {
+		t.Fatalf("writing the object at the provider: %v", err)
+	}
+	h.CleanupStored(t, key)
 
 	// Against MinIO the request is forwarded and answered by it.
 	if status, body := gatewayDo(t, h, http.MethodGet, key, "tagging"); status != http.StatusOK ||

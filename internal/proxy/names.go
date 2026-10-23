@@ -56,7 +56,8 @@ func (p *Proxy) nameEncryptionGate(op s3api.Operation) *s3api.Error {
 	}
 	switch op {
 	case s3api.OpPutObject, s3api.OpGetObject, s3api.OpHeadObject, s3api.OpDeleteObject,
-		s3api.OpDeleteObjects, s3api.OpGetObjectTagging:
+		s3api.OpDeleteObjects, s3api.OpGetObjectTagging, s3api.OpPutObjectTagging,
+		s3api.OpDeleteObjectTagging:
 		return nil
 	// Listings are served for a prefix that comes back whole in one page, and
 	// refuse the shapes they cannot sort. ADR-017 has the tiers.
