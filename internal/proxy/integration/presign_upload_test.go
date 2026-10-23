@@ -339,6 +339,18 @@ func TestPresignedUploadRefusesWhatTheSignerDidNotChoose(t *testing.T) {
 		"tags in the query": {
 			query: url.Values{"x-amz-tagging": {"a=b"}}, want: http.StatusNotImplemented,
 		},
+		// A reserved key hoisted out of the query (#91). The signature covers
+		// it, so the signer did choose it -- and it is still refused, because
+		// hoistUploadHeaders only turns it into a header and clientMetadata
+		// runs afterwards. Signing a bb-* key is not a way to set one.
+		"a reserved metadata key in the query": {
+			query: url.Values{"x-amz-meta-bb-kid": {"forged"}}, want: http.StatusBadRequest,
+		},
+		"a reserved metadata key signed as a header": {
+			signHeaders: map[string]string{"X-Amz-Meta-Bb-Dek": "forged"},
+			sendHeaders: map[string]string{"X-Amz-Meta-Bb-Dek": "forged"},
+			want:        http.StatusBadRequest,
+		},
 		"an aws-chunked body": {
 			sendHeaders: map[string]string{"Content-Encoding": "aws-chunked"}, want: http.StatusBadRequest,
 		},
