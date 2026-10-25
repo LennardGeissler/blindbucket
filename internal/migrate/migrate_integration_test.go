@@ -590,3 +590,23 @@ func TestIntegrationMigrateTwoRunsAtOnce(t *testing.T) {
 		}
 	}
 }
+
+// TestIntegrationMigrateKeepsTags: moving an object to its encrypted name moves
+// its tag sidecar with it (ADR-037).
+func TestIntegrationMigrateKeepsTags(t *testing.T) {
+	m := newMigration(t)
+	prefix := proxytest.TestKey(t, "tags")
+	key := prefix + "/tagged.bin"
+	resp := m.clear.Put(t, key, proxytest.RandomBytes(t, 5000), map[string]string{"X-Amz-Tagging": "owner=alice"})
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT: %d", resp.StatusCode)
+	}
+	m.clear.CleanupStored(t, m.stored(t, key))
+	if result := m.mustRun(t, m.anyConfig(t, prefix+"/")); result.Migrated != 1 {
+		t.Fatalf("migrate: %+v", *result)
+	}
+	if got := strings.Join(m.enc.Tags(t, key), "&"); got != "owner=alice" {
+		t.Fatalf("after migration the tags are %q", got)
+	}
+}

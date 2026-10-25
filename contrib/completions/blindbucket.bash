@@ -27,8 +27,8 @@ _blindbucket_flags() {
 	encrypt-existing) echo --allow-unconditional --concurrency --config --dry-run --json --keep-versions --passphrase-file -v ;;
 	probe) echo --config --json ;;
 	scrub) echo --concurrency --config --json --passphrase-file -v ;;
-	encrypt) echo --chunk-size-log2 -i --keyring -o --passphrase-file ;;
-	decrypt) echo -i --keyring -o --passphrase-file ;;
+	encrypt) echo --chunk-size-log2 --config -i --keyring -o --passphrase-file ;;
+	decrypt) echo --config -i --keyring -o --passphrase-file ;;
 	inspect) echo --json ;;
 	"keys list") echo --config --json --keyring --passphrase-file ;;
 	"keys remove") echo --config --force --keyring --passphrase-file ;;

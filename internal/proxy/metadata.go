@@ -59,6 +59,20 @@ var responseHeadersToStrip = []string{
 	"Accept-Ranges",
 }
 
+// providerOnlyHeaders are never copied from the provider, and, unlike the list
+// above, not deleted either: the gateway sets its own before the provider
+// answers. The provider's CORS headers answer a request the gateway made, never
+// the browser's, and the gateway's come from server.cors (ADR-036).
+var providerOnlyHeaders = map[string]bool{
+	"Access-Control-Allow-Origin":      true,
+	"Access-Control-Allow-Credentials": true,
+	"Access-Control-Allow-Methods":     true,
+	"Access-Control-Allow-Headers":     true,
+	"Access-Control-Expose-Headers":    true,
+	"Access-Control-Max-Age":           true,
+	"Vary":                             true,
+}
+
 // copyResponseHeaders forwards the upstream's headers to the client, minus
 // blindbucket's own metadata and anything that describes the ciphertext.
 //
@@ -70,6 +84,9 @@ var responseHeadersToStrip = []string{
 // boto3 against this gateway, which is what docs/COMPATIBILITY.md is for.
 func copyResponseHeaders(dst, src http.Header) {
 	for name, values := range src {
+		if providerOnlyHeaders[http.CanonicalHeaderKey(name)] {
+			continue
+		}
 		lower := strings.ToLower(name)
 		if strings.HasPrefix(lower, "x-amz-meta-"+metaPrefix) {
 			continue

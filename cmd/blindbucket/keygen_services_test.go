@@ -125,6 +125,74 @@ func TestKeygenSealedByAService(t *testing.T) {
 			if _, _, err := runCLI(t, "keys", "list", "--keyring", keyring); err == nil {
 				t.Error("a service-sealed keyring opened without its service")
 			}
+
+			// The offline commands work against the same keyring (#46). Before
+			// --config they could not: they opened the file with a passphrase
+			// and had no flag to name the provider with, so an operator who
+			// moved their root key to a service lost encrypt and decrypt.
+			t.Run("encrypt and decrypt round trip", func(t *testing.T) {
+				dir := t.TempDir()
+				plain := filepath.Join(dir, "plain")
+				sealed := filepath.Join(dir, "sealed.bb")
+				opened := filepath.Join(dir, "opened")
+				body := []byte("a service holds the root key, and these commands still work\n")
+				if err := os.WriteFile(plain, body, 0o600); err != nil {
+					t.Fatalf("write: %v", err)
+				}
+
+				if _, stderr, err := runCLI(t, "encrypt", "--keyring", keyring, "--config", cfg,
+					"-i", plain, "-o", sealed); err != nil {
+					t.Fatalf("encrypt: %v\n%s", err, stderr)
+				}
+				if ciphertext, err := os.ReadFile(sealed); err != nil {
+					t.Fatalf("read the ciphertext: %v", err)
+				} else if bytes.Contains(ciphertext, body) {
+					t.Error("the plaintext is in the output")
+				}
+
+				if _, stderr, err := runCLI(t, "decrypt", "--keyring", keyring, "--config", cfg,
+					"-i", sealed, "-o", opened); err != nil {
+					t.Fatalf("decrypt: %v\n%s", err, stderr)
+				}
+				got, err := os.ReadFile(opened)
+				if err != nil {
+					t.Fatalf("read what was decrypted: %v", err)
+				}
+				if !bytes.Equal(got, body) {
+					t.Errorf("decrypted %q, want %q", got, body)
+				}
+			})
+
+			// And without --config they say which flag is missing, rather than
+			// asking for a passphrase that cannot work.
+			t.Run("without --config the error names the flag", func(t *testing.T) {
+				dir := t.TempDir()
+				plain := filepath.Join(dir, "plain")
+				if err := os.WriteFile(plain, []byte("x"), 0o600); err != nil {
+					t.Fatalf("write: %v", err)
+				}
+				for _, command := range []string{"encrypt", "decrypt"} {
+					_, _, err := runCLI(t, command, "--keyring", keyring,
+						"-i", plain, "-o", filepath.Join(dir, command+".out"))
+					if err == nil {
+						t.Fatalf("%s opened a service-sealed keyring with no --config", command)
+					}
+					for _, want := range []string{"--config", "sealed by"} {
+						if !strings.Contains(err.Error(), want) {
+							t.Errorf("%s: the error does not mention %q: %v", command, want, err)
+						}
+					}
+					// The complaint in #46 is that the operator was sent after a
+					// passphrase. Saying "not a passphrase" is the point; telling
+					// them to go and check one is the thing that must not happen.
+					for _, unwanted := range []string{"check the passphrase", "--passphrase-file"} {
+						if strings.Contains(err.Error(), unwanted) {
+							t.Errorf("%s: the error still sends the operator after a passphrase (%q): %v",
+								command, unwanted, err)
+						}
+					}
+				}
+			})
 		})
 	}
 }

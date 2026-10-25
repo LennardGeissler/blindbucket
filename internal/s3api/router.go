@@ -10,6 +10,7 @@ package s3api
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -27,9 +28,12 @@ const (
 	OpGetObject    Operation = "GetObject"
 	OpHeadObject   Operation = "HeadObject"
 	OpDeleteObject Operation = "DeleteObject"
-	// OpGetObjectTagging reads an object's tags. The gateway writes none, so
-	// for anything it stored the answer is an empty set.
-	OpGetObjectTagging Operation = "GetObjectTagging"
+	// OpGetObjectTagging, OpPutObjectTagging and OpDeleteObjectTagging read,
+	// replace and remove an object's tags, which the gateway keeps sealed in a
+	// sidecar beside the object (ADR-037).
+	OpGetObjectTagging    Operation = "GetObjectTagging"
+	OpPutObjectTagging    Operation = "PutObjectTagging"
+	OpDeleteObjectTagging Operation = "DeleteObjectTagging"
 
 	OpListObjectsV2 Operation = "ListObjectsV2"
 	OpListObjects   Operation = "ListObjects"
@@ -56,7 +60,8 @@ const (
 func (o Operation) IsObject() bool {
 	switch o {
 	case OpPutObject, OpCopyObject, OpGetObject, OpHeadObject, OpDeleteObject,
-		OpGetObjectTagging, OpCreateMultipartUpload, OpUploadPart, OpUploadPartCopy,
+		OpGetObjectTagging, OpPutObjectTagging, OpDeleteObjectTagging,
+		OpCreateMultipartUpload, OpUploadPart, OpUploadPartCopy,
 		OpCompleteMultipartUpload, OpAbortMultipartUpload, OpListParts:
 		return true
 	default:
@@ -101,12 +106,25 @@ type Request struct {
 	PartNumber int
 }
 
+// bucketSubResource is a bucket-level sub-resource: the operation it selects,
+// and the method that selects it.
+//
+// The method belongs in the table rather than at the call site. Checked
+// alongside the operation, a sub-resource named with any other method is
+// refused by name; checked as a condition for recognising the sub-resource at
+// all, it was dropped and the request served as whatever the method alone
+// described -- DELETE ?delete as DeleteBucket.
+type bucketSubResource struct {
+	op     Operation
+	method string
+}
+
 // bucketQueryOps maps a bucket-level sub-resource to its operation. Only these
 // are served; every other sub-resource is refused.
-var bucketQueryOps = map[string]Operation{
-	"location": OpGetBucketLocation,
-	"delete":   OpDeleteObjects,
-	"uploads":  OpListMultipartUploads,
+var bucketQueryOps = map[string]bucketSubResource{
+	"location": {OpGetBucketLocation, http.MethodGet},
+	"delete":   {OpDeleteObjects, http.MethodPost},
+	"uploads":  {OpListMultipartUploads, http.MethodGet},
 }
 
 // ignorableParams are query parameters that carry no meaning for the service.
@@ -121,13 +139,13 @@ var ignorableParams = map[string]bool{
 	"x-id": true,
 }
 
-// presignParams are the six query parameters that carry a SigV4 signature in a
-// URL rather than selecting a sub-resource (ADR-019).
+// presignParams are the query parameters that carry a SigV4 signature in a URL
+// rather than selecting a sub-resource (ADR-019).
 //
 // The router runs before authentication, so it has to know them: without this
 // every presigned URL would be refused as an unimplemented sub-resource before
-// the verifier ever saw it. Naming them weakens nothing -- five of the six stay
-// covered by the signature, because the canonical query string is built from the
+// the verifier ever saw it. Naming them weakens nothing -- all but the signature
+// itself stay covered by the signature, because the canonical query string is built from the
 // request as it arrived, which is the same reasoning ?x-id above already records.
 //
 // Repeated here rather than imported from internal/auth, so that routing does not
@@ -140,6 +158,9 @@ var presignParams = map[string]bool{
 	"X-Amz-Expires":       true,
 	"X-Amz-SignedHeaders": true,
 	"X-Amz-Signature":     true,
+	// The AWS SDK for JavaScript v3 puts X-Amz-Content-Sha256=UNSIGNED-PAYLOAD
+	// in every URL it presigns, reads included; boto3 does not.
+	"X-Amz-Content-Sha256": true,
 }
 
 // responseOverrides are the query parameters with which a read sets a header
@@ -306,28 +327,49 @@ func routeBucket(r *http.Request, bucket string) (Request, *Error) {
 	// operation, or one of the parameters that shape a listing. Anything else
 	// names something this build does not implement, and answering it as a
 	// listing would silently ignore what the client asked for.
+	//
+	// The whole query is scanned before the operation is decided. Returning the
+	// operation from inside the loop made the answer depend on which key the
+	// map happened to yield first: ?uploads&acl was a ListMultipartUploads with
+	// ?acl ignored most of the time and a refusal the rest, from one call to the
+	// next on the same request.
+	var subResources []string
 	for name := range query {
-		if op, known := bucketQueryOps[name]; known {
-			switch {
-			case op == OpGetBucketLocation && r.Method == http.MethodGet:
-				req.Op = OpGetBucketLocation
-				return req, nil
-			case op == OpDeleteObjects && r.Method == http.MethodPost:
-				req.Op = OpDeleteObjects
-				return req, nil
-			case op == OpListMultipartUploads && r.Method == http.MethodGet:
-				req.Op = OpListMultipartUploads
-				return req, nil
-			}
+		if _, known := bucketQueryOps[name]; known {
+			subResources = append(subResources, name)
 			continue
 		}
 		if ignorableParams[strings.ToLower(name)] || presignParams[name] {
 			continue
 		}
+		if name == "cors" {
+			return Request{Bucket: bucket, Op: OpUnsupported}, errBucketCORS
+		}
 		if !listingParams[name] {
 			return Request{Bucket: bucket, Op: OpUnsupported}, ErrNotImplemented.WithMessage(
 				"the bucket sub-resource %q is not implemented in this build", name)
 		}
+	}
+
+	// Two sub-resources name two operations and only one can be served, so
+	// neither is: ?location&uploads was a GetBucketLocation or a
+	// ListMultipartUploads depending on map order, and guessing is the thing
+	// this router does not do. Sorted, so the message is the same every time.
+	if len(subResources) > 1 {
+		slices.Sort(subResources)
+		return unsupported(req), ErrInvalidRequest.WithMessage(
+			"a request cannot carry the bucket sub-resources ?%s together",
+			strings.Join(subResources, " and ?"))
+	}
+	if len(subResources) == 1 {
+		name := subResources[0]
+		sub := bucketQueryOps[name]
+		if r.Method != sub.method {
+			return unsupported(req), ErrNotImplemented.WithMessage(
+				"?%s on a bucket is %s only, not %s", name, sub.method, r.Method)
+		}
+		req.Op = sub.op
+		return req, nil
 	}
 
 	switch r.Method {
@@ -353,6 +395,16 @@ func routeBucket(r *http.Request, bucket string) (Request, *Error) {
 	return Request{Bucket: bucket, Op: OpUnsupported}, ErrNotImplemented.WithMessage(
 		"method %s is not implemented for buckets", r.Method)
 }
+
+// errBucketCORS refuses the bucket-CORS sub-resource with its reason (ADR-036).
+// The provider would store the configuration, and it would govern the
+// provider's endpoint, which a browser never reaches; the gateway answers
+// browsers from its own configuration instead.
+var errBucketCORS = ErrNotImplemented.WithMessage(
+	"a bucket's CORS configuration is not served: the provider would store it, and it " +
+		"would govern the provider's endpoint, which a browser never reaches. The gateway " +
+		"answers browsers itself, for the origins in server.cors.allowed_origins " +
+		"(docs/adr/ADR-036-presigned-uploads.md)")
 
 // objectQueryParams are the query parameters an object request may carry. A
 // parameter outside this set names a sub-resource this build does not implement,
@@ -443,9 +495,12 @@ func routeTagging(r *http.Request, bucket, key string) (Request, *Error) {
 	case http.MethodGet, http.MethodHead:
 		req.Op = OpGetObjectTagging
 		return req, nil
-	case http.MethodPut, http.MethodDelete:
-		return unsupported(req), ErrNotImplemented.WithMessage(
-			"object tags are not accepted: the provider would store them in plaintext")
+	case http.MethodPut:
+		req.Op = OpPutObjectTagging
+		return req, nil
+	case http.MethodDelete:
+		req.Op = OpDeleteObjectTagging
+		return req, nil
 	}
 	return unsupported(req), ErrNotImplemented.WithMessage(
 		"method %s is not implemented for the tagging sub-resource", r.Method)

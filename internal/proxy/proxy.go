@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -75,6 +76,10 @@ type Config struct {
 	// them, which is the default: there is no setting in which a URL handed to
 	// a browser uploads without a bound (ADR-036).
 	PresignUploadMaxSize int64
+	// CORSOrigins are the origins a browser page may call the gateway from,
+	// exactly as a browser sends them in Origin: "https://app.example". Empty
+	// answers no preflight and marks no response, which is the default.
+	CORSOrigins []string
 
 	// Freshness detects rollback: a provider serving an older but genuine
 	// version of an object (ADR-018). Nil detects nothing, which is the default
@@ -96,6 +101,8 @@ type Proxy struct {
 	metrics    *obs.Metrics
 	stall      time.Duration
 	uploadMax  int64
+	// corsOrigins is CORSOrigins; see cors.go.
+	corsOrigins []string
 
 	names          *names.Encrypter
 	maxListingKeys int
@@ -146,15 +153,16 @@ func New(cfg Config) (*Proxy, error) {
 		maxConcurrent = defaultMaxConcurrentListings
 	}
 	return &Proxy{
-		upstream:   cfg.Upstream,
-		keys:       cfg.Keys,
-		verifier:   cfg.Verifier,
-		baseDomain: cfg.BaseDomain,
-		log2C:      log2C,
-		log:        logger,
-		metrics:    cfg.Metrics,
-		stall:      cfg.StallTimeout,
-		uploadMax:  cfg.PresignUploadMaxSize,
+		upstream:    cfg.Upstream,
+		keys:        cfg.Keys,
+		verifier:    cfg.Verifier,
+		baseDomain:  cfg.BaseDomain,
+		log2C:       log2C,
+		log:         logger,
+		metrics:     cfg.Metrics,
+		stall:       cfg.StallTimeout,
+		uploadMax:   cfg.PresignUploadMaxSize,
+		corsOrigins: slices.Clone(cfg.CORSOrigins),
 
 		names:          cfg.Names,
 		maxListingKeys: maxListingKeys,
@@ -176,6 +184,21 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 	w = recorder
+
+	// CORS before anything else, so that an error a page provokes is one it
+	// can read. A preflight is answered here and goes no further: it carries
+	// no credential, touches nothing and is not an S3 request, so it is
+	// neither routed nor audited (ADR-036).
+	if len(p.corsOrigins) > 0 {
+		if r.Method == http.MethodOptions {
+			p.preflight(w, r, requestID)
+			p.metrics.Request("Preflight", recorder.status, time.Since(started))
+			return
+		}
+		if origin, ok := p.allowedOrigin(r); ok {
+			allowCORS(w.Header(), origin)
+		}
+	}
 
 	// req and client are read by the deferred audit record below, which is why
 	// they are declared here rather than at the point they are first known.
@@ -253,10 +276,14 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err = p.deleteObject(w, r, req, log)
 	case s3api.OpGetObjectTagging:
 		err = p.getObjectTagging(w, r, req, log)
+	case s3api.OpPutObjectTagging:
+		err = p.putObjectTagging(w, r, req, authResult, log)
+	case s3api.OpDeleteObjectTagging:
+		err = p.deleteObjectTagging(w, r, req, log)
 	case s3api.OpListObjectsV2, s3api.OpListObjects:
 		err = p.listObjects(w, r, req, log)
 	case s3api.OpDeleteObjects:
-		err = p.deleteObjects(w, r, req, log)
+		err = p.deleteObjects(w, r, req, authResult, log)
 	case s3api.OpCreateMultipartUpload:
 		err = p.createMultipartUpload(w, r, req, log)
 	case s3api.OpUploadPart:
@@ -264,7 +291,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case s3api.OpUploadPartCopy:
 		err = p.uploadPartCopy(w, r, req, authResult, log)
 	case s3api.OpCompleteMultipartUpload:
-		err = p.completeMultipartUpload(w, r, req, log)
+		err = p.completeMultipartUpload(w, r, req, authResult, log)
 	case s3api.OpAbortMultipartUpload:
 		err = p.abortMultipartUpload(w, r, req, log)
 	case s3api.OpListParts:
@@ -273,7 +300,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err = p.listMultipartUploads(w, r, req)
 	case s3api.OpListBuckets, s3api.OpHeadBucket, s3api.OpCreateBucket,
 		s3api.OpDeleteBucket, s3api.OpGetBucketLocation:
-		err = p.passthrough(w, r, req, log)
+		err = p.passthrough(w, r, req, authResult, log)
 	default:
 		err = s3api.ErrNotImplemented
 	}

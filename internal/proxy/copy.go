@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LennardGeissler/blindbucket/internal/auth"
+	"github.com/LennardGeissler/blindbucket/internal/crypto/tags"
 	"github.com/LennardGeissler/blindbucket/internal/manifest"
 	"github.com/LennardGeissler/blindbucket/internal/objcopy"
 	"github.com/LennardGeissler/blindbucket/internal/s3api"
@@ -124,6 +125,14 @@ func (p *Proxy) copyObject(
 		return p.integrityError(log, "object metadata", err)
 	}
 
+	// The destination's tags, as S3 decides them: the source's under the
+	// tagging directive COPY, the default, and x-amz-tagging's under REPLACE.
+	// objcopy carries the sidecar either way (ADR-037).
+	tagMode, newTags, apiErr := copyTagging(r)
+	if apiErr != nil {
+		return apiErr
+	}
+
 	// A self-copy keeps its own manifest chain: the destination version it
 	// replaces is the source, so the manifest that becomes an orphan is known
 	// here and can be removed under rule R3 rather than left to gc. For a copy
@@ -179,6 +188,8 @@ func (p *Proxy) copyObject(
 		// condition.
 		DestIfMatch:     ifMatch,
 		DestIfNoneMatch: ifNoneMatch,
+		TagMode:         tagMode,
+		Tags:            newTags,
 	})
 	switch {
 	case errors.Is(err, objcopy.ErrPreconditionFailed) && (ifMatch != "" || ifNoneMatch != ""):
@@ -187,6 +198,8 @@ func (p *Proxy) copyObject(
 		return s3api.ErrPreconditionFailed.WithMessage(
 			"the destination's If-Match or If-None-Match did not hold, or the copy " +
 				"source changed while it was being copied")
+	case errors.Is(err, objcopy.ErrTagSidecar):
+		return p.integrityError(log, "tag sidecar", err)
 	case errors.Is(err, objcopy.ErrPreconditionFailed):
 		log.Info("copy source changed while it was being copied",
 			"source_bucket", src.Bucket, "source_key", src.Key)
@@ -274,8 +287,25 @@ func parseCopySource(raw string) (copySource, *s3api.Error) {
 // S3 evaluates these against the source, and a failure is 412 rather than the
 // 304 the equivalent request headers would produce on a GET: this is a write,
 // and there is no cached copy for the client to fall back on.
+//
+// They are not independent. The CopyObject reference says that when
+// x-amz-copy-source-if-match is true and x-amz-copy-source-if-unmodified-since
+// is false, S3 copies. RFC 9110 section 13.2.2 gives the plain headers the same
+// precedence: a matching ETag is the stronger statement about the representation,
+// so If-Unmodified-Since is consulted only when If-Match is absent. Evaluating
+// each header alone would refuse a copy S3 makes, with a 412 the client cannot
+// fix. (A date that cannot be read is still the client's mistake, and is refused
+// either way.)
+//
+// The pair x-amz-copy-source-if-none-match and -if-modified-since is not
+// reordered. The reference documents one of its two cases, a matching excluded
+// ETag with a true date condition, which is a 412 here as it is there. The
+// other case, a non-matching ETag with a false date condition, is not
+// documented, and RFC 9110 would copy where this refuses. That needs measuring
+// against S3 before it is changed.
 func checkCopyConditions(h http.Header, etag string, modified time.Time) *s3api.Error {
-	if want := h.Get("X-Amz-Copy-Source-If-Match"); want != "" && !etagMatches(want, etag) {
+	ifMatch := h.Get("X-Amz-Copy-Source-If-Match")
+	if ifMatch != "" && !etagMatches(ifMatch, etag) {
 		return s3api.ErrPreconditionFailed.WithMessage(
 			"the copy source does not have the expected ETag")
 	}
@@ -289,7 +319,10 @@ func checkCopyConditions(h http.Header, etag string, modified time.Time) *s3api.
 			return s3api.ErrInvalidArgument.WithMessage(
 				"x-amz-copy-source-if-unmodified-since is not a valid HTTP date")
 		}
-		if modified.After(since) {
+		// A failed if-match returned above, so a non-empty one has matched, and
+		// a matching ETag decides: the date is read, to refuse one that is
+		// malformed, but not held against the copy.
+		if ifMatch == "" && modified.After(since) {
 			return s3api.ErrPreconditionFailed.WithMessage(
 				"the copy source was modified after the given time")
 		}
@@ -338,4 +371,28 @@ func userMetadataOf(md map[string]string) map[string]string {
 		out[name] = value
 	}
 	return out
+}
+
+// copyTagging reads the tagging directive of a CopyObject. x-amz-tagging is
+// what the destination gets under REPLACE; under COPY it would be ignored, and
+// a header that is ignored is a tag set the client believes it set, so it is
+// refused with the reason instead.
+func copyTagging(r *http.Request) (objcopy.TagMode, []tags.Tag, *s3api.Error) {
+	switch directive := strings.ToUpper(strings.TrimSpace(r.Header.Get("X-Amz-Tagging-Directive"))); directive {
+	case "", "COPY":
+		if r.Header.Get("X-Amz-Tagging") != "" {
+			return 0, nil, s3api.ErrInvalidArgument.WithMessage(
+				"x-amz-tagging on a copy takes effect only with x-amz-tagging-directive: REPLACE")
+		}
+		return objcopy.TagsCarry, nil, nil
+	case "REPLACE":
+		set, apiErr := tagsFromHeader(r)
+		if apiErr != nil {
+			return 0, nil, apiErr
+		}
+		return objcopy.TagsReplace, set, nil
+	default:
+		return 0, nil, s3api.ErrInvalidArgument.WithMessage(
+			"x-amz-tagging-directive must be COPY or REPLACE, not %q", directive)
+	}
 }

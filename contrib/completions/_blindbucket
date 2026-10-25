@@ -22,7 +22,7 @@ _blindbucket() {
     'keygen:create a keyring, or add a key to an existing one'
     'keys:list the keys in a keyring, or retire one'
     'reseal:seal a keyring under another passphrase, Vault or KMS'
-    'gc:remove orphaned multipart manifests'
+    'gc:remove orphaned multipart manifests and tag sidecars'
     'rotate:re-wrap data keys under a new KEK'
     'migrate-names:move objects stored in clear to their encrypted names'
     'encrypt-existing:encrypt the objects a bucket held before the gateway, in place'
@@ -186,6 +186,7 @@ _blindbucket() {
     encrypt)
       _arguments \
         '--chunk-size-log2[chunk size as a power of two]:exponent' \
+        '--config[configuration file naming the root-key provider]:file:_files' \
         '-i[input file, or - for stdin]:file:_files' \
         '--keyring[keyring file]:file:_files' \
         '-o[output file, or - for stdout]:file:_files' \
@@ -193,6 +194,7 @@ _blindbucket() {
       ;;
     decrypt)
       _arguments \
+        '--config[configuration file naming the root-key provider]:file:_files' \
         '-i[input file, or - for stdin]:file:_files' \
         '--keyring[keyring file]:file:_files' \
         '-o[output file, or - for stdout]:file:_files' \

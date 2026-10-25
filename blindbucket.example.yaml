@@ -60,12 +60,19 @@ server:
     # Presigned PutObject and UploadPart, for a backend that hands a browser a
     # URL to upload one file to (ADR-036). Off until max_size is set: the most
     # one request may upload, per part for a multipart upload, up to 5GiB. A
-    # browser on another origin also needs CORS, which this build does not
-    # serve yet. max_expiry caps an upload URL's window; it defaults to 1h,
-    # because an upload URL can write again until it expires.
+    # browser on another origin also needs cors below. max_expiry caps an
+    # upload URL's window; it defaults to 1h, because an upload URL can write
+    # again until it expires.
     # uploads:
     #   max_size: 100MiB
     #   max_expiry: 1h
+
+  # The origins of the browser pages that may call the gateway -- a page that
+  # uploads by presigned URL, above all. Exactly as a browser sends Origin:
+  # scheme and host, a port only if it is not the default, no trailing slash.
+  # No wildcard. Unset, no preflight is answered (ADR-036).
+  # cors:
+  #   allowed_origins: ["https://app.example"]
 
 # Operator-facing listener: metrics, health and, if asked for, profiles. None of
 # it is for storage clients, which is why it is a separate address and why the

@@ -78,7 +78,10 @@ gateway wrote carries it (FORMAT §6.3), so this is the test `rotate` already us
   Object Lock or a legal hold that forbids the overwrite (`unreadable`, `locked`).
 - **An object with tags** (`tagged`). An overwrite would drop the tags, and carrying them
   across would keep plaintext at the provider through a side door, which is why the
-  gateway refuses tags at all. The operator decides.
+  gateway refuses tags at all. The operator decides. *Since
+  [ADR-037](ADR-037-encrypted-object-tags.md) the gateway stores tags sealed, so moving
+  an object's provider tags into a sidecar could follow; it is not part of either
+  decision.*
 
 ### Per object
 

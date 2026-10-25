@@ -140,6 +140,11 @@ still good.
 
 ### The six `X-Amz-*` parameters are authentication, not sub-resources
 
+*A seventh since 1.6.0: the AWS SDK for JavaScript v3 puts
+`X-Amz-Content-Sha256=UNSIGNED-PAYLOAD` in every URL it presigns, and until then
+the router refused every such URL as an unknown sub-resource. Only that value is
+accepted ([ADR-036](ADR-036-presigned-uploads.md)).*
+
 The router refuses any query parameter it does not know, and that is deliberate:
 `?acl` answered as a `PUT` would send plaintext to the provider. So
 `X-Amz-Algorithm`, `X-Amz-Credential`, `X-Amz-Date`, `X-Amz-Expires`,

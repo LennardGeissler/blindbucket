@@ -1,7 +1,9 @@
 # blindbucket Wire Format — Version 1
 
 **Status:** Normative for format version `1`, and implemented as specified.
-**Last updated:** 2026-10-03 (section 10.7: R3 deletes the observed manifest only once
+**Last updated:** 2026-10-21 (section 17, object tags, added with
+`internal/crypto/tags`, [ADR-037](adr/ADR-037-encrypted-object-tags.md); before that,
+2026-10-03: section 10.7: R3 deletes the observed manifest only once
 it has seen the object replaced, [ADR-025](adr/ADR-025-writes-rank-by-when-they-began.md);
 before that, format `1` declared stable with `v1.0.0`; section 15, the object name
 mapping, added with `internal/crypto/names`; section 14, the audit log, added with
@@ -11,8 +13,10 @@ and upload token of sections 10 and 11 becoming normative with M4)
 Every section is implemented. Sections 4 to 9 live in `internal/crypto/stream`,
 `internal/crypto/keys` and `internal/crypto/envelope` and are pinned by the
 known-answer vectors of section 13; section 10 is `internal/manifest`, section 11
-is `internal/upload`, section 14 is `internal/audit`, and section 15 is
-`internal/crypto/names`, pinned by its own vectors.
+is `internal/upload`, section 14 is `internal/audit`, section 15 is
+`internal/crypto/names`, pinned by its own vectors. Section 17's encoding and seal
+are `internal/crypto/tags`, pinned by its own vectors as well; the gateway does not
+write sidecars yet ([ADR-037](adr/ADR-037-encrypted-object-tags.md)).
 
 This document is the authoritative specification of the bytes blindbucket writes to
 object storage. It is written so that an independent implementation can interoperate
@@ -923,7 +927,119 @@ The object name mapping of section 15 is versioned with the object format above:
 it decides where an object is, so a reader that cannot reproduce it cannot reach
 the bytes the rest of this document describes.
 
+The tag sidecar of section 17 is versioned by its magic, `BBT1`. It adds an object
+type next to the segment and the manifest and changes neither, so it needs no new
+format version: an object without tags is written exactly as before, and a reader
+that does not know section 17 reads every object it could read before.
+
 The audit log of section 14 carries its own version, in the `v` field of each
 head. It is at `1`, and it moves independently of the object format above: the
 two describe different files, and a change to one has no reason to invalidate
 readers of the other.
+
+---
+
+## 17. Object tags (`BBT1`)
+
+An object's tag set is stored sealed, in a sidecar object of its own beside the
+object, and never reaches the provider in plaintext
+([ADR-037](adr/ADR-037-encrypted-object-tags.md)). One sidecar belongs to one
+object version. An object without tags has none.
+
+### 17.1 Placement
+
+```
+.blindbucket/t/<hex(SHA-256(StoredKey))>/<BindingID>
+
+BindingID = base64url(SHA-256(bb-dek)[0:16])
+```
+
+`StoredKey` is the key the object is stored under, after the mapping of section 15
+if names are encrypted, hashed as in section 10.1 so that the path is of fixed
+width. `bb-dek` is the value of the object's `x-amz-meta-bb-dek` metadata exactly as
+stored, its 80 characters, and `base64url` is unpadded (22 characters). Every write
+mints a new data key, so every object version has its own `BindingID`. Anything
+that can read the object's metadata can compute it, without any key.
+
+A sidecar carries its object's `StoredKey` in its metadata, as
+`x-amz-meta-bb-key`: the key's bytes in unpadded base64url, because a key may hold
+bytes a metadata value may not. It is there for a reader without the object's key in
+hand -- `gc`, which finds sidecars by listing -- to learn which object a directory
+belongs to. The value is not authenticated, and a reader MUST use it only once it
+hashes back to the directory the sidecar was found in, as a manifest's key is checked
+(section 10.1). It tells the provider nothing new: it is the name the provider stores
+the object under.
+
+The rules of section 10.1 for the `.blindbucket/` prefix apply: a proxy MUST refuse
+client access to it and MUST omit it from listings.
+
+### 17.2 The tag set
+
+```
+TagSet = uint8_be(n) || for each tag, in ascending bytewise order of key: lp(key) || lp(value)
+```
+
+`n` is the number of tags, at most 10. Keys and values are UTF-8. A key is never
+empty and occurs once; a value may be empty. The empty set is the single byte
+`0x00`.
+
+The encoding is canonical, and a decoder MUST reject anything else: a count above
+10, an empty key, keys that are not in strictly ascending bytewise order (which
+rejects a key given twice), a field cut short, and bytes after the last tag.
+
+What a tag may contain is S3's rule, not the format's, and a proxy SHOULD enforce
+it before it stores a set: keys of 1 to 128 characters, values of up to 256,
+letters, numbers, spaces and `+ - = . _ : / @`, and no key in the reserved `aws:`
+prefix. A decoder MUST NOT reject a canonical set for breaking it.
+
+### 17.3 Sealing
+
+```
+TagKey  = HKDF-SHA256(ikm = DEK, salt = "", info = "blindbucket/v1/tags", L = 32)
+AAD     = "blindbucket/v1/tags" || lp(bucket) || lp(key)
+Sidecar = "BBT1" || Nonce(12) || AES-256-GCM.Seal(TagKey, Nonce, TagSet, AAD)
+```
+
+`DEK` is the object's data key, unwrapped (section 6). `bucket` and `key` are the
+ones the client named, as in the data key's own associated data (section 6.1), so
+the seal is the same with names encrypted or not. `Nonce` is 12 random bytes,
+fresh for every sidecar written. The `info` string is ASCII, 19 bytes, and
+separates the tag key from the segment subkeys the same `DEK` derives with another
+label (section 4.2).
+
+A reader computes the `BindingID` from the object's current `bb-dek` and reads the
+sidecar at that path. If there is none, the object has no tags. If there is one, it
+MUST open under the object's `DEK` and the associated data above, and decode
+canonically, or the reader MUST fail as for any integrity failure. A sidecar that
+does not open is never taken for an empty set: its name already says which version
+it belongs to.
+
+### 17.4 Order and lifecycle
+
+A sidecar MUST be written before the object version it belongs to becomes visible,
+as a manifest is (section 10.7): the object is never visible without the tags it
+was written with. An operation that writes a new `bb-dek` or a new stored key for
+an object that keeps its tags — a key rotation, a name migration, a server-side
+copy — writes the new sidecar first.
+
+A sidecar whose object version is no longer visible is an orphan. Orphans hold no
+plaintext. One MAY be deleted as a manifest may (ADR-010, rule R4): listed first,
+skipped while an upload is open for the key, kept if it is the sidecar of the
+object's current `bb-dek` read after the listing, and deleted only once it is older
+than the same minimum age.
+
+### 17.5 Test vectors
+
+Known-answer vectors live in
+[`testdata/vectors/tags_v1.json`](../testdata/vectors/tags_v1.json) and are a
+normative part of this specification, on the same footing as those of sections 13
+and 15.6. Each vector fixes the data key, the nonce, bucket, key, stored key, a
+stand-in for `bb-dek` and the tag set, listed in canonical order. An
+implementation that reproduces `encoded`, `sidecar` and `path` byte for byte
+implements this section.
+
+Regenerate them after a deliberate change with:
+
+```sh
+go test ./internal/crypto/tags -run TestKnownAnswerVectors -update
+```

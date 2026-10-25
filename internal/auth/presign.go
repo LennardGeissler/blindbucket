@@ -10,7 +10,8 @@ import (
 	"time"
 )
 
-// The six query parameters that carry a SigV4 signature in a URL.
+// The query parameters that carry a SigV4 signature in a URL: six always,
+// and the payload hash when the signer puts it there.
 //
 // They are named here rather than matched by prefix because the router has to
 // know them too: it refuses any query parameter it does not recognise, and
@@ -25,6 +26,12 @@ const (
 	QueryExpires       = "X-Amz-Expires"
 	QuerySignedHeaders = "X-Amz-SignedHeaders"
 	QuerySignature     = "X-Amz-Signature"
+
+	// QueryContentSHA256 is the payload hash, when a signer puts it in the URL.
+	// The AWS SDK for JavaScript v3 does, as UNSIGNED-PAYLOAD, in every URL it
+	// presigns; boto3 leaves it out. It is covered by the signature like any
+	// other query parameter.
+	QueryContentSHA256 = "X-Amz-Content-Sha256"
 )
 
 // MaxPresignExpiry is the longest window S3 itself permits, and the ceiling this
@@ -59,7 +66,7 @@ func IsPresigned(r *http.Request) bool {
 func PresignQueryParam(name string) bool {
 	switch name {
 	case QueryAlgorithm, QueryCredential, QueryDate, QueryExpires,
-		QuerySignedHeaders, QuerySignature:
+		QuerySignedHeaders, QuerySignature, QueryContentSHA256:
 		return true
 	}
 	return false
@@ -82,7 +89,7 @@ func StripPresignParams(query url.Values) url.Values {
 	return out
 }
 
-// presignParams is the parsed content of those six parameters.
+// presignParams is the parsed content of those parameters.
 type presignParams struct {
 	credential    Credential
 	signedHeaders []string
@@ -133,6 +140,15 @@ func parsePresign(query url.Values) (presignParams, error) {
 			ErrPresignMalformed, QueryExpires, query.Get(QueryExpires))
 	}
 	p.expires = time.Duration(seconds) * time.Second
+
+	// A presigned body does not exist when the URL is signed, so the only
+	// payload hash a URL can carry is the literal. A hex hash would ask for a
+	// body bound by the signature, which no SDK produces and this gateway
+	// would have to verify differently.
+	if got := query.Get(QueryContentSHA256); got != "" && got != UnsignedPayload {
+		return p, fmt.Errorf("%w: %s is %q; a presigned URL may carry only %s",
+			ErrPresignMalformed, QueryContentSHA256, got, UnsignedPayload)
+	}
 
 	if signedAt.UTC().Format(dateFormat) != credential.Date {
 		return p, fmt.Errorf("%w: timestamp %s does not match credential scope date %s",

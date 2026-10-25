@@ -6,7 +6,7 @@ reading a specification.
 
 **Measured:** the client matrix on 2026-09-12 against `v0.2.0`, with object names
 in the clear. **AWS CLI and boto3 are re-run against every commit** by the
-`Client compatibility` CI job, so their rows are current for `v1.5.0`. The other
+`Client compatibility` CI job, so their rows are current for `v1.5.1`. The other
 clients were measured on the date their row gives; rclone has not been re-measured
 since `v0.2.0`.
 
@@ -172,11 +172,18 @@ Measured on 2026-10-14 against MinIO ([#114](https://github.com/LennardGeissler/
 | Gateway | CRT | classic |
 |---|---|---|
 | 1.3 and later, default | works | works |
-| 1.2 and earlier, default | `GetObject` and multipart refused | works |
+| 1.2 and earlier, default | `GetObject` and multipart refused, and an empty file | works |
 | `require_signed_payload: true` | refused | works over HTTP only |
 
-With a gateway at 1.2 or earlier, either set `allow_unsigned_payload: true`, or
-make the CLI use its previous transfer client:
+An empty file is the case `allow_unsigned_payload` does not reach: the CRT
+client sends it as an aws-chunked body with nothing but a trailer, and the parser
+of a gateway at 1.2 or earlier misreads that, answering `IncompleteBody`,
+*"expected CRLF after chunk data"*. Measured on 2026-10-21 with 2.38.1 against
+every release from 0.1.0 to 1.2.0; 1.3 and later take it.
+
+With a gateway at 1.2 or earlier, make the CLI use its previous transfer client,
+which covers both; `allow_unsigned_payload: true` alone leaves empty files
+failing:
 
 ```sh
 aws configure set default.s3.preferred_transfer_client classic
@@ -339,7 +346,7 @@ These apply to every client.
 |---|---|---|
 | **`ListMultipartUploads`** | Returns `NotImplemented`, and will keep doing so. The upload ids this gateway issues are sealed tokens carrying the data key and the manifest id (ADR-006); neither can be reconstructed from the provider's listing, so the call could only return ids no client is able to use. Clients that abort their own uploads are unaffected — they hold the token already. | — |
 | **The shape of a part ETag** | An `UploadPart` answers with the provider's ETag followed by `.` and a sealed suffix carrying that part's segment salt — the only way a stateless gateway can learn, at completion, which attempt at a part number it is assembling ([ADR-014](adr/ADR-014-part-salts-in-the-manifest.md)). Clients echo it back unchanged, which is all S3 asks of them, and the AWS CLI, boto3, `mc` and rclone were each measured doing so; s5cmd's multipart uploads complete, which the gateway refuses for an ETag it did not issue. A client that assumes a part ETag is 32 hex characters would be surprised; none of the five is. The object's own ETag is untouched. | — |
-| **Object tags** | `PutObjectTagging`, `DeleteObjectTagging` and `x-amz-tagging` on an upload return `NotImplemented`: a tag is a key and a value the provider stores in plaintext, and this gateway does not take plaintext through a side door. `GetObjectTagging` is forwarded and answers an empty set for anything the gateway wrote — and an empty set too where the provider has no tagging at all (Garage), because such a provider holds no tags. Refused rather than ignored, so a client never believes its object carries tags it does not ([ADR-012](adr/ADR-012-copy-semantics.md)). | — |
+| **Object tags** | Served, sealed: `PutObjectTagging`, `GetObjectTagging`, `DeleteObjectTagging` and `x-amz-tagging` on `PutObject`, `CreateMultipartUpload` and a presigned upload. The tag set is stored in a sidecar under `.blindbucket/t/`, sealed under a key the object's own data key derives, so the provider holds no tag in plaintext and a sidecar opens only for the object version it belongs to ([ADR-037](adr/ADR-037-encrypted-object-tags.md), FORMAT.md §17). **No provider feature works on these tags**: no lifecycle rule, replication filter or IAM condition can read them. S3's rules for a tag set are enforced (`InvalidTag`). `GetObject` and `HeadObject` do not report `x-amz-tagging-count`. A server-side copy gets the source's tags under `x-amz-tagging-directive: COPY`, the default, and `x-amz-tagging`'s under `REPLACE`; `x-amz-tagging` without `REPLACE` is refused rather than ignored. `rotate` and `migrate-names` keep an object's tags. An object written before the gateway keeps the provider's own tags, which `GetObjectTagging` forwards, and takes no sealed ones. | by design |
 | **Copy cost above the multipart threshold** | A server-side copy of a small object moves no data — 1.2 KB over the wire for a 600 KB object. Above the client's multipart threshold (8 MiB for the AWS CLI) the client switches to `UploadPartCopy`, and that path *cannot* stay inside the provider: a part is a segment with its own salt, so the range is decrypted and re-encrypted on the way through. Correct, and not free ([ADR-012](adr/ADR-012-copy-semantics.md)). | — |
 | **Copying a `versionId`** | Returns `NotImplemented`. This build does not implement versioned reads, and copying the current version instead of the one asked for would be the wrong kind of helpful. | — |
 | **Part sizes** | Every part but the last must be a multiple of the chunk size (FORMAT §7.3). The defaults of every client above satisfy this; a client configured with, say, 5.5 MiB parts is refused at completion with a message naming the fix. Empty parts are refused by both `UploadPart` and `UploadPartCopy` when they arrive, with `InvalidRequest` and the same empty-last-part explanation as completion. Small nonempty final parts remain valid ([ADR-026](adr/ADR-026-empty-parts-refused-on-arrival.md)). | — |
@@ -403,7 +410,7 @@ A client's `If-None-Match: *` and `If-Match` on `PutObject`, on
 against the stored key, so they hold under name encryption too. The ETag a client
 compares is the provider's: the gateway returns it unchanged from every write and
 every read. `If-None-Match` with an ETag rather than `*` is answered
-`501 NotImplemented`, as S3 answers it. Up to 1.5.0 the gateway read neither
+`501 NotImplemented`, as S3 answers it. Up to 1.5.1 the gateway read neither
 header, and a conditional write was carried out unconditionally without a word
 ([#168](https://github.com/LennardGeissler/blindbucket/issues/168)).
 
@@ -502,7 +509,7 @@ front of a deployment. nginx passes them through unchanged, which is what the CI
 job uses. The symptom is metadata that round-trips with the wrong casing while
 everything else works.
 | **ETag ≠ MD5 of plaintext** | The ETag is the provider's, so it is the MD5 of the ciphertext. Anything comparing it against a local hash sees a mismatch. Sizes are fine. | by design |
-| **Presigned URLs read, and upload only where enabled** | `GET` and `HEAD` are served. `PutObject` and `UploadPart` are served when `server.presign.uploads.max_size` is set: the limit holds per request, judged on `Content-Length` before the body is read, and an upload URL's window is capped at an hour by default (`uploads.max_expiry`). A checksum the URL binds, as a header or in the query, is verified; `x-amz-*` values in the query are read as the headers they stand for, as the AWS SDK for JavaScript v3 puts them there; an `x-amz-*` header the URL did not sign is refused. With its defaults JavaScript v3 binds the CRC32 of an empty body, so its URLs take only an empty upload: set `requestChecksumCalculation: "WHEN_REQUIRED"`, or bind the real checksum. Every other operation a presigned URL can name is refused with `AccessDenied`. A URL is where a bearer credential gets copied — browser history, `Referer` headers, chat previews, CI logs. **Presigned POST**, the form-and-policy mechanism, is a different protocol and is not planned. A browser on another origin also needs CORS, which this build does not serve yet ([ADR-036](adr/ADR-036-presigned-uploads.md)). The gateway verifies presigned URLs and never issues them, because presigning is a local computation in the client ([ADR-019](adr/ADR-019-presigned-urls.md)). A read, presigned or not, may set its own response headers with `response-content-disposition`, `response-content-type` and the other four `response-*` parameters; GitLab sends them with every download ([ADR-032](adr/ADR-032-response-header-overrides.md)). | CORS: next |
+| **Presigned URLs read, and upload only where enabled** | `GET` and `HEAD` are served. `PutObject` and `UploadPart` are served when `server.presign.uploads.max_size` is set: the limit holds per request, judged on `Content-Length` before the body is read, and an upload URL's window is capped at an hour by default (`uploads.max_expiry`). A checksum the URL binds, as a header or in the query, is verified; `x-amz-*` values in the query are read as the headers they stand for, as the AWS SDK for JavaScript v3 puts them there, and so is the `X-Amz-Content-Sha256=UNSIGNED-PAYLOAD` it adds to every URL it presigns, downloads included, which was refused up to 1.5.1; an `x-amz-*` header the URL did not sign is refused. With its defaults JavaScript v3 binds the CRC32 of an empty body, so its URLs take only an empty upload: set `requestChecksumCalculation: "WHEN_REQUIRED"`, or bind the real checksum. Every other operation a presigned URL can name is refused with `AccessDenied`. A URL is where a bearer credential gets copied — browser history, `Referer` headers, chat previews, CI logs. **Presigned POST**, the form-and-policy mechanism, is a different protocol and is not planned. A browser on another origin also needs CORS, which the gateway answers for the origins in `server.cors.allowed_origins`, never `*` and never with credentials; the bucket-CORS sub-resource `?cors` stays refused, because the provider would store it for an endpoint the browser never reaches ([ADR-036](adr/ADR-036-presigned-uploads.md), [browser-uploads.md](guides/browser-uploads.md)). The gateway verifies presigned URLs and never issues them, because presigning is a local computation in the client ([ADR-019](adr/ADR-019-presigned-urls.md)). A read, presigned or not, may set its own response headers with `response-content-disposition`, `response-content-type` and the other four `response-*` parameters; GitLab sends them with every download ([ADR-032](adr/ADR-032-response-header-overrides.md)). | by design |
 | **Presigned URLs must point at the gateway** | Not at the provider, which holds ciphertext under a name the recipient cannot read and no key. `host` is covered by the signature, so the two cannot be confused — but it means the gateway has to be reachable by whoever is given the link. | by design |
 | **boto3 presigns with SigV2 unless told otherwise** | botocore still defaults to the older signature format for presigned URLs against a custom endpoint, and this gateway verifies `AWS4-HMAC-SHA256` only. Build the client with `Config(signature_version="s3v4")`. A SigV2 URL is answered with `InvalidRequest` naming the setting, rather than with the first unknown query parameter. The AWS CLI produces SigV4 already. | by design |
 | **Listing sizes use the configured chunk size** | A listing carries no per-object metadata, so the conversion assumes the chunk size this deployment is configured with. Correct for everything this deployment wrote; an object written under a different setting is listed with its raw ciphertext size rather than a wrong plaintext one. Not authenticated in any case — see [THREAT_MODEL.md](THREAT_MODEL.md) section 5.4. | by design |

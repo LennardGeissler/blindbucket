@@ -1,6 +1,6 @@
 # ADR-036 — Presigned uploads: served when the operator sets a size limit, with CORS for the browser
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
 **Milestone:** M14
 **Implements:** [#131](https://github.com/LennardGeissler/blindbucket/issues/131)
@@ -110,7 +110,8 @@ boto3's default of 3600 seconds and JavaScript v3's 900.
 - **`x-amz-*` values in the query** are read as the headers they stand for, on a
   presigned upload only, and only these: `x-amz-checksum-{crc32,crc32c,crc64nvme,sha1,sha256}`,
   `x-amz-sdk-checksum-algorithm` and `x-amz-meta-*`. `x-amz-tagging` is refused as
-  the header is ([ADR-012](ADR-012-copy-semantics.md), #132). A value given both as
+  the header is ([ADR-012](ADR-012-copy-semantics.md), #132). *Since
+  [ADR-037](ADR-037-encrypted-object-tags.md) it is served as the header is: sealed.* A value given both as
   a header and in the query is refused, not merged. Every other query parameter is
   refused, as now. Like the six signing parameters, none of them is forwarded to the
   provider.

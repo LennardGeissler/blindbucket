@@ -43,21 +43,45 @@ func TestAuditLogRecordsWhatWasServed(t *testing.T) {
 	}
 	const objectKey = "audit/2026/report.pdf"
 
+	// An entry is written when its handler returns, which can be after the
+	// client has its response. settled waits for the n-th entry, so that each
+	// request below is recorded before the next one is sent and the entries
+	// keep the order the requests had.
+	base := writer.Status().Seq
+	settled := func(n uint64) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for writer.Status().Seq < base+n {
+			if time.Now().After(deadline) {
+				t.Fatalf("the audit log holds %d entries, want %d", writer.Status().Seq-base, n)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
 	if resp := h.Put(t, objectKey, body, nil); resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT: %d", resp.StatusCode)
 	} else {
 		_ = resp.Body.Close()
 	}
+	settled(1)
 	if resp := h.Do(t, http.MethodGet, objectKey); resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET: %d", resp.StatusCode)
 	} else {
+		// Read to the end: a body closed unread is a download cut short, which
+		// is recorded with the bytes that went out before it, not the object's.
+		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+			t.Fatalf("reading the GET: %v", err)
+		}
 		_ = resp.Body.Close()
 	}
+	settled(2)
 	if resp := h.Do(t, http.MethodDelete, objectKey); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("DELETE: %d", resp.StatusCode)
 	} else {
 		_ = resp.Body.Close()
 	}
+	settled(3)
 
 	// An unsigned request, which must be recorded as a rejection rather than not
 	// at all.
@@ -70,6 +94,7 @@ func TestAuditLogRecordsWhatWasServed(t *testing.T) {
 		t.Fatalf("unsigned GET: %v", err)
 	}
 	_ = resp.Body.Close()
+	settled(4)
 
 	if err := writer.Close(); err != nil {
 		t.Fatalf("closing the audit log: %v", err)

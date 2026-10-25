@@ -95,6 +95,29 @@ stop_last() {
 
 sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 
+# before_1_3 VERSION reports whether a release predates v1.3.0.
+before_1_3() { [[ $(printf '%s\nv1.3.0\n' "$1" | sort -V | head -1) == "$1" && $1 != v1.3.0 ]]; }
+
+# AWS CLI 2.38.0 made a new transfer client the default, and releases before
+# v1.3.0 cannot take what it sends: UNSIGNED-PAYLOAD on multipart uploads, and an
+# empty file as an aws-chunked body their parser misreads. CHANGELOG 1.3.0 says
+# 2.38 works from 1.3 on. What this test asks is whether the current build reads
+# what each release wrote, not whether a newer client can still write to an old
+# release, so those releases are written with the client they were released
+# against: the classic transfer client. Found when the runner image moved to
+# 2.38.1 on 2026-10-20.
+classic="$work/classic.cfg"
+printf '[default]\ns3 =\n  preferred_transfer_client = classic\n' >"$classic"
+writer_env() {
+  if before_1_3 "$1"; then
+    shift
+    AWS_CONFIG_FILE=$classic client_env "$@"
+  else
+    shift
+    client_env "$@"
+  fi
+}
+
 # The payloads. 65535 and 65537 sit either side of the default 64 KiB chunk;
 # 20 MiB is above the AWS CLI's 8 MiB multipart threshold.
 mkdir -p "$work/payload"
@@ -120,7 +143,7 @@ for v in "${versions[@]}"; do
   config $port "$work/$v.keyring.json" >"$work/$v.write.yaml"
   serve "$work/$v" "$work/$v.write.yaml" $port
   for f in "$work"/payload/*.bin; do
-    client_env aws --endpoint-url "http://127.0.0.1:$port" s3 cp --only-show-errors \
+    writer_env "$v" aws --endpoint-url "http://127.0.0.1:$port" s3 cp --only-show-errors \
       "$f" "s3://$bucket/$prefix/$v/$(basename "$f")"
   done
   stop_last

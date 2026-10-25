@@ -19,6 +19,7 @@ import (
 // cryptFlags are shared by encrypt and decrypt.
 type cryptFlags struct {
 	keyring string
+	conf    string
 	in      string
 	out     string
 	pass    passphraseFlags
@@ -26,28 +27,40 @@ type cryptFlags struct {
 
 func (c *cryptFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&c.keyring, "keyring", "", "keyring file (required)")
+	fs.StringVar(&c.conf, "config", "",
+		"configuration file naming the root-key provider, for a keyring sealed by Vault or KMS")
 	fs.StringVar(&c.in, "i", "-", "input file, or - for stdin")
 	fs.StringVar(&c.out, "o", "-", "output file, or - for stdout")
 	c.pass.register(fs)
 }
 
-func (c *cryptFlags) loadKeyring() (*keys.Keyring, error) {
+// loadKeyring opens the keyring these commands were pointed at.
+//
+// It goes through openKeyring, as keys list, rotate and serve do, so a keyring
+// sealed by Vault Transit or AWS KMS opens here too. Until #46 this called
+// keys.LoadKeyring directly with a passphrase, which made the offline commands
+// unusable for an operator who had moved their root key to a service: there was
+// no flag to name the provider with, and so no way to say how to reach it.
+//
+// The passphrase path is unchanged and still the default. Without --config,
+// keysConfig yields the file provider, which is exactly what a passphrase
+// keyring needs.
+func (c *cryptFlags) loadKeyring(ctx context.Context) (*keys.Keyring, error) {
 	defer c.pass.wipe()
 	if c.keyring == "" {
 		return nil, errors.New("--keyring is required")
 	}
-	warnIfExposed("keyring", c.keyring)
-	data, err := os.ReadFile(c.keyring)
-	if err != nil {
+	if err := c.requireConfigForAService(); err != nil {
 		return nil, err
 	}
-	phrase, err := c.pass.resolve("Passphrase for "+c.keyring+": ", false)
-	if err != nil {
-		return nil, err
-	}
-	defer clear(phrase)
 
-	ring, err := keys.LoadKeyring(data, phrase)
+	cfg, err := keysConfig(c.conf, &c.pass)
+	if err != nil {
+		return nil, err
+	}
+	// warnIfExposed is openKeyringFile's job now; calling it here as well would
+	// warn twice about the same file.
+	ring, err := openKeyring(ctx, c.keyring, cfg, &c.pass)
 	if err != nil {
 		return nil, err
 	}
@@ -63,6 +76,42 @@ func (c *cryptFlags) loadKeyring() (*keys.Keyring, error) {
 	return ring, nil
 }
 
+// requireConfigForAService refuses a service-sealed keyring with no --config,
+// naming the flag that is missing.
+//
+// Without it the operator in #46 is told `keys.provider is "file"`, which is
+// true -- that is the default keysConfig returns -- and names neither the
+// provider the keyring actually needs nor the flag that would supply it. These
+// two commands are the only ones that can reach openKeyring with no
+// configuration behind them, which is why the check sits here rather than in
+// unlockKeyring, where it would be dead code for every other caller.
+//
+// The file is read a second time to do this. That is one small read once per
+// invocation, before any data moves, and it buys an error the operator can act
+// on; anything cheaper would mean threading the bytes through openKeyring's
+// signature for this one caller.
+func (c *cryptFlags) requireConfigForAService() error {
+	if c.conf != "" {
+		return nil
+	}
+	data, err := os.ReadFile(c.keyring)
+	if err != nil {
+		return keyringReadError(c.keyring, err)
+	}
+	ref, err := keys.ReadRootKeyRef(data)
+	if err != nil {
+		// Not a keyring this build can read. openKeyring says so in the words
+		// every other command uses, so let it.
+		return nil //nolint:nilerr // deliberate: the better message is downstream.
+	}
+	if ref.Source == keys.SourcePassphrase {
+		return nil
+	}
+	return fmt.Errorf("%s is sealed by %s, not a passphrase; pass --config with a "+
+		"configuration naming that provider (keys.provider), as `keys list` takes",
+		c.keyring, ref.Source)
+}
+
 func runEncrypt(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("encrypt", flag.ContinueOnError)
 	fs.Usage = func() {
@@ -70,6 +119,9 @@ func runEncrypt(ctx context.Context, args []string) error {
 
 Encrypts a stream into a blindbucket file under the keyring's active key.
 Memory stays proportional to the chunk size, not to the size of the input.
+
+The keyring opens by whatever sealed it. A passphrase needs no configuration;
+for one sealed by Vault Transit or AWS KMS, --config names the provider to ask.
 
 Flags:
 `)
@@ -90,7 +142,7 @@ Flags:
 		return err
 	}
 
-	ring, err := c.loadKeyring()
+	ring, err := c.loadKeyring(ctx)
 	if err != nil {
 		return err
 	}
@@ -119,6 +171,9 @@ func runDecrypt(ctx context.Context, args []string) error {
 Decrypts a blindbucket file. Nothing is written until the first chunk has been
 authenticated, so a wrong key or a damaged file leaves the output untouched.
 
+The keyring opens by whatever sealed it. A passphrase needs no configuration;
+for one sealed by Vault Transit or AWS KMS, --config names the provider to ask.
+
 Flags:
 `)
 		fs.PrintDefaults()
@@ -130,7 +185,7 @@ Flags:
 		return err
 	}
 
-	ring, err := c.loadKeyring()
+	ring, err := c.loadKeyring(ctx)
 	if err != nil {
 		return err
 	}

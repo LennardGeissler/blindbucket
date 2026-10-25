@@ -558,3 +558,26 @@ func TestIntegrationRotateAtScale(t *testing.T) {
 func mib(n int64) string {
 	return fmt.Sprintf("%.1f MiB", float64(n)/(1024*1024))
 }
+
+// TestIntegrationRotateKeepsTags: a rotation rewraps the data key, which moves
+// the tag sidecar to a new name, and the object keeps its tags (ADR-037).
+func TestIntegrationRotateKeepsTags(t *testing.T) {
+	h := proxytest.New(t)
+	key := proxytest.TestKey(t, "tagged.bin")
+	h.CleanupStored(t, key)
+	resp := h.Put(t, key, proxytest.RandomBytes(t, 5000), map[string]string{"X-Amz-Tagging": "team=platform&tier=gold"})
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT: %d", resp.StatusCode)
+	}
+	cfg := h.RotateConfig(t, key)
+	if result, err := rotate.Run(t.Context(), cfg); err != nil || result.Rotated != 1 {
+		t.Fatalf("rotate: %+v, %v", result, err)
+	}
+	if after := h.ObjectKID(t, key); after != cfg.TargetKID {
+		t.Fatalf("the object is still wrapped under %q", after)
+	}
+	if got := strings.Join(h.Tags(t, key), "&"); got != "team=platform&tier=gold" {
+		t.Fatalf("after rotation the tags are %q", got)
+	}
+}

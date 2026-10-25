@@ -318,7 +318,8 @@ func TestPresignedUploadCarriesQueryMetadata(t *testing.T) {
 }
 
 // TestPresignedUploadRefusesWhatTheSignerDidNotChoose: an unsigned x-amz-*
-// header, a value given both ways, tags, and an aws-chunked body.
+// header, a value given both ways, and an aws-chunked body. Tags in the query
+// are served since ADR-037; tags_test.go has them.
 func TestPresignedUploadRefusesWhatTheSignerDidNotChoose(t *testing.T) {
 	h := proxytest.New(t, withPresign(), withUploads(uploadLimit))
 	key := proxytest.TestKey(t, "extra")
@@ -335,9 +336,6 @@ func TestPresignedUploadRefusesWhatTheSignerDidNotChoose(t *testing.T) {
 			signHeaders: map[string]string{"X-Amz-Meta-Owner": "bob"},
 			sendHeaders: map[string]string{"X-Amz-Meta-Owner": "bob"},
 			query:       url.Values{"x-amz-meta-owner": {"alice"}}, want: http.StatusBadRequest,
-		},
-		"tags in the query": {
-			query: url.Values{"x-amz-tagging": {"a=b"}}, want: http.StatusNotImplemented,
 		},
 		"an aws-chunked body": {
 			sendHeaders: map[string]string{"Content-Encoding": "aws-chunked"}, want: http.StatusBadRequest,

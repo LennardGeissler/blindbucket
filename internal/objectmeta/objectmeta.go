@@ -73,6 +73,22 @@ func (m Meta) Headers() map[string]string {
 	return out
 }
 
+// StoredDEK returns an object's bb-dek exactly as the provider holds it, or ""
+// for an object the gateway did not write. A tag sidecar is named after this
+// string, not after the key it decodes to (FORMAT.md section 17.1), so that gc,
+// which has no keyring, names it the same way.
+func StoredDEK(md map[string]string) string {
+	for name, value := range md {
+		if strings.EqualFold(name, metaDEK) {
+			return value
+		}
+	}
+	return ""
+}
+
+// StoredDEKOf is StoredDEK for metadata the gateway is about to write.
+func StoredDEKOf(m Meta) string { return m.Headers()[metaDEK] }
+
 // Parse reads blindbucket's metadata off an upstream response.
 //
 // fallbackLog2C is used for objects written before bb-c existed, and for any

@@ -3,11 +3,15 @@ package gc_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/LennardGeissler/blindbucket/internal/crypto/stream"
+	"github.com/LennardGeissler/blindbucket/internal/crypto/tags"
 	"github.com/LennardGeissler/blindbucket/internal/gc"
 	"github.com/LennardGeissler/blindbucket/internal/manifest"
 	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
@@ -222,5 +226,223 @@ func TestIntegrationGcLeavesForeignObjectsAlone(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("GET on the reserved prefix returned %d, want 403", resp.StatusCode)
+	}
+}
+
+// failingHead answers a HEAD of one object key with a 503 and passes every
+// other request on, manifests included.
+type failingHead struct {
+	key  string
+	base http.RoundTripper
+	hits int
+}
+
+func (f *failingHead) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method == http.MethodHead && strings.HasSuffix(r.URL.Path, "/"+f.key) {
+		f.hits++
+		body := `<?xml version="1.0" encoding="UTF-8"?><Error><Code>ServiceUnavailable</Code><Message>injected</Message></Error>`
+		return &http.Response{
+			Status: "503 Service Unavailable", StatusCode: http.StatusServiceUnavailable,
+			Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
+			Header:        http.Header{"Content-Type": {"application/xml"}},
+			Body:          io.NopCloser(strings.NewReader(body)),
+			ContentLength: int64(len(body)), Request: r,
+		}, nil
+	}
+	return f.base.RoundTrip(r)
+}
+
+// TestIntegrationGcKeepsManifestsWhenTheHeadFails: a HEAD that fails says
+// nothing about whether the object is there. Taken for "gone", it made gc
+// delete the manifest of a visible multipart object, which then could not be
+// read (invariant I1). Only a 404 means gone.
+func TestIntegrationGcKeepsManifestsWhenTheHeadFails(t *testing.T) {
+	h := proxytest.New(t)
+	key := proxytest.TestKey(t, "live.bin")
+	h.MpuStore(t, key, [][]byte{proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, 64)})
+	current, _ := h.ManifestKeyOf(t, key)
+
+	transport := &failingHead{key: key, base: http.DefaultTransport}
+	cfg := proxytest.UpstreamConfig(t)
+	cfg.HTTPClient = &http.Client{Transport: transport}
+	cfg.MaxRetries = 1
+	client, err := upstream.New(cfg)
+	if err != nil {
+		t.Fatalf("upstream.New: %v", err)
+	}
+	result, err := gc.Run(t.Context(), gc.Config{
+		Upstream: client, Bucket: proxytest.Bucket, Prefix: key,
+		DisableMinAge: true, Log: proxytest.DiscardLogger(),
+	})
+	if err != nil {
+		t.Fatalf("gc: %v", err)
+	}
+	if transport.hits == 0 {
+		t.Fatal("the failing HEAD was never sent")
+	}
+	if result.Deleted != 0 || result.Errors == 0 {
+		t.Fatalf("gc with a failing HEAD: %+v, want nothing deleted and an error counted", *result)
+	}
+	if _, err := h.Upstream.HeadObject(t.Context(), proxytest.Bucket, current); err != nil {
+		t.Fatalf("the live manifest is gone: %v", err)
+	}
+	h.MustRead(t, key, "after a gc pass whose HEAD failed")
+}
+
+// sidecarsOf lists the tag sidecars of a stored key at the provider.
+func sidecarsOf(t *testing.T, h *proxytest.Harness, stored string) []string {
+	t.Helper()
+	page, err := h.Upstream.ListObjects(context.Background(), proxytest.Bucket,
+		url.Values{"list-type": {"2"}, "prefix": {tags.PrefixFor(stored)}})
+	if err != nil {
+		t.Fatalf("listing sidecars: %v", err)
+	}
+	var out []string
+	for _, entry := range page.Contents {
+		out = append(out, entry.Key)
+	}
+	t.Cleanup(func() {
+		for _, k := range out {
+			_ = h.Upstream.DeleteObject(context.Background(), proxytest.Bucket, k)
+		}
+	})
+	return out
+}
+
+func gcSidecars(t *testing.T, h *proxytest.Harness, prefix string, minAgeOff bool) *gc.Result {
+	t.Helper()
+	result, err := gc.Run(t.Context(), gc.Config{
+		Upstream: h.Upstream, Bucket: proxytest.Bucket, Prefix: prefix,
+		DisableMinAge: minAgeOff, Log: proxytest.DiscardLogger(),
+	})
+	if err != nil {
+		t.Fatalf("gc: %v", err)
+	}
+	return result
+}
+
+// TestIntegrationGcCollectsOrphanedTagSidecars: an overwrite and a delete
+// leave sidecars behind; gc removes them and keeps the visible version's.
+func TestIntegrationGcCollectsOrphanedTagSidecars(t *testing.T) {
+	h := proxytest.New(t)
+	key, gone := proxytest.TestKey(t, "kept.bin"), proxytest.TestKey(t, "gone.bin")
+	h.CleanupStored(t, key)
+	for _, tag := range []string{"v=1", "v=2"} {
+		resp := h.Put(t, key, []byte("version "+tag), map[string]string{"X-Amz-Tagging": tag})
+		_ = resp.Body.Close()
+	}
+	resp := h.Put(t, gone, []byte("deleted next"), map[string]string{"X-Amz-Tagging": "doomed=yes"})
+	_ = resp.Body.Close()
+	del := h.Do(t, http.MethodDelete, gone)
+	_ = del.Body.Close()
+
+	if n := len(sidecarsOf(t, h, key)); n != 2 {
+		t.Fatalf("%d sidecars for two tagged versions, want 2", n)
+	}
+	result := gcSidecars(t, h, key, true)
+	if result.SidecarsDeleted != 1 || result.SidecarsKeptCurrent != 1 {
+		t.Fatalf("gc of an overwritten key: %+v", *result)
+	}
+	if got := strings.Join(h.Tags(t, key), "&"); got != "v=2" {
+		t.Fatalf("the visible version's tags are %q after gc", got)
+	}
+	if result := gcSidecars(t, h, gone, true); result.SidecarsDeleted != 1 {
+		t.Fatalf("gc of a deleted key: %+v", *result)
+	}
+	if n := len(sidecarsOf(t, h, gone)); n != 0 {
+		t.Fatalf("%d sidecars left of a deleted object", n)
+	}
+}
+
+// TestIntegrationGcLeavesYoungAndInFlightSidecars: a sidecar is written before
+// its version is visible. The minimum age keeps a PUT's; an open upload keeps
+// a multipart upload's, whatever its age (spec/tla, MCTags and MCTagsNoAge).
+func TestIntegrationGcLeavesYoungAndInFlightSidecars(t *testing.T) {
+	h := proxytest.New(t)
+	young := proxytest.TestKey(t, "young.bin")
+	h.CleanupStored(t, young)
+	resp := h.Put(t, young, []byte("v1"), map[string]string{"X-Amz-Tagging": "v=1"})
+	_ = resp.Body.Close()
+	resp = h.Put(t, young, []byte("v2"), nil)
+	_ = resp.Body.Close()
+	if result := gcSidecars(t, h, young, false); result.SidecarsDeleted != 0 || result.SidecarsKeptTooYoung != 1 {
+		t.Fatalf("gc with the minimum age, a fresh orphan: %+v", *result)
+	}
+
+	inflight := proxytest.TestKey(t, "inflight.bin")
+	token := h.MpuStart(t, inflight, map[string]string{"X-Amz-Tagging": "kind=backup"})
+	t.Cleanup(func() {
+		r, err := http.NewRequestWithContext(context.Background(), http.MethodDelete,
+			h.URL(inflight)+"?uploadId="+proxytest.URLQueryEscape(token), nil)
+		if err == nil {
+			if resp, err := h.Client.Do(r); err == nil {
+				_ = resp.Body.Close()
+			}
+		}
+	})
+	if n := len(sidecarsOf(t, h, inflight)); n != 1 {
+		t.Fatalf("%d sidecars for an open tagged upload, want 1", n)
+	}
+	if result := gcSidecars(t, h, inflight, true); result.SidecarsDeleted != 0 || result.KeysSkipped != 1 {
+		t.Fatalf("gc of a key with an open upload: %+v", *result)
+	}
+}
+
+// TestIntegrationGcIgnoresASidecarThatNamesAnotherKey: bb-key is not
+// authenticated, so a sidecar naming a key that does not hash to its place is
+// left alone rather than acted on.
+func TestIntegrationGcIgnoresASidecarThatNamesAnotherKey(t *testing.T) {
+	h := proxytest.New(t)
+	victim := proxytest.TestKey(t, "victim.bin")
+	h.Store(t, victim, []byte("must not be looked at through a forged sidecar"))
+	forged := tags.PrefixFor(proxytest.TestKey(t, "elsewhere")) + "AAAAAAAAAAAAAAAAAAAAAA"
+	md := tags.Metadata(victim)
+	if _, err := h.Upstream.PutObject(context.Background(), upstream.PutObjectInput{
+		Bucket: proxytest.Bucket, Key: forged, Body: strings.NewReader("x"), ContentLength: 1, Metadata: md,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.Upstream.DeleteObject(context.Background(), proxytest.Bucket, forged) })
+	// Limited to the victim's key, so that a pass with the age off touches no
+	// other test's objects; the forged sidecar is set aside before the prefix
+	// is applied, because its key does not resolve.
+	result := gcSidecars(t, h, victim, true)
+	if result.SidecarsKeptUnreadable == 0 {
+		t.Fatalf("a sidecar naming another key was not set aside: %+v", *result)
+	}
+	if _, err := h.Upstream.HeadObject(context.Background(), proxytest.Bucket, forged); err != nil {
+		t.Fatalf("the forged sidecar was deleted: %v", err)
+	}
+}
+
+// TestIntegrationGcKeepsSidecarsWhenTheHeadFails: as for manifests, a failed
+// HEAD is not a missing object.
+func TestIntegrationGcKeepsSidecarsWhenTheHeadFails(t *testing.T) {
+	h := proxytest.New(t)
+	key := proxytest.TestKey(t, "tagged.bin")
+	h.CleanupStored(t, key)
+	resp := h.Put(t, key, []byte("tagged"), map[string]string{"X-Amz-Tagging": "keep=me"})
+	_ = resp.Body.Close()
+
+	transport := &failingHead{key: key, base: http.DefaultTransport}
+	cfg := proxytest.UpstreamConfig(t)
+	cfg.HTTPClient = &http.Client{Transport: transport}
+	cfg.MaxRetries = 1
+	client, err := upstream.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := gc.Run(t.Context(), gc.Config{
+		Upstream: client, Bucket: proxytest.Bucket, Prefix: key,
+		DisableMinAge: true, Log: proxytest.DiscardLogger(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport.hits == 0 || result.SidecarsDeleted != 0 || result.Errors == 0 {
+		t.Fatalf("gc with a failing HEAD: %+v", *result)
+	}
+	if got := strings.Join(h.Tags(t, key), "&"); got != "keep=me" {
+		t.Fatalf("the tags are %q", got)
 	}
 }

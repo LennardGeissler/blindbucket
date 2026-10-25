@@ -29,6 +29,7 @@
 package objcopy
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -39,6 +40,7 @@ import (
 
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/stream"
+	"github.com/LennardGeissler/blindbucket/internal/crypto/tags"
 	"github.com/LennardGeissler/blindbucket/internal/manifest"
 	"github.com/LennardGeissler/blindbucket/internal/objectmeta"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
@@ -78,6 +80,7 @@ const (
 	HookManifest = "copyManifest" // after the new manifest is written
 	HookUploads  = "copyUploads"  // after the destination's open uploads are checked
 	HookComplete = "copyComplete" // after the publishing write lands
+	HookTags     = "copyTags"     // after the destination's tag sidecar is written
 )
 
 // Deps are what a copy needs from the rest of the system.
@@ -179,9 +182,35 @@ type Request struct {
 	// (ADR-025, MCAwsRotate and MCMigrateAwsOrder in spec/tla).
 	YieldToUploads bool
 
+	// TagMode says which tags the destination gets (ADR-037). The zero value
+	// carries the source's, which is what rotate and migrate-names want: the
+	// object keeps its tags under its new data key wrapping or its new name.
+	TagMode TagMode
+	// Tags are the destination's tags under TagsReplace. Empty gives it none.
+	Tags []tags.Tag
+
 	// Hook is called at the steps named above.
 	Hook func(point string)
 }
+
+// TagMode is what a copy does with tags.
+type TagMode int
+
+const (
+	// TagsCarry gives the destination the source's tags: a rotation, a name
+	// migration, a CopyObject with the tagging directive COPY.
+	TagsCarry TagMode = iota
+	// TagsReplace gives the destination Request.Tags: a CopyObject with the
+	// tagging directive REPLACE.
+	TagsReplace
+)
+
+// ErrTagSidecar reports a source whose tag sidecar does not open: it was
+// altered, or is not this version's. The copy is not made.
+var ErrTagSidecar = errors.New("objcopy: the source's tag sidecar does not open")
+
+// maxTagSidecar bounds what is read of a sidecar, as the gateway bounds it.
+const maxTagSidecar = 64 << 10
 
 // Result reports what the provider recorded for the new object.
 type Result struct {
@@ -287,6 +316,13 @@ func publish(ctx context.Context, deps Deps, req Request,
 	next objectmeta.Meta, dek []byte,
 ) (*Result, error) {
 	src, dst := req.Source, req.Dest
+
+	// The destination's tags before the destination exists, as its manifest
+	// is: it must never be visible without them (FORMAT.md section 17.4). A
+	// copy that fails after this leaves the sidecar for gc.
+	if err := writeTags(ctx, deps, req, next, dek); err != nil {
+		return nil, err
+	}
 
 	metadata := map[string]string{}
 	for name, value := range dst.UserMetadata {
@@ -588,4 +624,67 @@ func writeManifest(ctx context.Context, deps Deps, m *manifest.Manifest, dek []b
 		return fmt.Errorf("storing the manifest: %w", err)
 	}
 	return nil
+}
+
+// writeTags gives the destination its tag sidecar: the source's set, opened
+// under the data key the two share and sealed again for the destination's
+// bucket and key, or the set the caller gives. The sidecar is named after the
+// destination's new bb-dek, so a rewrap -- a rotation -- moves it too.
+func writeTags(ctx context.Context, deps Deps, req Request, next objectmeta.Meta, dek []byte) error {
+	src, dst := req.Source, req.Dest
+	set := req.Tags
+	if req.TagMode == TagsCarry {
+		carried, err := sourceTags(ctx, deps, src, dek)
+		if err != nil {
+			return err
+		}
+		set = carried
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	sealed, err := tags.Seal(dek, dst.Bucket, dst.Key, set)
+	if err != nil {
+		return fmt.Errorf("sealing the destination's tags: %w", err)
+	}
+	if _, err := deps.Upstream.PutObject(ctx, upstream.PutObjectInput{
+		Bucket: dst.Bucket, Key: tags.Path(dst.StoredKey, objectmeta.StoredDEKOf(next)),
+		Body: bytes.NewReader(sealed), ContentLength: int64(len(sealed)),
+		Metadata: tags.Metadata(dst.StoredKey),
+	}); err != nil {
+		return fmt.Errorf("writing the destination's tag sidecar: %w", err)
+	}
+	req.at(HookTags)
+	return nil
+}
+
+// sourceTags reads the source version's tag set. A source without a sidecar,
+// or one the gateway did not write, has none.
+func sourceTags(ctx context.Context, deps Deps, src Source, dek []byte) ([]tags.Tag, error) {
+	stored := objectmeta.StoredDEK(src.Info.Metadata)
+	if stored == "" {
+		return nil, nil
+	}
+	out, err := deps.Upstream.GetObject(ctx, upstream.GetObjectInput{
+		Bucket: src.Bucket, Key: tags.Path(src.StoredKey, stored),
+	})
+	if upstream.NotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the source's tag sidecar: %w", err)
+	}
+	defer func() { _ = out.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(out.Body, maxTagSidecar+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading the source's tag sidecar: %w", err)
+	}
+	if len(body) > maxTagSidecar {
+		return nil, fmt.Errorf("%w: more than %d bytes", ErrTagSidecar, maxTagSidecar)
+	}
+	set, err := tags.Open(dek, src.Bucket, src.Key, body)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrTagSidecar, err)
+	}
+	return set, nil
 }

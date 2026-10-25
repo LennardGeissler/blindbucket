@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/LennardGeissler/blindbucket/internal/auth"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/stream"
 	"github.com/LennardGeissler/blindbucket/internal/s3api"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
@@ -128,10 +129,14 @@ func touchesReservedPrefix(prefix string) bool {
 }
 
 // deleteObjects removes several objects in one request.
-func (p *Proxy) deleteObjects(w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger) *s3api.Error {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxDeleteBody))
-	if err != nil {
-		return s3api.ErrIncompleteBody.WithMessage("could not read the request body")
+func (p *Proxy) deleteObjects(
+	w http.ResponseWriter, r *http.Request, req s3api.Request, authResult *auth.Result, log *slog.Logger,
+) *s3api.Error {
+	// Verified before anything is deleted: the body is what decides which
+	// objects go, and the signature covers only its announced hash.
+	body, apiErr := readVerifiedBody(r, authResult, maxDeleteBody)
+	if apiErr != nil {
+		return apiErr
 	}
 
 	var in upstream.DeleteRequest
@@ -194,12 +199,14 @@ func (p *Proxy) deleteObjects(w http.ResponseWriter, r *http.Request, req s3api.
 // Bucket existence, location, creation, deletion and the bucket list carry no
 // object content, so reproducing the provider's answer verbatim is both simpler
 // and more accurate than paraphrasing it.
-func (p *Proxy) passthrough(w http.ResponseWriter, r *http.Request, req s3api.Request, _ *slog.Logger) *s3api.Error {
+func (p *Proxy) passthrough(
+	w http.ResponseWriter, r *http.Request, req s3api.Request, authResult *auth.Result, _ *slog.Logger,
+) *s3api.Error {
 	var body []byte
 	if r.Body != nil && r.ContentLength > 0 {
-		read, err := io.ReadAll(io.LimitReader(r.Body, maxDeleteBody))
-		if err != nil {
-			return s3api.ErrIncompleteBody.WithMessage("could not read the request body")
+		read, apiErr := readVerifiedBody(r, authResult, maxDeleteBody)
+		if apiErr != nil {
+			return apiErr
 		}
 		body = read
 	}

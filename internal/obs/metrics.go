@@ -37,11 +37,13 @@ const (
 	KindToken     = "token"
 	KindSize      = "size"
 	KindFreshness = "freshness"
+	// KindTags is a tag sidecar that does not open for its object (ADR-037).
+	KindTags = "tags"
 )
 
 // integrityKinds lists every kind, so that each series exists from startup.
 var integrityKinds = []string{
-	KindChunk, KindHeader, KindDEKUnwrap, KindManifest, KindToken, KindSize, KindFreshness,
+	KindChunk, KindHeader, KindDEKUnwrap, KindManifest, KindToken, KindSize, KindFreshness, KindTags,
 }
 
 // exportDestinations lists the destinations for audit export metrics.

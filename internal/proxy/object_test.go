@@ -92,7 +92,6 @@ func TestPassthroughContentEncoding(t *testing.T) {
 func TestRejectUnsupportedUpload(t *testing.T) {
 	for name, header := range map[string][2]string{
 		"a copy source":              {"X-Amz-Copy-Source", "/bucket/other"},
-		"object tags":                {"X-Amz-Tagging", "team=payroll"},
 		"SSE":                        {"X-Amz-Server-Side-Encryption", "AES256"},
 		"SSE-C":                      {"X-Amz-Server-Side-Encryption-Customer-Algorithm", "AES256"},
 		"SSE-KMS, differently cased": {"x-amz-server-side-encryption-aws-kms-key-id", "alias/x"},

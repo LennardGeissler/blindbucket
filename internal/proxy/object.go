@@ -1,13 +1,11 @@
 package proxy
 
 import (
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -34,6 +32,10 @@ func (p *Proxy) putObject(
 		return apiErr
 	}
 	ifMatch, ifNoneMatch, apiErr := writeConditions(r)
+	if apiErr != nil {
+		return apiErr
+	}
+	tagSet, apiErr := tagsFromHeader(r)
 	if apiErr != nil {
 		return apiErr
 	}
@@ -91,6 +93,12 @@ func (p *Proxy) putObject(
 		KeyID:         kid,
 		WrappedDEK:    wrapped,
 		Log2ChunkSize: p.log2C,
+	}
+
+	// The tags before the object, so that it is never visible without them.
+	if apiErr := p.writeTagsBeforeObject(r.Context(), req.Bucket, req.Key, storedKey,
+		meta, dek.Bytes(), tagSet, log); apiErr != nil {
+		return apiErr
 	}
 
 	// The encrypter runs in its own goroutine writing into a pipe, and the
@@ -605,6 +613,8 @@ func metricKind(kind string) string {
 		return obs.KindDEKUnwrap
 	case "manifest":
 		return obs.KindManifest
+	case "tag sidecar":
+		return obs.KindTags
 	case "ciphertext size", "object size", "range mapping":
 		return obs.KindSize
 	default:
@@ -700,70 +710,11 @@ func rejectUnsupportedUpload(r *http.Request) *s3api.Error {
 		return s3api.ErrNotImplemented.WithMessage(
 			"this operation does not accept x-amz-copy-source in this build")
 	}
-	// Silently dropping tags would be worse than refusing them: a client would
-	// believe its object carries them. Storing them would be worse still --
-	// they are plaintext at the provider.
-	if r.Header.Get("X-Amz-Tagging") != "" {
-		return s3api.ErrNotImplemented.WithMessage(
-			"object tags are not accepted: the provider would store them in plaintext")
-	}
 	for name := range r.Header {
 		if strings.HasPrefix(strings.ToLower(name), "x-amz-server-side-encryption") {
 			return s3api.ErrNotImplemented.WithMessage(
 				"server-side encryption headers are not accepted; this gateway encrypts already")
 		}
-	}
-	return nil
-}
-
-// emptyTagging is a GetObjectTagging answer with no tags in it.
-type emptyTagging struct {
-	XMLName xml.Name `xml:"http://s3.amazonaws.com/doc/2006-03-01/ Tagging"`
-	TagSet  struct{} `xml:"TagSet"`
-}
-
-// getObjectTagging forwards the tagging sub-resource to the provider.
-//
-// The gateway writes no tags, so for an object it stored this is an empty set.
-// It is forwarded rather than answered locally because tags set out of band are
-// the provider's to report, and inventing an empty answer would hide them.
-func (p *Proxy) getObjectTagging(
-	w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger,
-) *s3api.Error {
-	storedKey, apiErr := p.storedKey(req.Key)
-	if apiErr != nil {
-		return apiErr
-	}
-	resp, err := p.upstream.ObjectPassthrough(r.Context(), http.MethodGet,
-		req.Bucket, storedKey, url.Values{"tagging": {""}})
-	if apiErr, ok := upstream.AsAPIError(err); ok && apiErr.Code == "NotImplemented" {
-		// A provider without tagging (Garage) holds no tags, so the empty set is
-		// its true answer rather than an invented one. It matters because the
-		// AWS CLI asks for tags before every multipart server-side copy, and a
-		// 502 here would fail the copy.
-		log.Debug("object tagging not implemented upstream, answered empty")
-		if r.Method == http.MethodHead {
-			w.WriteHeader(http.StatusOK)
-			return nil
-		}
-		return writeXML(w, http.StatusOK, emptyTagging{})
-	}
-	if err != nil {
-		return translateUpstream(err)
-	}
-	log.Debug("object tagging served", "status", resp.StatusCode)
-
-	for name, values := range resp.Header {
-		if strings.EqualFold(name, "Content-Length") {
-			continue
-		}
-		w.Header()[name] = values
-	}
-	w.Header().Set("Content-Length", strconv.Itoa(len(resp.Body)))
-	w.WriteHeader(resp.StatusCode)
-	if r.Method != http.MethodHead {
-		//nolint:gosec // the provider's own XML under its own content type.
-		_, _ = w.Write(resp.Body)
 	}
 	return nil
 }

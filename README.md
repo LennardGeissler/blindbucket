@@ -38,7 +38,7 @@
 </sub></p>
 
 > [!NOTE]
-> **Status: `v1.5.0` — stable, and measured against AWS.** Standard S3 clients round-trip
+> **Status: `v1.5.1` — stable, and measured against AWS.** Standard S3 clients round-trip
 > through the gateway, multipart included: AWS CLI, boto3, `mc`, rclone and
 > s5cmd all work, and a 5 GiB `aws s3 cp` across two instances comes back with
 > an identical SHA-256. Key rotation, server-side copy, a signed audit log,
@@ -202,7 +202,7 @@ in **[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)**.
 
 ```sh
 # Container: distroless, nonroot, no shell, 21 MB.
-docker pull ghcr.io/lennardgeissler/blindbucket:1.5.0
+docker pull ghcr.io/lennardgeissler/blindbucket:1.5.1
 
 # Or with Homebrew, on macOS and Linux, with the completions for bash, zsh and fish:
 brew install --cask lennardgeissler/tap/blindbucket
@@ -299,8 +299,8 @@ aws s3 ls s3://blindbucket-dev/5GiB.bin      # 5368709120 — the plaintext size
 The gateway keeps no state for any of it: the upload id a client gets back is a
 sealed token carrying the data key and the manifest id, so parts can be spread
 across instances and an instance can restart mid-upload. Orphaned manifests — from
-a crashed upload, or from a plain PUT over a multipart object — are cleaned up out
-of band:
+a crashed upload, or from a plain PUT over a multipart object — and the tag sidecars
+of versions that are gone are cleaned up out of band:
 
 ```sh
 ./bin/blindbucket gc --config blindbucket.yaml --dry-run s3://blindbucket-dev
@@ -398,6 +398,15 @@ first: the format can be reviewed, fuzzed and measured before any HTTP is involv
 ./bin/blindbucket encrypt --keyring keyring.json -i big.tar.zst -o big.tar.zst.bb
 ./bin/blindbucket decrypt --keyring keyring.json -i big.tar.zst.bb -o restored.tar.zst
 ./bin/blindbucket inspect big.tar.zst.bb   # what the file says it is, with no key in sight
+```
+
+This works with any root-key source, not only a passphrase. For a keyring sealed
+by Vault Transit or AWS KMS, `--config` names the provider to ask, exactly as
+`keys list` takes it:
+
+```sh
+./bin/blindbucket decrypt --keyring keyring.json --config blindbucket.yaml \
+  -i big.tar.zst.bb -o restored.tar.zst
 ```
 
 </details>
@@ -752,14 +761,14 @@ the gateway already costs per request.
 | [docs/FORMAT.md](docs/FORMAT.md) | Normative wire format. An independent implementation should be able to interoperate from this document alone. |
 | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | What is protected, what is not, and what the residual risks are. |
 | [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Which clients work, which settings they need, and what does not work yet. Measured, not assumed. |
-| [docs/guides/](docs/guides/) | Putting the gateway in front of an application that stores to S3, as measured by the scenarios in [test/apps/](test/apps/): Nextcloud, GitLab, Grafana Loki, Mastodon and Velero. |
+| [docs/guides/](docs/guides/) | Putting the gateway in front of an application that stores to S3, as measured by the scenarios in [test/apps/](test/apps/): Nextcloud, GitLab, Grafana Loki, Mastodon and Velero. And [browser uploads](docs/guides/browser-uploads.md) by presigned URL, the backend's side and the browser's. |
 | [docs/adr/](docs/adr/) | Architecture decisions, with the alternatives that were rejected and why. |
 | [docs/adr/ADR-016-audit-log.md](docs/adr/ADR-016-audit-log.md) | The audit log: what it proves, what it does not, and what it costs. |
 | [testdata/vectors/](testdata/vectors/) | Known-answer vectors, normative alongside the format spec. |
 | [ref/python/](ref/python/) | A second decoder written from the format spec alone, and the differential test that compares it against the Go one. |
 | [bench/](bench/) | Benchmark scripts, the figures they produce, and the methodology notes that came out of getting them wrong first. |
 | [demo/](demo/) | The end-to-end demo, as scripts: upload through the gateway, ciphertext at the provider, identical hash back, and `tamper.sh` — the hostile provider, by hand, in one command. |
-| [spec/tla/](spec/tla/) | The formal models of the manifest coordination, of `migrate-names` and of `encrypt-existing`, the sixteen TLC configurations `make tla` runs, and the counterexamples written out. |
+| [spec/tla/](spec/tla/) | The formal models of the manifest coordination, of `migrate-names`, of `encrypt-existing` and of the tag sidecars, the eighteen TLC configurations `make tla` runs, and the counterexamples written out. |
 | [CHANGELOG.md](CHANGELOG.md) | What each release contains, and what it does not. |
 
 ## Roadmap
@@ -792,7 +801,7 @@ the gateway already costs per request.
 | M11 | The first ten minutes: `blindbucket init` writes a working configuration, keyring and client credentials, `blindbucket doctor` checks configuration, provider and root-key source and names the fix, a Homebrew tap and ArtifactHub — measured by watching people who have never seen the project get to their first encrypted upload | **done** |
 | M12 | Works with software that cannot be changed: Nextcloud, Velero, GitLab, Loki and Mastodon storing through the gateway, each as a CI job and a guide, with what breaks written down, and an existing bucket's objects encrypted in place (ADR-034) | **done** |
 | M13 | A read-only dashboard: instance health, keyring and root-key source, the audit log verified — nothing on it changes state, served on loopback only until M15 brings sign-in (ADR-035) | **done** |
-| M14 | What is refused today, decided again: presigned uploads and encrypted object tags, each an ADR first — where the answer stays no, the ADR says why | planned |
+| M14 | What is refused today, decided again: presigned uploads, served where the operator sets a size limit and with CORS for the browser (ADR-036), and object tags, stored sealed in a sidecar per object version (ADR-037) | **done** |
 | M15 | Several tenants on one gateway: keys per tenant, a tenant deleted by destroying its key, OIDC sign-in for the dashboard, the audit log exported | planned |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
@@ -812,12 +821,10 @@ the [non-goals](docs/THREAT_MODEL.md#6-non-goals): IAM and bucket policies stay 
 provider's, and a milestone that would need the wire format goes through
 [FORMAT.md](docs/FORMAT.md) first, like any other change to it.
 
-**What is still missing.** Object tags are refused rather than
-stored, because the provider would hold them in plaintext
-([ADR-012](docs/adr/ADR-012-copy-semantics.md)). `ListMultipartUploads` is refused
+**What is still missing.** Object tags are stored sealed, so no provider feature can act
+on them ([ADR-037](docs/adr/ADR-037-encrypted-object-tags.md)). `ListMultipartUploads` is refused
 permanently and says why. A presigned URL uploads only where the operator has set a size
-limit, and a browser on another origin cannot use one yet, because the gateway serves no
-CORS ([ADR-036](docs/adr/ADR-036-presigned-uploads.md)). And one benchmark cell is documented as
+limit ([ADR-036](docs/adr/ADR-036-presigned-uploads.md)). And one benchmark cell is documented as
 the provider's behaviour rather than explained; the gateway's share of it is measured at
 0.13 ms per request.
 

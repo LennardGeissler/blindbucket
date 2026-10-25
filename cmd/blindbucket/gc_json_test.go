@@ -20,6 +20,8 @@ var gcJSONFields = []string{
 	"bucket", "deleted", "dry_run", "duration_seconds", "errors", "keys_scanned",
 	"keys_skipped", "kept_current", "kept_too_new", "kept_unreadable",
 	"manifests_seen", "prefix", "started",
+	"tag_sidecars_deleted", "tag_sidecars_kept_current", "tag_sidecars_kept_too_new",
+	"tag_sidecars_kept_unreadable", "tag_sidecars_seen",
 }
 
 func decodeFields(t *testing.T, data []byte) map[string]any {

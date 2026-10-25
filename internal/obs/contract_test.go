@@ -154,7 +154,7 @@ func TestIntegrityKindsStartAtZero(t *testing.T) {
 		}
 	}
 	for _, kind := range []string{
-		KindChunk, KindHeader, KindDEKUnwrap, KindManifest, KindToken, KindSize, KindFreshness,
+		KindChunk, KindHeader, KindDEKUnwrap, KindManifest, KindToken, KindSize, KindFreshness, KindTags,
 	} {
 		value, ok := exported[kind]
 		if !ok {

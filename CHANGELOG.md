@@ -18,13 +18,37 @@ version 1 would keep being readable.
 
 ### Added
 
+- **`encrypt` and `decrypt` open a keyring sealed by Vault or KMS.** Both opened a keyring with a passphrase only and had no `--config`, so an operator who moved their root key to Vault Transit or AWS KMS lost the offline commands entirely — and the error they got was about a passphrase rather than about the flag that was missing. They now take `--config` and open the keyring through the same path as `keys list`, `rotate` and `serve`, so whichever service sealed it is asked. Without `--config` a service-sealed keyring is refused by name, saying which provider it needs and which flag supplies it. The passphrase path is unchanged and still the default ([#46](https://github.com/LennardGeissler/blindbucket/issues/46)).
+
 - **A read-only status page.** With `admin.dashboard.listen` set, the gateway serves one page that says whether it is ready, which keys it holds and what seals them, and whether its audit log is being signed and still verifies, checked in the background every ten minutes. It never shows key material, credentials or object names, runs no script and changes nothing. It has no authentication of its own, so it serves only on loopback and only to requests that name `localhost`, and is reached from elsewhere through `kubectl port-forward` or an SSH tunnel ([ADR-035](docs/adr/ADR-035-dashboard.md)).
 
-- **Presigned uploads, where the operator sets a size limit.** With `server.presign.uploads.max_size` set, a presigned URL can `PutObject` or `UploadPart`, so a backend can hand a client a URL to upload one file to. The limit is judged on `Content-Length` before the body is read, and an upload URL's window is capped at an hour unless `uploads.max_expiry` says otherwise. A checksum or `If-None-Match` the URL binds is honoured, `x-amz-*` values in the query are read as headers, and an `x-amz-*` header the URL did not sign is refused. CORS, which a browser on another origin needs, comes next ([ADR-036](docs/adr/ADR-036-presigned-uploads.md)).
+- **Presigned uploads, where the operator sets a size limit.** With `server.presign.uploads.max_size` set, a presigned URL can `PutObject` or `UploadPart`, so a backend can hand a client a URL to upload one file to. The limit is judged on `Content-Length` before the body is read, and an upload URL's window is capped at an hour unless `uploads.max_expiry` says otherwise. A checksum or `If-None-Match` the URL binds is honoured, `x-amz-*` values in the query are read as headers, and an `x-amz-*` header the URL did not sign is refused. [browser-uploads.md](docs/guides/browser-uploads.md) shows the backend's side, for JavaScript v3 and boto3, and the browser's ([ADR-036](docs/adr/ADR-036-presigned-uploads.md)).
+
+- **CORS for browser pages, from the gateway's own configuration.** With `server.cors.allowed_origins` set, the gateway answers a browser's preflight for a listed origin and marks its responses readable by that origin, the `ETag` included, so a page can upload by presigned URL, in parts too. It never answers `*` or allows credentials, and refuses a preflight for any other origin, method or header. The bucket-CORS sub-resource stays refused, because the provider would store it for an endpoint the browser never reaches ([ADR-036](docs/adr/ADR-036-presigned-uploads.md)).
+
+- **Object tags, sealed.** `PutObjectTagging`, `GetObjectTagging`, `DeleteObjectTagging` and `x-amz-tagging` on uploads are served. The tag set is sealed in a sidecar beside the object version, under a key its own data key derives, so the provider holds no tag in plaintext and cannot move a tag set to another object or version; no provider feature, such as a lifecycle rule, can act on these tags. Copies, `rotate` and `migrate-names` keep an object's tags, a copy follows `x-amz-tagging-directive` as S3 does, and `gc` removes the sidecars of versions that are gone ([ADR-037](docs/adr/ADR-037-encrypted-object-tags.md)).
 
 ### Fixed
 
+- **`gc` no longer deletes the manifest of a visible object when a HEAD fails.** It took any failed HEAD of an object for a missing object, so a provider answering one HEAD with a 503 during a pass made gc delete every manifest of that key past the minimum age, the visible object's included, which then could not be read. Only a 404 now means the object is gone; any other failure skips the key and is counted as an error. A `bb-mid` that does not parse skips the key too, rather than leaving its manifests unprotected.
+
+- **A bucket sub-resource named with the wrong method is refused instead of dropped.** `?delete`, `?location` and `?uploads` were recognised only together with the method that serves them, so any other method fell through to the plain bucket request the method alone described: `DELETE /bucket?delete` was carried out as `DeleteBucket`, `PUT /bucket?delete` as `CreateBucket`, and `GET /bucket?delete` was answered with a listing. The sub-resource now decides, and a mismatched method is answered `501` naming the method it takes. A query carrying two of them is refused rather than served as whichever one Go's map iteration happened to yield first, and the whole query is checked before the operation is chosen, so `?uploads&acl` is refused for `?acl` every time instead of roughly one time in seven ([#187](https://github.com/LennardGeissler/blindbucket/issues/187)).
+
+- **Presigned URLs made by the AWS SDK for JavaScript v3 are accepted.** The SDK puts `X-Amz-Content-Sha256=UNSIGNED-PAYLOAD` in the query of every URL it presigns, downloads included, and the gateway refused each one as an unknown sub-resource with `501`, so no presigned URL from JavaScript v3 ever worked. It is now read as one of the signing parameters; only that value is accepted. boto3 and the AWS CLI leave it out and were not affected (measured with v3.1152.0).
+
 - **A client's conditional write is no longer carried out unconditionally.** `If-None-Match: *` and `If-Match` on `PutObject`, `CompleteMultipartUpload` and `CopyObject` were dropped without a word, so "create only if absent" could overwrite an object. They now go to the provider with the write, under name encryption too, and a condition that does not hold is answered `412`. Where the provider ignores them, as Garage v2.4.1 does, the client gets what the provider does ([#168](https://github.com/LennardGeissler/blindbucket/issues/168), [COMPATIBILITY.md](docs/COMPATIBILITY.md#a-clients-own-conditional-writes)).
+
+- **A copy whose ETag matches is no longer refused because of a date.** With both `x-amz-copy-source-if-match` and `x-amz-copy-source-if-unmodified-since` on a `CopyObject` or `UploadPartCopy`, the gateway answered `412` when the source had changed after the date even though the ETag matched, where S3 makes the copy. A matching `if-match` now decides, as the CopyObject reference and RFC 9110 section 13.2.2 describe; a malformed date is still refused. The `if-none-match` and `if-modified-since` pair is unchanged, because S3's answer for a non-matching ETag with a date that fails is not documented and has not been measured ([#90](https://github.com/LennardGeissler/blindbucket/issues/90)). `rotate` and `migrate-names` send `if-match` alone and are not affected.
+
+## [1.5.1] — 2026-10-21
+
+**A security fix.** Three request bodies are now checked against the signature
+([GHSA-h6g6-fvvh-3r88](https://github.com/LennardGeissler/blindbucket/security/advisories/GHSA-h6g6-fvvh-3r88)).
+Nothing else changes from 1.5.0.
+
+### Security
+
+- **The bodies of `DeleteObjects`, `CompleteMultipartUpload` and bucket requests are checked against the signature.** They were read without being compared to the `x-amz-content-sha256` the signature covers, so a request whose headers were signed was served with any body. Someone able to alter traffic on an unprotected hop between client and gateway, or holding a signed request within its 15-minute window, could change which objects a `DeleteObjects` removed or which parts a completion assembled. These bodies now go through the same verifying reader as an upload, which also checks `Content-MD5` and `x-amz-checksum-*`. Every release from 0.1.0 through 1.5.0 is affected ([GHSA-h6g6-fvvh-3r88](https://github.com/LennardGeissler/blindbucket/security/advisories/GHSA-h6g6-fvvh-3r88)).
 
 ## [1.5.0] — 2026-10-19
 
@@ -1372,7 +1396,8 @@ figures and the methodology are in [bench/](bench/).
   of ten seconds, so the time is the provider's; why it behaves that way under
   this access pattern is not established.
 
-[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.2.0...v1.3.0
