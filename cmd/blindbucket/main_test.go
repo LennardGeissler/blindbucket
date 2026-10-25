@@ -290,7 +290,7 @@ func TestVersionDetails(t *testing.T) {
 	t.Run("partial build info", func(t *testing.T) {
 		info := &debug.BuildInfo{
 			GoVersion: "go1.25.1",
-			Settings: []debug.BuildSetting{{Key: "GOOS", Value: "linux"}},
+			Settings:  []debug.BuildSetting{{Key: "GOOS", Value: "linux"}},
 		}
 		want := []string{"go version: go1.25.1"}
 		got := versionDetails(info)
