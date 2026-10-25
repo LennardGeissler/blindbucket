@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 )
 
@@ -109,7 +110,45 @@ func run(ctx context.Context, args []string) error {
 
 func runVersion(context.Context, []string) error {
 	fmt.Println(version)
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, line := range versionDetails(info) {
+			fmt.Println(line)
+		}
+	}
 	return nil
+}
+
+// versionDetails returns only build metadata present in the binary. Go's
+// build info can omit VCS settings, for example with -buildvcs=false.
+func versionDetails(info *debug.BuildInfo) []string {
+	if info == nil {
+		return nil
+	}
+
+	settings := make(map[string]string, len(info.Settings))
+	for _, setting := range info.Settings {
+		settings[setting.Key] = setting.Value
+	}
+
+	var lines []string
+	if info.GoVersion != "" {
+		lines = append(lines, "go version: "+info.GoVersion)
+	}
+	if revision := settings["vcs.revision"]; revision != "" {
+		lines = append(lines, "commit: "+revision)
+	}
+	if commitTime := settings["vcs.time"]; commitTime != "" {
+		lines = append(lines, "commit time: "+commitTime)
+	}
+	if modified, ok := settings["vcs.modified"]; ok {
+		lines = append(lines, "modified tree: "+modified)
+	}
+	goos, hasGOOS := settings["GOOS"]
+	goarch, hasGOARCH := settings["GOARCH"]
+	if hasGOOS && hasGOARCH && goos != "" && goarch != "" {
+		lines = append(lines, "platform: "+goos+"/"+goarch)
+	}
+	return lines
 }
 
 func usage(w *os.File) {

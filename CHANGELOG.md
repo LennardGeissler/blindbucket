@@ -18,6 +18,8 @@ version 1 would keep being readable.
 
 ### Added
 
+- **Build details in `blindbucket version`.** The version remains the first line; when present in Go's build info, the output also reports the Go version, VCS revision and timestamp, modified-tree status, and target platform. Missing metadata is omitted.
+
 - **`encrypt` and `decrypt` open a keyring sealed by Vault or KMS.** Both opened a keyring with a passphrase only and had no `--config`, so an operator who moved their root key to Vault Transit or AWS KMS lost the offline commands entirely — and the error they got was about a passphrase rather than about the flag that was missing. They now take `--config` and open the keyring through the same path as `keys list`, `rotate` and `serve`, so whichever service sealed it is asked. Without `--config` a service-sealed keyring is refused by name, saying which provider it needs and which flag supplies it. The passphrase path is unchanged and still the default ([#46](https://github.com/LennardGeissler/blindbucket/issues/46)).
 
 - **A read-only status page.** With `admin.dashboard.listen` set, the gateway serves one page that says whether it is ready, which keys it holds and what seals them, and whether its audit log is being signed and still verifies, checked in the background every ten minutes. It never shows key material, credentials or object names, runs no script and changes nothing. It has no authentication of its own, so it serves only on loopback and only to requests that name `localhost`, and is reached from elsewhere through `kubectl port-forward` or an SSH tunnel ([ADR-035](docs/adr/ADR-035-dashboard.md)).

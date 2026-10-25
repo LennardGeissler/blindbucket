@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 
@@ -248,4 +249,53 @@ func assertAbsent(t *testing.T, path string) {
 	if left, _ := filepath.Glob(path + ".tmp*"); len(left) > 0 {
 		t.Errorf("%v was left behind after a failed run", left)
 	}
+}
+
+func TestVersionDetails(t *testing.T) {
+	t.Run("missing build info", func(t *testing.T) {
+		if got := versionDetails(nil); len(got) != 0 {
+			t.Fatalf("versionDetails(nil) = %v, want no extra lines", got)
+		}
+	})
+
+	t.Run("available build info", func(t *testing.T) {
+		info := &debug.BuildInfo{
+			GoVersion: "go1.25.1",
+			Settings: []debug.BuildSetting{
+				{Key: "GOOS", Value: "linux"},
+				{Key: "GOARCH", Value: "arm64"},
+				{Key: "vcs.revision", Value: "abc123"},
+				{Key: "vcs.time", Value: "2026-10-01T12:30:00Z"},
+				{Key: "vcs.modified", Value: "true"},
+			},
+		}
+		want := []string{
+			"go version: go1.25.1",
+			"commit: abc123",
+			"commit time: 2026-10-01T12:30:00Z",
+			"modified tree: true",
+			"platform: linux/arm64",
+		}
+		got := versionDetails(info)
+		if len(got) != len(want) {
+			t.Fatalf("versionDetails() = %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("versionDetails()[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("partial build info", func(t *testing.T) {
+		info := &debug.BuildInfo{
+			GoVersion: "go1.25.1",
+			Settings:  []debug.BuildSetting{{Key: "GOOS", Value: "linux"}},
+		}
+		want := []string{"go version: go1.25.1"}
+		got := versionDetails(info)
+		if len(got) != len(want) || got[0] != want[0] {
+			t.Fatalf("versionDetails() = %v, want %v", got, want)
+		}
+	})
 }
