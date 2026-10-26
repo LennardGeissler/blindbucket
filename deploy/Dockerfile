@@ -12,7 +12,7 @@
 # this image ships, and a release the Go team no longer patches ships its holes.
 # Both bases are pinned by digest, because a tag can be moved and a digest
 # cannot; Dependabot keeps tag and digest current together.
-FROM golang:1.27-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS build
+FROM golang:1.27-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS build
 WORKDIR /src
 
 # Dependencies first, so a source-only change does not refetch them.
