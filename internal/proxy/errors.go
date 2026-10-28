@@ -65,13 +65,24 @@ func translateUpstream(err error) *s3api.Error {
 	if !ok {
 		return s3api.ErrInternal.WithMessage("upstream request failed")
 	}
-	// Two conditional writes to one key raced, and the provider asks the loser
-	// to retry. Only this 409 is passed on as it is: the others (a bucket that
-	// is not empty, an upload in progress) mean something the gateway answers
-	// itself.
-	if apiErr.StatusCode == http.StatusConflict && apiErr.Code == "ConditionalRequestConflict" {
-		return &s3api.Error{Code: apiErr.Code, Message: apiErr.Message,
-			HTTPStatus: http.StatusConflict}
+	// A 409 the client can act on is passed on as it is: two conditional
+	// writes raced and the provider asks the loser to retry, or a bucket
+	// request met the bucket's state. Turned into a 502 they read as a fault of
+	// the gateway, and a client retries them until it gives up -- rclone, which
+	// creates the bucket before every multipart upload, failed every one (#194).
+	if apiErr.StatusCode == http.StatusConflict {
+		switch apiErr.Code {
+		case "ConditionalRequestConflict", "BucketAlreadyOwnedByYou", "BucketAlreadyExists":
+			return &s3api.Error{Code: apiErr.Code, Message: apiErr.Message,
+				HTTPStatus: http.StatusConflict}
+		case "BucketNotEmpty":
+			// What keeps a bucket the client sees as empty from being deleted
+			// is often the gateway's own objects under .blindbucket/: orphaned
+			// manifests and tag sidecars, which gc removes.
+			return &s3api.Error{Code: apiErr.Code, HTTPStatus: http.StatusConflict,
+				Message: "The bucket is not empty. Objects under .blindbucket/ count too: " +
+					"orphaned manifests and tag sidecars, which `blindbucket gc` removes."}
+		}
 	}
 	switch apiErr.StatusCode {
 	case http.StatusNotFound:

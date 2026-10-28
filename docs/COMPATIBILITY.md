@@ -7,8 +7,8 @@ reading a specification.
 **Measured:** the client matrix on 2026-09-12 against `v0.2.0`, with object names
 in the clear. **AWS CLI and boto3 are re-run against every commit** by the
 `Client compatibility` CI job, so their rows are current for `v1.6.0`. The other
-clients were measured on the date their row gives; rclone has not been re-measured
-since `v0.2.0`.
+clients were measured on the date their row gives; rclone's multipart uploads were
+re-measured on 2026-10-28, the rest of its row stands from `v0.2.0`.
 
 The **object-name encryption** rows were verified on 2026-09-16 with the AWS CLI
 against a real MinIO — a 40 MiB multipart round trip and a server-side copy of it
@@ -46,7 +46,7 @@ not measured yet.
 | AWS CLI v2 | 2.36.43 | **Works** | every commit, in CI | none |
 | boto3 | 1.43.92 | **Works** | every commit, in CI | none |
 | MinIO client (`mc`) | RELEASE.2025-08-13 | **Works** | 2026-09-28, after `v1.0.0` | none since 1.3; before, `allow_unsigned_payload: true` for multipart |
-| rclone | 1.75.1 | **Works with settings** | `v0.2.0` | `--ignore-checksum`; `--size-only` for `check`; before 1.3 also `allow_unsigned_payload: true` |
+| rclone | 1.75.1 | **Works with settings** | 2026-10-28, multipart; the rest `v0.2.0` | `--ignore-checksum`; `--size-only` for `check`; before 1.6.1 also `--s3-no-check-bucket` for multipart; before 1.3 also `allow_unsigned_payload: true` |
 | s5cmd | 2.3.0 | **Works** | 2026-10-03, main `8cdb03a` | none, `--endpoint-url` only |
 
 **HTTP and HTTPS are different code paths.** A client chooses how to frame the
@@ -249,7 +249,7 @@ identical SHA-256. Since 1.3 that is the default (ADR-029). Under
 
 ## rclone
 
-rclone works, but needs three things said out loud.
+rclone works, but needs a few things said out loud.
 
 ```ini
 [bb]
@@ -272,9 +272,14 @@ rclone check --size-only <dir> bb:bucket/prefix/
 | No `require_signed_payload` on the proxy (and before 1.3, `allow_unsigned_payload: true`) | rclone cannot seek its upload body, so it cannot hash it to sign it, and it sends `UNSIGNED-PAYLOAD`. Setting `use_unsigned_payload = false` makes rclone fail with *"failed to seek body to start"* instead. Between client and proxy the body is then protected by TLS, not by the signature (ADR-029). |
 | `--ignore-checksum` on copy and sync | rclone compares the ETag against the local MD5. The ETag is the MD5 of **ciphertext**, so they never match, and rclone reports *"corrupted on transfer"* for a perfectly good object. |
 | `--size-only` for `check` | Same reason. Sizes match exactly, because listings report plaintext sizes. |
+| Before 1.6.1, `--s3-no-check-bucket` for multipart | rclone calls `CreateBucket` before every multipart upload. The provider's `409 BucketAlreadyOwnedByYou` became a `502`, and rclone gave up on the upload after ten retries ([#194](https://github.com/LennardGeissler/blindbucket/issues/194)). Since 1.6.1 the 409 passes through, and rclone carries on. |
 
 With those, `copy`, `sync`, `ls` and `check --size-only` all pass, both
-directions, on nested directories.
+directions, on nested directories. A 20 MiB multipart `copy` with 5 MiB parts, read
+back byte for byte and removed with `purge`, was measured on 2026-10-28 against
+MinIO. `purge` logs an `ERROR` that it cannot read the bucket's versioning status,
+which the gateway does not implement; rclone assumes an unversioned bucket, which is
+right, and the purge succeeds.
 
 ## s5cmd
 

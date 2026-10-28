@@ -63,6 +63,9 @@ garage layout apply --version 1 >/dev/null
 garage key import --yes -n blindbucket-test "$KEY_ID" "$SECRET" >/dev/null
 garage bucket create "$BUCKET" >/dev/null
 garage bucket allow --read --write --owner "$BUCKET" --key "$KEY_ID" >/dev/null
+# Creating buckets too: the bucket-conflict test makes one of its own, so that
+# it never deletes the shared one.
+garage key allow --create-bucket "$KEY_ID" >/dev/null
 
 cat <<ENV
 export BLINDBUCKET_TEST_S3_ENDPOINT=http://localhost:$PORT

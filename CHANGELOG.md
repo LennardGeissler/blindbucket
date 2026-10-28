@@ -16,6 +16,17 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A bucket's 409 from the provider is the client's answer, not a 502.**
+  `BucketAlreadyOwnedByYou` and `BucketAlreadyExists` on `CreateBucket`, and
+  `BucketNotEmpty` on `DeleteBucket`, now pass through with their status and code. rclone
+  calls `CreateBucket` before every multipart upload and gave up after ten retries on the
+  502, so its multipart uploads needed `--s3-no-check-bucket`; they no longer do
+  ([#194](https://github.com/LennardGeissler/blindbucket/issues/194)). `BucketNotEmpty`
+  says that orphaned manifests and tag sidecars under `.blindbucket/` count, and that
+  `blindbucket gc` removes them.
+
 ## [1.6.0] — 2026-10-28
 
 **Refusals decided again, and a status page.** Presigned URLs can upload where the
