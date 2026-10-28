@@ -1,9 +1,15 @@
 # Threat Model
 
-**Status:** Current as of `v1.5.1`, which makes one guarantee hold that was stated without
-holding. The bodies of `DeleteObjects`, `CompleteMultipartUpload` and bucket requests were
-not checked against the signature, so `require_signed_payload` did not cover them, and a
-signed request could be served with another body
+**Status:** Current as of `v1.6.0`, which brings one new adversary and three things this
+model now names. The new adversary is whoever holds a presigned upload URL: they can
+write one key, bounded in size and time (§5.10). CORS answers a browser's preflight
+without authentication (§5.10). Object tags are sealed in sidecars, of which the provider
+sees whether there are any and roughly how large, and can drop or replay one of the same
+version (§4, §5.11). The dashboard is on loopback and answers only to `localhost` (§5.9).
+`v1.5.1` made one guarantee hold that was stated without holding: the bodies of
+`DeleteObjects`, `CompleteMultipartUpload` and bucket requests were not checked against
+the signature, so `require_signed_payload` did not cover them, and a signed request could
+be served with another body
 ([GHSA-h6g6-fvvh-3r88](https://github.com/LennardGeissler/blindbucket/security/advisories/GHSA-h6g6-fvvh-3r88));
 now every body the gateway acts on is. `v1.5.0` added three things this model has to name,
 and no mechanism. The audit export

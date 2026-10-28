@@ -6,8 +6,8 @@ type: application
 # gateway release it deploys by default, and moving it is a change to the chart
 # like any other -- a release commit bumps both. Every version is published to
 # ghcr.io once and never again with other contents (build/chart.sh).
-version: 0.1.9
-appVersion: "1.5.1"
+version: 0.1.10
+appVersion: "1.6.0"
 home: https://github.com/LennardGeissler/blindbucket
 sources:
   - https://github.com/LennardGeissler/blindbucket
@@ -23,7 +23,7 @@ annotations:
   artifacthub.io/category: security
   artifacthub.io/images: |
     - name: blindbucket
-      image: ghcr.io/lennardgeissler/blindbucket:1.5.1
+      image: ghcr.io/lennardgeissler/blindbucket:1.6.0
       platforms:
         - linux/amd64
         - linux/arm64
@@ -39,6 +39,10 @@ annotations:
     - name: support
       url: https://github.com/LennardGeissler/blindbucket/issues
   artifacthub.io/changes: |
-    - kind: security
-      description: Deploys blindbucket 1.5.1 by default, which checks the bodies of DeleteObjects, CompleteMultipartUpload and bucket requests against the signature (GHSA-h6g6-fvvh-3r88).
+    - kind: changed
+      description: Deploys blindbucket 1.6.0 by default.
+    - kind: added
+      description: dashboard.enabled serves the read-only status page on each pod's loopback, reached with kubectl port-forward.
+    - kind: added
+      description: server.presign.uploads and server.cors serve presigned uploads and the browser pages that make them.
 keywords: [s3, encryption, gateway, proxy]

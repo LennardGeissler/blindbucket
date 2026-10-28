@@ -16,17 +16,37 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-10-28
+
+**Refusals decided again, and a status page.** Presigned URLs can upload where the
+operator sets a size limit, with CORS for the browser pages that use them (ADR-036), and
+object tags are stored sealed, in a sidecar per object version (ADR-037): the two things
+the gateway refused, decided again (M14). A read-only status page shows a gateway's
+health, keys and audit log, on loopback (ADR-035, M13). Tag sidecars are a new object
+type next to the segment and the manifest (FORMAT.md §17); the format is still `1`, and
+everything is additive under [ADR-021](docs/adr/ADR-021-what-1.0-promises.md).
+
+**Upgrading:** nothing to do for the binaries, the image or the Helm chart, whose new
+options are off. Four things answer differently. A client's `If-None-Match` and
+`If-Match` on a write now reach the provider, so a conditional write that does not hold
+is refused with `412` where it used to overwrite. `x-amz-tagging`, `PutObjectTagging`
+and `DeleteObjectTagging` are served where they were refused with `NotImplemented`, and a
+copy given `x-amz-tagging` without `x-amz-tagging-directive: REPLACE` is refused with
+`InvalidArgument` where the header was ignored. A bucket sub-resource named with the wrong
+method is refused where it was served as another operation. And `gc` collects tag
+sidecars, with new counts in `gc --json`.
+
 ### Added
-
-- **`encrypt` and `decrypt` open a keyring sealed by Vault or KMS.** Both opened a keyring with a passphrase only and had no `--config`, so an operator who moved their root key to Vault Transit or AWS KMS lost the offline commands entirely — and the error they got was about a passphrase rather than about the flag that was missing. They now take `--config` and open the keyring through the same path as `keys list`, `rotate` and `serve`, so whichever service sealed it is asked. Without `--config` a service-sealed keyring is refused by name, saying which provider it needs and which flag supplies it. The passphrase path is unchanged and still the default ([#46](https://github.com/LennardGeissler/blindbucket/issues/46)).
-
-- **A read-only status page.** With `admin.dashboard.listen` set, the gateway serves one page that says whether it is ready, which keys it holds and what seals them, and whether its audit log is being signed and still verifies, checked in the background every ten minutes. It never shows key material, credentials or object names, runs no script and changes nothing. It has no authentication of its own, so it serves only on loopback and only to requests that name `localhost`, and is reached from elsewhere through `kubectl port-forward` or an SSH tunnel ([ADR-035](docs/adr/ADR-035-dashboard.md)).
 
 - **Presigned uploads, where the operator sets a size limit.** With `server.presign.uploads.max_size` set, a presigned URL can `PutObject` or `UploadPart`, so a backend can hand a client a URL to upload one file to. The limit is judged on `Content-Length` before the body is read, and an upload URL's window is capped at an hour unless `uploads.max_expiry` says otherwise. A checksum or `If-None-Match` the URL binds is honoured, `x-amz-*` values in the query are read as headers, and an `x-amz-*` header the URL did not sign is refused. [browser-uploads.md](docs/guides/browser-uploads.md) shows the backend's side, for JavaScript v3 and boto3, and the browser's ([ADR-036](docs/adr/ADR-036-presigned-uploads.md)).
 
 - **CORS for browser pages, from the gateway's own configuration.** With `server.cors.allowed_origins` set, the gateway answers a browser's preflight for a listed origin and marks its responses readable by that origin, the `ETag` included, so a page can upload by presigned URL, in parts too. It never answers `*` or allows credentials, and refuses a preflight for any other origin, method or header. The bucket-CORS sub-resource stays refused, because the provider would store it for an endpoint the browser never reaches ([ADR-036](docs/adr/ADR-036-presigned-uploads.md)).
 
 - **Object tags, sealed.** `PutObjectTagging`, `GetObjectTagging`, `DeleteObjectTagging` and `x-amz-tagging` on uploads are served. The tag set is sealed in a sidecar beside the object version, under a key its own data key derives, so the provider holds no tag in plaintext and cannot move a tag set to another object or version; no provider feature, such as a lifecycle rule, can act on these tags. Copies, `rotate` and `migrate-names` keep an object's tags, a copy follows `x-amz-tagging-directive` as S3 does, and `gc` removes the sidecars of versions that are gone ([ADR-037](docs/adr/ADR-037-encrypted-object-tags.md)).
+
+- **A read-only status page.** With `admin.dashboard.listen` set, the gateway serves one page that says whether it is ready, which keys it holds and what seals them, and whether its audit log is being signed and still verifies, checked in the background every ten minutes. It never shows key material, credentials or object names, runs no script and changes nothing. It has no authentication of its own, so it serves only on loopback and only to requests that name `localhost`, and is reached from elsewhere through `kubectl port-forward` or an SSH tunnel ([ADR-035](docs/adr/ADR-035-dashboard.md)).
+
+- **`encrypt` and `decrypt` open a keyring sealed by Vault or KMS.** Both opened a keyring with a passphrase only and had no `--config`, so an operator who moved their root key to Vault Transit or AWS KMS lost the offline commands entirely — and the error they got was about a passphrase rather than about the flag that was missing. They now take `--config` and open the keyring through the same path as `keys list`, `rotate` and `serve`, so whichever service sealed it is asked. Without `--config` a service-sealed keyring is refused by name, saying which provider it needs and which flag supplies it. The passphrase path is unchanged and still the default ([#46](https://github.com/LennardGeissler/blindbucket/issues/46)).
 
 ### Fixed
 
@@ -1396,7 +1416,8 @@ figures and the methodology are in [bench/](bench/).
   of ten seconds, so the time is the provider's; why it behaves that way under
   this access pattern is not established.
 
-[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.1...HEAD
+[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.3.0...v1.4.0
