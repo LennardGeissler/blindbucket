@@ -7,6 +7,14 @@ you configured. Its certificate has to be trusted by the client, and has to
 name that host.
 
 Health and metrics: port {{ .Values.service.adminPort }}, /healthz, /readyz and /metrics.
+{{- if .Values.dashboard.enabled }}
+
+The status page listens on each pod's loopback, on no Service. Reach one with
+
+  kubectl port-forward -n {{ .Release.Namespace }} pod/<pod> {{ .Values.dashboard.port }}:{{ .Values.dashboard.port }}
+
+and open http://localhost:{{ .Values.dashboard.port }}/.
+{{- end }}
 {{- if ne .Values.upstream.credentialSource "static" }}
 
 Upstream credentials come from {{ .Values.upstream.credentialSource }} (ADR-024), resolved by

@@ -96,6 +96,29 @@ why — rather than running with the node's instance role, which is what the AWS
 SDK's default chain does in that case. `imds` would choose the node's role on
 purpose, and is rarely what a pod should have.
 
+## The status page
+
+`dashboard.enabled` serves the gateway's read-only status page
+([ADR-035](../../../docs/adr/ADR-035-dashboard.md)) on each pod's loopback, port
+`dashboard.port` (9101). It is on no Service and the gateway refuses any address but
+loopback, so it is reached with `kubectl port-forward`, whose authentication and RBAC
+stand in front of it:
+
+```sh
+kubectl port-forward -n <namespace> pod/<pod> 9101:9101
+```
+
+Then open <http://localhost:9101/>. Each pod has its own page.
+
+## Browser uploads
+
+`server.presign.uploads.maxSize` serves presigned uploads, and
+`server.cors.allowedOrigins` lists the pages that may make them from a browser
+([ADR-036](../../../docs/adr/ADR-036-presigned-uploads.md),
+[browser-uploads.md](../../../docs/guides/browser-uploads.md)). Uploads cannot be
+combined with `server.requireSignedPayload`, and the chart refuses to render the
+two together.
+
 ## What it leaves out, and why
 
 - **The audit log and rollback detection.** Each is a file per instance that has
@@ -120,8 +143,10 @@ copy drifts from it.
   Kubernetes schemas and the Prometheus Operator CRDs, and require that it refuses
   to render without TLS. Then the EKS shape ([ci/eks-values.yaml](ci/eks-values.yaml)):
   rendered and validated, with the role annotation on the ServiceAccount, no AWS key
-  taken from any Secret, and the API token still unmounted; and the refusals of a
-  static source without a Secret and of a source that does not exist.
+  taken from any Secret, and the API token still unmounted; the refusals of a
+  static source without a Secret and of a source that does not exist; and the
+  status page, CORS and presigned uploads rendered, with uploads refused next to
+  `requireSignedPayload`.
 - `make chart-e2e` ([test/helm/kind.sh](../../../test/helm/kind.sh)): a kind
   cluster with MinIO, the chart installed from the checkout, and the AWS CLI in
   another pod putting a 20 MiB multipart object through it over TLS and reading it

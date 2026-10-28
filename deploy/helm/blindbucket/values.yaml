@@ -29,11 +29,26 @@ tls:
   existingSecret: ""
 
 server:
-  # Presigned URLs, for reads only (ADR-019). The URL carries the object's
-  # plaintext key and is a bearer credential until it expires.
+  # Presigned URLs (ADR-019). The URL carries the object's plaintext key and is
+  # a bearer credential until it expires.
   presign:
     enabled: true
     maxExpiry: 1h
+    # Presigned PutObject and UploadPart, for a backend that hands a browser a
+    # URL to upload one file to (ADR-036). Off until maxSize is set: the most
+    # one request may upload, per part for a multipart upload, up to 5GiB, such
+    # as 100MiB. maxExpiry caps an upload URL's window; empty is one hour.
+    # Cannot be combined with requireSignedPayload, because a presigned body is
+    # never signed. Needs gateway 1.6.0 or later.
+    uploads:
+      maxSize: ""
+      maxExpiry: ""
+  # The origins of browser pages that may call the gateway, a page uploading by
+  # presigned URL above all (ADR-036), exactly as a browser sends Origin:
+  # https://app.example, with no trailing slash. No wildcard. Empty answers no
+  # preflight. Needs gateway 1.6.0 or later.
+  cors:
+    allowedOrigins: []
   # Refuse every request whose body the client did not sign -- UNSIGNED-PAYLOAD
   # and STREAMING-UNSIGNED-PAYLOAD-TRAILER alike (ADR-029). For a cluster where
   # TLS ends before the gateway and the hop after it is not trusted; the clients
@@ -129,6 +144,15 @@ service:
   # The admin port serves metrics and health. It is on the Service so that a
   # ServiceMonitor can reach it; the NetworkPolicy below narrows who else can.
   adminPort: 9100
+
+# The read-only status page (ADR-035): health, the keyring and what seals it,
+# and whether the audit log verifies. It listens on the pod's loopback only and
+# is on no Service; reach it with
+#   kubectl port-forward pod/<pod> 9101:<port>
+# whose RBAC is what stands in front of it. Needs gateway 1.6.0 or later.
+dashboard:
+  enabled: false
+  port: 9101
 
 # Only the pods selected here may reach the S3 port; the admin port stays open
 # to the namespaces listed under metricsFrom. Off by default because it depends

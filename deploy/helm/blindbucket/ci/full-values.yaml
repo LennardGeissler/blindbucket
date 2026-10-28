@@ -16,7 +16,10 @@ keys:
 clients:
   - { name: backup-job, existingSecret: backup-job-s3, buckets: [backups] }
   - { name: reports, existingSecret: reports-s3, buckets: ["*"] }
-server: { requireSignedPayload: true }
+server:
+  requireSignedPayload: true
+  cors: { allowedOrigins: ["https://app.example"] }
+dashboard: { enabled: true }
 names: { encrypt: true }
 networkPolicy:
   enabled: true

@@ -171,6 +171,17 @@ chart: ## Lint, render and validate the Helm chart.
 	@! $(HELM) template bb blindbucket -f blindbucket/ci/eks-values.yaml --set upstream.credentialSource=sso >/dev/null 2>&1 \
 		|| { echo "the chart rendered an unknown credential source"; exit 1; }
 	@echo "refuses static without a Secret, and an unknown source: ok"
+	@# The status page on the pod's loopback, CORS, and presigned uploads, which
+	@# need a listener that accepts unsigned bodies, so they render apart.
+	@grep -q 'listen: "127.0.0.1:9101"' bin/chart.yaml && grep -q 'https://app.example' bin/chart.yaml \
+		|| { echo "the dashboard or CORS did not render"; exit 1; }
+	@$(HELM) template bb blindbucket -f blindbucket/ci/full-values.yaml --set server.requireSignedPayload=false \
+		--set server.presign.uploads.maxSize=100MiB | grep -q 'max_size: "100MiB"' \
+		|| { echo "presigned uploads did not render"; exit 1; }
+	@! $(HELM) template bb blindbucket -f blindbucket/ci/full-values.yaml \
+		--set server.presign.uploads.maxSize=100MiB >/dev/null 2>&1 \
+		|| { echo "the chart rendered presigned uploads with requireSignedPayload"; exit 1; }
+	@echo "renders the dashboard, CORS and uploads, and refuses uploads with signed bodies only: ok"
 
 .PHONY: app-nextcloud
 app-nextcloud: ## Run Nextcloud through the gateway (test/apps/nextcloud, M12).

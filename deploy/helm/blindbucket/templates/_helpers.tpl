@@ -38,6 +38,12 @@ the cluster network, which is the one outcome this chart exists to prevent.
 {{- if and (eq .Values.upstream.credentialSource "static") (not .Values.upstream.existingSecret) -}}
 {{- fail "upstream.existingSecret is required with upstream.credentialSource=static: a Secret with access_key_id and secret_access_key. On EKS, set credentialSource to web_identity or container instead" -}}
 {{- end -}}
+{{- if and .Values.server.presign.uploads.maxSize .Values.server.requireSignedPayload -}}
+{{- fail "server.presign.uploads.maxSize cannot be combined with server.requireSignedPayload: a presigned upload's body is never signed, and the gateway refuses the combination" -}}
+{{- end -}}
+{{- if and .Values.server.presign.uploads.maxSize (not .Values.server.presign.enabled) -}}
+{{- fail "server.presign.uploads.maxSize needs server.presign.enabled" -}}
+{{- end -}}
 {{- if not .Values.keys.keyringSecret -}}
 {{- fail "keys.keyringSecret is required: a Secret with the keyring under keyring.json" -}}
 {{- end -}}
