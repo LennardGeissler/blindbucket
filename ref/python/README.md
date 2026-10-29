@@ -15,6 +15,7 @@ pip install --require-hashes -r requirements.txt
 python3 test_vectors.py                  # the normative known-answer vectors
 python3 test_names_vectors.py            # the same, for the object name mapping
 python3 test_tags_vectors.py             # the same, for the tag sidecar of §17
+python3 test_keyring_vectors.py          # the same, for the keyring file of §18
 python3 difftest.py --count 100000       # against the Go decoder
 python3 difftest_names.py --count 100000 # the same, for the name mapping
 
@@ -49,6 +50,14 @@ the same reason: the vectors fix the sealed bytes, so reproducing them takes an
 encoder. It is small, because the sidecar composes nothing; it is here because a
 format section nobody implemented from the text alone is a claim, not a check.
 
+**Section 18, the keyring file's version 2, in `keyring_ref.py`** — a reader only,
+given root keys as a key service or a passphrase would yield them. The vectors fix
+what a file opens to and which files are refused, so a reader is what checks them.
+It is here for the rules more than the cryptography: which failures refuse the
+whole file and which leave one tenant unopened, and which tenant a bucket is in.
+Those are what decide whether a destroyed tenant's buckets fall back to the default
+tenant, and the Go reader got one of them wrong until the vectors showed it.
+
 The multipart manifest (§10) and the upload token (§11) are not implemented. They
 are coordination structures rather than content format, and the interesting
 property there — the lifecycle rules — is checked by the TLA+ model in
@@ -58,10 +67,12 @@ property there — the lifecycle rules — is checked by the TLA+ model in
 
 **Known-answer vectors.** §13 makes the ten segment vectors in
 [`testdata/vectors/`](../../testdata/vectors/) a normative part of the
-specification, §15.6 does the same for the fifteen name-mapping vectors, and §17.5
-for the eight tag vectors. The reference decoder opens all ten segments to exactly
-their recorded plaintext, reproduces all fifteen stored keys character for
-character, and all eight sidecars and their paths byte for byte.
+specification, §15.6 does the same for the fifteen name-mapping vectors, §17.5
+for the eight tag vectors, and §18.8 for the twenty-two keyring vectors. The
+reference decoder opens all ten segments to exactly their recorded plaintext,
+reproduces all fifteen stored keys character for character and all eight sidecars
+and their paths byte for byte, opens the nine accepted keyrings to exactly their
+keys, tenants and buckets, and refuses the thirteen others.
 
 **Differential fuzzing.** `difftest.py` generates valid segments with the Go
 encoder, mutates them, and feeds every result to both decoders. The only thing

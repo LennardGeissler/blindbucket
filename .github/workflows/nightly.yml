@@ -45,6 +45,10 @@ jobs:
         working-directory: ref/python
         run: python3 test_tags_vectors.py
 
+      - name: Known-answer vectors (keyring, version 2)
+        working-directory: ref/python
+        run: python3 test_keyring_vectors.py
+
       - name: Differential fuzzing
         working-directory: ref/python
         run: python3 difftest.py --count 250000 --seeds 400 --seed ${{ github.run_number }}

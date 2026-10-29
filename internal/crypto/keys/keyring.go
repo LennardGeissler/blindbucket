@@ -395,10 +395,24 @@ func (r *Keyring) MarshalWithRootKey(rootKey []byte, ref RootKeyRef) ([]byte, er
 }
 
 func (r *Keyring) marshal(rootKey []byte, ref RootKeyRef, params *KDFParams) ([]byte, error) {
+	file, err := r.buildFile(rootKey, ref, params)
+	if err != nil {
+		return nil, err
+	}
+	out, err := json.MarshalIndent(file, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(out, '\n'), nil
+}
+
+// buildFile wraps every secret of the keyring under rootKey into the version 1
+// file structure (docs/FORMAT.md section 18.1), which a version 2 file extends.
+func (r *Keyring) buildFile(rootKey []byte, ref RootKeyRef, params *KDFParams) (keyringFile, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.active == "" {
-		return nil, fmt.Errorf("keys: refusing to write an empty keyring")
+		return keyringFile{}, fmt.Errorf("keys: refusing to write an empty keyring")
 	}
 
 	file := keyringFile{
@@ -407,12 +421,12 @@ func (r *Keyring) marshal(rootKey []byte, ref RootKeyRef, params *KDFParams) ([]
 	for _, kid := range sortedKeys(r.keks) {
 		aad, err := kekAAD(kid)
 		if err != nil {
-			return nil, err
+			return keyringFile{}, err
 		}
 		kek := r.keks[kid]
 		wrapped, err := sealKey(rootKey, kek[:], aad)
 		if err != nil {
-			return nil, err
+			return keyringFile{}, err
 		}
 		file.Keys = append(file.Keys, keyEntry{
 			KID:     kid,
@@ -424,7 +438,7 @@ func (r *Keyring) marshal(rootKey []byte, ref RootKeyRef, params *KDFParams) ([]
 	if r.audit != nil {
 		entry, err := sealAudit(rootKey, r.audit)
 		if err != nil {
-			return nil, err
+			return keyringFile{}, err
 		}
 		file.Audit = entry
 	}
@@ -432,7 +446,7 @@ func (r *Keyring) marshal(rootKey []byte, ref RootKeyRef, params *KDFParams) ([]
 	if r.name != nil {
 		entry, err := sealName(rootKey, r.name)
 		if err != nil {
-			return nil, err
+			return keyringFile{}, err
 		}
 		file.Name = entry
 	}
@@ -440,16 +454,12 @@ func (r *Keyring) marshal(rootKey []byte, ref RootKeyRef, params *KDFParams) ([]
 	if r.freshness != nil {
 		entry, err := sealFreshness(rootKey, r.freshness)
 		if err != nil {
-			return nil, err
+			return keyringFile{}, err
 		}
 		file.Freshness = entry
 	}
 
-	out, err := json.MarshalIndent(file, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	return append(out, '\n'), nil
+	return file, nil
 }
 
 // sealFreshness wraps the rollback-index key.

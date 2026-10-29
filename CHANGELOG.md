@@ -16,6 +16,14 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Added
+
+- **The keyring file is specified, with version 2 for tenants.** FORMAT.md §18 writes
+  down the keyring as every release has written it, and version 2, which holds tenants
+  under locks of their own ([ADR-038](docs/adr/ADR-038-tenants-and-crypto-shredding.md)).
+  Twenty-two known-answer vectors pin it, and the Python reference reads them. Nothing
+  reads or writes version 2 yet: this release still refuses such a file.
+
 ### Fixed
 
 - **A bucket's 409 from the provider is the client's answer, not a 502.**

@@ -111,10 +111,14 @@ default tenant.
   moved by `migrate-names` from the default name key to the tenant's, under
   ADR-022's rule: every instance switched first, then the migration.
 - **Audit entries about a tenant's buckets** encrypt their names under a key derived
-  from the tenant's name key, and record the tenant in clear. After destruction
-  those names are opaque for good, while the chain and the checkpoints still verify:
-  they cover what is stored, not the plaintext. The audit secret stays
-  deployment-wide.
+  from the tenant's name key, and record nothing else about the tenant. A reader
+  finds the key by trying those it holds, which the name encryption's own check
+  makes unambiguous (FORMAT §14.5), so the entry's fields and the audit format
+  stay as they are. After destruction those names are opaque for good, while the
+  chain and the checkpoints still verify: they cover what is stored, not the
+  plaintext. The audit secret stays deployment-wide. *Amended while writing FORMAT
+  §14.5: a `tenant` field in clear, as first planned, would have changed the
+  entry's hash and every verifier with it.*
 - **A destroyed tenant's buckets are refused**, reads and writes, with
   `403 AccessDenied` and a message naming the destruction. They do not fall back to
   the default tenant. Without that, the first write after a destruction would store
@@ -213,8 +217,8 @@ and in the audit log.
   tenant's data, wrapped under its keys, and that is correct.
 - **Plaintext that left the gateway**: client copies, caches, and the memory, swap
   and core dumps of processes that held the keys (A5, out of scope).
-- **The audit log's clear fields**: client, principal, operation, code, key id,
-  tenant and time stay readable. So do the freshness index's entries, which are
+- **The audit log's clear fields**: client, principal, operation, code, key id
+  and time stay readable. So do the freshness index's entries, which are
   keyed hashes under the deployment's freshness key and say nothing without it.
 - **The ciphertext against future cryptanalysis of AES-256-GCM.** The bytes stay at
   the provider until someone deletes them, and destroying the tenant does not delete

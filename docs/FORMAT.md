@@ -1,8 +1,11 @@
 # blindbucket Wire Format — Version 1
 
 **Status:** Normative for format version `1`, and implemented as specified.
-**Last updated:** 2026-10-21 (section 17, object tags, added with
-`internal/crypto/tags`, [ADR-037](adr/ADR-037-encrypted-object-tags.md); before that,
+**Last updated:** 2026-10-29 (section 18, the keyring file, written down with
+version 2 for tenants, and sections 3, 14.5 and 15.1 amended for them,
+[ADR-038](adr/ADR-038-tenants-and-crypto-shredding.md); before that, 2026-10-21:
+section 17, object tags, added with `internal/crypto/tags`,
+[ADR-037](adr/ADR-037-encrypted-object-tags.md); before that,
 2026-10-03: section 10.7: R3 deletes the observed manifest only once
 it has seen the object replaced, [ADR-025](adr/ADR-025-writes-rank-by-when-they-began.md);
 before that, format `1` declared stable with `v1.0.0`; section 15, the object name
@@ -10,13 +13,15 @@ mapping, added with `internal/crypto/names`; section 14, the audit log, added wi
 `internal/audit`; clarifications from the independent reference decoder, and the manifest
 and upload token of sections 10 and 11 becoming normative with M4)
 
-Every section is implemented. Sections 4 to 9 live in `internal/crypto/stream`,
+Every section but the version 2 parts of 18 is implemented. Sections 4 to 9 live in `internal/crypto/stream`,
 `internal/crypto/keys` and `internal/crypto/envelope` and are pinned by the
 known-answer vectors of section 13; section 10 is `internal/manifest`, section 11
 is `internal/upload`, section 14 is `internal/audit`, section 15 is
-`internal/crypto/names`, pinned by its own vectors. Section 17's encoding and seal
-are `internal/crypto/tags`, pinned by its own vectors as well; the gateway does not
-write sidecars yet ([ADR-037](adr/ADR-037-encrypted-object-tags.md)).
+`internal/crypto/names`, pinned by its own vectors. Section 17 is
+`internal/crypto/tags`, pinned by its own vectors as well, and the gateway has
+written tag sidecars since `v1.6.0`. Section 18 is `internal/crypto/keys`; its
+version 1 is what every release has written, and version 2, tenants, is specified
+ahead of the code ([ADR-038](adr/ADR-038-tenants-and-crypto-shredding.md)).
 
 This document is the authoritative specification of the bytes blindbucket writes to
 object storage. It is written so that an independent implementation can interoperate
@@ -91,6 +96,20 @@ Root key            external: AWS KMS | Vault Transit | Argon2id(passphrase)
 A DEK MUST be generated with a CSPRNG and MUST NOT be derived from any value chosen
 by the storage provider (notably not from the upstream `UploadId`; see
 [ADR-006](adr/ADR-006-upload-token.md)).
+
+With tenants ([ADR-038](adr/ADR-038-tenants-and-crypto-shredding.md)) a keyring holds
+several such trees. The default tenant's KEKs are under the deployment's root key;
+each other tenant's are under a root key of its own, or under the deployment's if it
+has none:
+
+```
+Root key (deployment)     └─ default tenant's KEKs, name key; audit and freshness keys; the directory
+Root key (tenant "acme")  └─ acme's KEKs, acme's name key
+```
+
+Below the KEK nothing changes: a DEK, its subkeys and an upload token's key are
+derived the same way whichever tenant's KEK it is. Which tenant a bucket is in,
+and so which KEK and name key apply, is §18.5.
 
 ### 3.1 Key identifiers
 
@@ -755,6 +774,22 @@ occur. Such a name is not recoverable.
 
 `client`, `principal`, `op`, `code` and `kid` are in clear.
 
+**Entries about a tenant's bucket** (§18.5) use another `nameKey` for both names,
+derived from the tenant's name key rather than from the audit secret:
+
+```
+nameKey_T = HKDF-SHA256(tenant name key, salt = "", info = "blindbucket/v1/tenant-audit-name", L = 32)
+```
+
+The entry records nothing else about the tenant, so the fields, the chain and the
+format version stay as they are, and a verifier needs no key at all. A reader
+that shows names finds the key by trying the ones it holds: the audit secret's
+`nameKey`, then each opened tenant's `nameKey_T`. §15.4's check accepts at most one
+of them, since a wrong key fails it with probability 1 − 2⁻¹²⁸ per segment. Once a
+tenant is destroyed no key accepts its entries' names, and they stay opaque, while
+the entries still verify. A `kid` in clear may name its tenant all the same, if the
+operator's key ids do.
+
 ### 14.6 Keys
 
 The audit secret is 32 bytes, stored in the keyring wrapped under the root key
@@ -788,7 +823,8 @@ Design, alternatives and what the mapping does *not* hide:
 
 ### 15.1 Keys
 
-Two keys are derived from the keyring's 32-byte name key:
+Two keys are derived from a 32-byte name key: the keyring's, or, for a bucket in a
+tenant, that tenant's (§18.5):
 
 ```
 K_prf = HKDF-SHA256(ikm = name_key, salt = "", info = "blindbucket/v1/name-prf", L = 32)
@@ -932,6 +968,11 @@ type next to the segment and the manifest and changes neither, so it needs no ne
 format version: an object without tags is written exactly as before, and a reader
 that does not know section 17 reads every object it could read before.
 
+The keyring file of section 18 carries its own `version`. Version 1 is what every
+release so far writes and reads. Version 2 adds tenants; a file is written as
+version 2 only once it has a tenant, so a deployment without tenants keeps files
+older releases can open.
+
 The audit log of section 14 carries its own version, in the `v` field of each
 head. It is at `1`, and it moves independently of the object format above: the
 two describe different files, and a change to one has no reason to invalidate
@@ -1042,4 +1083,238 @@ Regenerate them after a deliberate change with:
 
 ```sh
 go test ./internal/crypto/tags -run TestKnownAnswerVectors -update
+```
+
+---
+
+## 18. The keyring file
+
+A keyring holds the key-encryption keys and the deployment's other secrets, each
+wrapped under a root key ([ADR-002](adr/ADR-002-key-hierarchy.md),
+[ADR-013](adr/ADR-013-root-key-sources.md)). It is not stored at the provider, but it
+is data at rest all the same: every instance reads it, and a later release has to
+open every file an earlier one wrote ([ADR-021](adr/ADR-021-what-1.0-promises.md)).
+Version 1 is what every release so far has written. Version 2 adds tenants
+([ADR-038](adr/ADR-038-tenants-and-crypto-shredding.md)): sets of buckets with keys of
+their own, each sealed under a lock of its own.
+
+The file is a UTF-8 JSON object. Binary values are standard base64 with padding.
+A reader MUST ignore members it does not know, which is what lets a version 1 file
+carry `generation` (§18.1) without older readers noticing.
+
+### 18.1 Version 1
+
+| Member | Content |
+|---|---|
+| `version` | `1` |
+| `generation` | optional; an integer that increases with every write of the file. Not authenticated, and used for nothing but reporting which file an instance loaded |
+| `kdf` | for a passphrase keyring: `algorithm` (`"argon2id"`), `salt`, `time`, `memory_kib`, `parallelism` |
+| `root_key` | for a keyring sealed by a key service: `source` (`"vault-transit"` or `"awskms"`), `ciphertext`, `key_name`, `context` |
+| `active_kid` | the key id new data keys are wrapped under |
+| `keys` | one or more `{kid, created, wrapped}`; `created` is RFC 3339 and may be absent |
+| `audit_key` | optional; `{wrapped, public_key}` (§14.6) |
+| `name_key` | optional; `{wrapped}` (§15.1) |
+| `freshness_key` | optional; `{wrapped}`, the rollback index's key |
+
+A passphrase keyring has `kdf`, and a `root_key` that is either absent (files
+written before key services existed) or `{"source": "passphrase"}`. A keyring sealed
+by a key service has `root_key` and no `kdf`. The **root key** is 32 bytes. For a passphrase it is
+`Argon2id(passphrase, salt, time, memory_kib, parallelism, 32)`, and a reader MUST
+refuse a `salt` shorter than 16 bytes, `time` outside 1..16, `memory_kib` outside
+1..1048576 and `parallelism` outside 1..16, since the parameters come from the
+file. For a key service it is what that service decrypts `ciphertext` to; how is the
+service's protocol, not this format's.
+
+Every `wrapped` value is
+
+```
+Wrapped = Nonce(12) || AES-256-GCM-Seal(key = root key, nonce = Nonce, plaintext = secret, aad = AAD)
+```
+
+over a 32-byte secret, with these associated data:
+
+| Secret | AAD |
+|---|---|
+| KEK | `"blindbucket/v1/kek" \|\| lp(kid)` |
+| audit secret | `"blindbucket/v1/audit-secret"` |
+| name key | `"blindbucket/v1/name-key"` |
+| freshness key | `"blindbucket/v1/freshness-key"` |
+
+`active_kid` MUST name one of `keys`, and key ids MUST be unique and valid (§3.1).
+A reader MUST refuse a file in which any of these fails, or in which any `wrapped`
+value does not open: the keys of a version 1 file are opened together or not at all.
+
+### 18.2 Version 2
+
+A version 2 file is a version 1 file, read as in §18.1, with two more members and
+`generation` required:
+
+| Member | Content |
+|---|---|
+| `directory` | `Wrapped` (§18.1) of the directory (§18.3) under the deployment's root key, with the AAD `"blindbucket/v1/directory"` |
+| `tenants` | one section per live tenant (§18.4) |
+
+What §18.1 describes becomes the **default tenant**: its keys, its name key, and
+the deployment-wide audit and freshness keys. Every bucket that no tenant claims
+belongs to it, so a version 2 file without a single bucket assigned means what the
+same file in version 1 means.
+
+A writer MUST write version 2 when the directory lists at least one tenant or one
+tombstone, and version 1 otherwise. Once a tenant has been destroyed, its tombstone
+stays, so the file stays version 2. Releases that read only version 1 refuse it,
+and they have to: a reader that ignored the tenants would wrap their buckets under
+the default tenant's keys.
+
+### 18.3 The directory
+
+The directory is a JSON object, sealed whole, so that nothing in it can be read or
+changed without the deployment's root key:
+
+```json
+{
+  "generation": 7,
+  "tenants": [
+    {
+      "name": "acme",
+      "buckets": ["acme-*", "shared-reports"],
+      "kids": ["acme-2026-10"],
+      "active_kid": "acme-2026-10",
+      "locks": [
+        {"source": "awskms", "key_name": "alias/bb-acme-2025"},
+        {"source": "awskms", "key_name": "alias/bb-acme"}
+      ]
+    }
+  ],
+  "tombstones": [
+    {
+      "name": "globex",
+      "buckets": ["globex-*"],
+      "kids": ["globex-1"],
+      "locks": [{"source": "passphrase", "salt": "q83vEjRWeJA..."}],
+      "destroyed": "2026-11-02T10:00:00Z"
+    }
+  ]
+}
+```
+
+- `generation` MUST equal the file's own `generation`. The copy in clear is for
+  reporting; this one is what is trusted.
+- A tenant's `name` is 1 to 64 bytes of `A-Z a-z 0-9 . _ -`, like a key id
+  (§3.1), and MUST NOT be `default`, which names the default tenant.
+- `kids` lists every KEK the tenant has, current or retired, at least one.
+  `active_kid` is one of them, or the empty string while the tenant is not yet
+  active. A tenant that is not active owns its buckets, but writes to them are
+  still wrapped under the default tenant's active KEK (ADR-038, rule 1).
+- `locks` is every lock the tenant's section has ever been sealed under, oldest
+  first; the last one is the current lock. A lock is
+  `{"source": "deployment"}` for a tenant under the deployment's own root key,
+  `{"source": "passphrase", "salt": …}` with its Argon2id salt, or
+  `{"source": "vault-transit" | "awskms", "key_name": …}`.
+- A tombstone keeps a destroyed tenant's `name`, `buckets`, `kids` and `locks`,
+  and the time it was destroyed. It has no section.
+
+### 18.4 Tenant sections
+
+Each member of `tenants` is
+
+| Member | Content |
+|---|---|
+| `name` | the tenant's name |
+| `kdf` or `root_key` | as in §18.1, for a tenant with a lock of its own; neither for a tenant under the deployment's root key |
+| `keys` | `{kid, created, wrapped}` for every id in the directory's `kids` |
+| `name_key` | `{wrapped}`, the tenant's name key |
+
+Its secrets are wrapped as in §18.1, under the **tenant's root key**: what its
+`kdf` or `root_key` yields, or the deployment's root key for a tenant without
+either. The associated data name the tenant, so that a section cannot be moved to
+another name:
+
+| Secret | AAD |
+|---|---|
+| KEK | `"blindbucket/v1/tenant-kek" \|\| lp(name) \|\| lp(kid)` |
+| name key | `"blindbucket/v1/tenant-name-key" \|\| lp(name)` |
+
+No prefix in §18.1 or here is a prefix of another, so no wrapped secret opens as a
+secret of another kind.
+
+### 18.5 Which tenant a bucket is in
+
+An entry of `buckets` is a bucket name, 3 to 63 bytes of `a-z 0-9 . -`, or a
+prefix of 1 to 62 such bytes followed by `*`. A bucket name matches an entry that
+equals it, and a prefix entry that it starts with.
+
+No two entries anywhere in the directory, live tenants and tombstones together,
+may **overlap**: two names overlap if they are equal, a name and a prefix if the
+name starts with the prefix, and two prefixes if one starts with the other. So a
+bucket matches at most one entry, and:
+
+- a bucket that matches a live tenant's entry is in that tenant;
+- a bucket that matches a tombstone's entry is in a destroyed tenant, and a reader
+  MUST refuse every request for it (ADR-038);
+- every other bucket is in the default tenant.
+
+A bucket's tenant decides the KEK a write is wrapped under: the tenant's
+`active_kid`, or the default tenant's while the tenant is not active. A read
+unwraps with the KEK `bb-kid` names, whichever tenant holds it (ADR-038). The
+tenant also decides the name key of §15 and the audit names of §14.5.
+
+### 18.6 Reading
+
+A reader MUST refuse to open a version 2 file, as a whole, if
+
+- `directory` is missing or does not open under the deployment's root key, or its
+  `generation` differs from the file's;
+- a tenant name is invalid or `default`, or is used twice among tenants and
+  tombstones;
+- a key id is used twice among the default tenant's `keys`, all tenants' `kids`
+  and all tombstones' `kids`;
+- a `buckets` entry is malformed, or two entries overlap (§18.5);
+- an `active_kid` is neither empty nor one of its tenant's `kids`;
+- the live tenants of the directory and the sections of `tenants` do not
+  correspond one to one by `name`;
+- a section's `keys` are not exactly its tenant's `kids`, or it has no
+  `name_key`;
+- a section's `kdf` or `root_key` does not match its tenant's last lock: its
+  source, and its `key_name` or `salt`.
+
+These are failures of the file, all visible without a key, and a file that fails
+one of them cannot be trusted to say which buckets are whose.
+
+A tenant whose root key the reader cannot obtain, or whose section has a `wrapped`
+value that does not open under it, is **unopened**. That is a failure of the tenant, not of the file. A reader MUST
+NOT use any key of an unopened tenant's section, MUST refuse requests for its
+buckets, and MUST NOT treat them as the default tenant's. Every other tenant is
+served. The deployment's own root key is different: if it cannot be obtained, the
+file cannot be opened at all.
+
+### 18.7 Writing
+
+Every write of the file MUST increase `generation`, in clear and in the directory
+alike. A writer MUST keep every rule of §18.6, and also:
+
+- a bucket entry, once in a tenant, stays there until the tenant is destroyed: a
+  tenant's `buckets` only grow;
+- a key id is never issued twice, including the ids of a destroyed tenant;
+- resealing a tenant appends its new lock to `locks`;
+- destroying a tenant removes its section and moves its `name`, `buckets`, `kids`
+  and `locks` into a tombstone, and a tombstone is never removed.
+
+The first rule is what keeps a destruction from reaching another tenant's data,
+and the last one what keeps a destroyed tenant's buckets refused rather than
+falling back to the default tenant (ADR-038).
+
+### 18.8 Test vectors
+
+Known-answer vectors live in
+[`testdata/vectors/keyring_v2.json`](../testdata/vectors/keyring_v2.json) and are a
+normative part of this specification, as those of sections 13, 15.6 and 17.5 are.
+Each fixes the root keys, the file, and what opening it must yield: the keys of
+every opened tenant, which tenants are unopened, and which bucket names fall in
+which tenant. Negative vectors fix files a reader must refuse, each for one rule of
+§18.6.
+
+Regenerate them after a deliberate change with:
+
+```sh
+go test ./internal/crypto/keys -run TestKeyringV2Vectors -update
 ```

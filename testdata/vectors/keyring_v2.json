@@ -1,0 +1,604 @@
+{
+  "note": "Known-answer vectors for docs/FORMAT.md section 18, version 2 of the keyring file. Root keys are given in hex as a key service or a passphrase would yield them; a tenant missing from tenant_roots is one whose root key cannot be obtained. A vector with `refused` is a file a reader must refuse as a whole. Regenerate with `go test ./internal/crypto/keys -run TestKeyringV2Vectors -update`.",
+  "vectors": [
+    {
+      "name": "a tenant with a lock of its own",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {
+        "acme": "b3e2f296fa992f65a2aa079cad545f764c579b0d08bb783c79e1a03875d39008"
+      },
+      "file": "{\n  \"version\": 2,\n  \"active_kid\": \"2026-10\",\n  \"root_key\": {\n    \"source\": \"vault-transit\",\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\"\n  },\n  \"keys\": [\n    {\n      \"kid\": \"2026-09\",\n      \"created\": \"2026-10-29T19:16:12.32233Z\",\n      \"wrapped\": \"+r6LmAMMd1sm1tn5lQUCW6zeOZATNw6eCTWJbPdt1Sv517p8QWgu1HYpDLuiN7f4e21a6SMDbwSr221s\"\n    },\n    {\n      \"kid\": \"2026-10\",\n      \"created\": \"2026-10-29T19:16:12.32233Z\",\n      \"wrapped\": \"FmF4pExut1+DgENy3S8afbupCrJQJ4czk3crd016U7X97RzZJffdkMMFjTcFG+NEbriHG66aL4GUitln\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"UcvuwBFmUNqOhqk6ZtG7W6xPr0vGxgLMT0IjVOzJa+IlO+1nb6JLN+p+h4xpBcWWsR/I9zcRqzG4NvSN\"\n  },\n  \"generation\": 7,\n  \"directory\": \"Fz5mN9hX5uwUh0zSxYY1S+3VHiuSLjDJ0ofeW3bZNzdhTboahsm/tB+MmAtAGOCcZeT9xWWfo7FzJ+cgk1lX82vvI0zIRejXzj4se1CTAogIYk6KyUmhq4mcCq3mcc2ZSb3UpY2xB5o/nkyMGRYGZh2RQCCEOdvLHJCnE50kI0IS3UGgSYrTz0ytw5TWGE6IYN6soQ+vnpPy4aQAk6oRyUtUoP/iFObLgC/5DtXaP+5jt/l59XVMgkkXBdtv1pQqZqz16wPCTBgEkYE2eycS/dxAKxFfeGPHXSH8g3AE7Kjmd4Qp3+MWiuMWtg==\",\n  \"tenants\": [\n    {\n      \"name\": \"acme\",\n      \"root_key\": {\n        \"source\": \"awskms\",\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\"\n      },\n      \"keys\": [\n        {\n          \"kid\": \"acme-2026-10\",\n          \"created\": \"2026-10-29T19:16:12.322283Z\",\n          \"wrapped\": \"WNygyY0Qru4E9IPeX4xD18JmuZFfCuHFlI+Eom0rU9fdHKEZSgB6c4P3FEs8NYWiyvP0GCiBG1rDJj7U\"\n        }\n      ],\n      \"name_key\": {\n        \"wrapped\": \"O9x1f1GX1aOGqjo5o+ot8DVu4xOEC6wt43qSszeyZNHAOZo+D17D0398yL0AwIUVfa2lOzgEKLavXLaO\"\n      }\n    }\n  ]\n}\n",
+      "expect": {
+        "default": {
+          "active_kid": "2026-10",
+          "keks": {
+            "2026-09": "492aff7c3fe3e70bf87c78d8e0498ab266eec45b2f0864e612d516c2606c594b",
+            "2026-10": "777f57f70b94e06f5223a6faee555289d552936394ac32bf4e754a6d20f30f7a"
+          },
+          "name_key": "50ec8fdf0113b0ecab6fc44002dbee9dbf7ff7efa0f174680198b5cc3a22c1c8"
+        },
+        "tenants": {
+          "acme": {
+            "active_kid": "acme-2026-10",
+            "keks": {
+              "acme-2026-10": "f80b4e732e19838f6dd43741a0913b10a4c12f1b09bb1c6df8d59eace260e159"
+            },
+            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba"
+          }
+        },
+        "unopened": [],
+        "buckets": {
+          "acme": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "acme-photos": {
+            "tenant": "acme",
+            "destroyed": false
+          },
+          "beta-1": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "globex-data": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "other": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "shared-reports": {
+            "tenant": "acme",
+            "destroyed": false
+          },
+          "shared-reports-2": {
+            "tenant": "default",
+            "destroyed": false
+          }
+        }
+      }
+    },
+    {
+      "name": "an inactive tenant under the deployment's lock",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {
+        "acme": "b3e2f296fa992f65a2aa079cad545f764c579b0d08bb783c79e1a03875d39008"
+      },
+      "file": "{\n  \"version\": 2,\n  \"active_kid\": \"2026-10\",\n  \"root_key\": {\n    \"source\": \"vault-transit\",\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\"\n  },\n  \"keys\": [\n    {\n      \"kid\": \"2026-09\",\n      \"created\": \"2026-10-29T19:16:12.323278Z\",\n      \"wrapped\": \"BCNfmPCSEPqkMheciGPKOLCL6MYX0nppU7J8j6Gx/ABMr5LZOk8tCXdhEzow3Clr6e27F6ebysqHuEL3\"\n    },\n    {\n      \"kid\": \"2026-10\",\n      \"created\": \"2026-10-29T19:16:12.323279Z\",\n      \"wrapped\": \"n31wXFI2dNxFmbTBwgoro+cQxLCL0Qnx5oFxkAmLGwIZvEGabuJ//bXcy9y5Z1pHQr5L526kqE3KQX1g\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"IJum9ESPluWMsh4swbBlosI9n1KGB39UhUx9EFC6d+6rjQxvKnKXM8sP9s0QRnmLNPVhg7/CNiEg7IUr\"\n  },\n  \"generation\": 7,\n  \"directory\": \"GxGA9px+iUaJikQu9qyTwI0QrfyZuXIPoFTdbBUPFo/7w+prcNcvdFdaRbK5IBIhnJKKnj/4zpEaoqaMQHVApKXIH7nLddMIhFs6Fm6W7WGRRCWDfrR4PBdgbhwt/i/rCY0km6tPpYUESViK9zJ+rlb3BBZ9mlIwJ6QzP7BhY1CgLrrzDmIyYOi8fm1d/2SbvNbdIHJFgrCos1THgM2RRJWcJ0yAGh/FZYbvL5CpG/ftPvPOil6RxdS8W4s6Z3FoKsU2DWK7C6QmYqLek06Hi/V+f2vEH5Z5GVF+R5EQE7efE10Hcn3kxieE2agIKslcRiXMCLZi2R0cdBhOd6uILnUm9GRcS9YrE7rDpk06+s5JUxFSA7z33JxC+QCb2bvZmTXtDRVyP8D/1EMU+Aen1LMLLpQQlTGlIq1fO05CT9e2wCD+3Hwx30QHC3vm+QW1DbF5Mw==\",\n  \"tenants\": [\n    {\n      \"name\": \"acme\",\n      \"root_key\": {\n        \"source\": \"awskms\",\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\"\n      },\n      \"keys\": [\n        {\n          \"kid\": \"acme-2026-10\",\n          \"created\": \"2026-10-29T19:16:12.322285Z\",\n          \"wrapped\": \"AwGsyp/g5MyRbCv/eByvz+N5f9sDhwSAWM1Mcuco5H4uBVMZpsOuyDR3J5G2nj4foBnLCOEsTXEQfhNV\"\n        }\n      ],\n      \"name_key\": {\n        \"wrapped\": \"gqKA/d2YFcy40LQUe72a2GeIToedrGYsA3kqYkAWAuWu8scD76LJmdGXBjZagpMRfzlBijYPiee+yA0E\"\n      }\n    },\n    {\n      \"name\": \"beta\",\n      \"keys\": [\n        {\n          \"kid\": \"beta-1\",\n          \"created\": \"2026-10-29T19:16:12.322286Z\",\n          \"wrapped\": \"85Y2tT02IEb4ltAYwZwPe5dq1tWaVcMWXqn/uJ3XXE0n6mI+CrVBUYk+beAYnkWv5ZfR9OGFOClkIcGr\"\n        }\n      ],\n      \"name_key\": {\n        \"wrapped\": \"tqEZLs4zSiSm/EAa1rAvcYpTtPB2paODpvclqn4+y5HSL56RasYlDfBC5M22BOc7R0359Isb7NbD+HBE\"\n      }\n    }\n  ]\n}\n",
+      "expect": {
+        "default": {
+          "active_kid": "2026-10",
+          "keks": {
+            "2026-09": "492aff7c3fe3e70bf87c78d8e0498ab266eec45b2f0864e612d516c2606c594b",
+            "2026-10": "777f57f70b94e06f5223a6faee555289d552936394ac32bf4e754a6d20f30f7a"
+          },
+          "name_key": "50ec8fdf0113b0ecab6fc44002dbee9dbf7ff7efa0f174680198b5cc3a22c1c8"
+        },
+        "tenants": {
+          "acme": {
+            "active_kid": "acme-2026-10",
+            "keks": {
+              "acme-2026-10": "f80b4e732e19838f6dd43741a0913b10a4c12f1b09bb1c6df8d59eace260e159"
+            },
+            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba"
+          },
+          "beta": {
+            "active_kid": "",
+            "keks": {
+              "beta-1": "a9488b0aa7199912d75486308bfcf2a15b7b311ed3e3b4e8eb71851fd9a457dd"
+            },
+            "name_key": "cff2acdc78936d311c7007251d901281c69928f224619a8cffa9c517ddbb42b8"
+          }
+        },
+        "unopened": [],
+        "buckets": {
+          "acme": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "acme-photos": {
+            "tenant": "acme",
+            "destroyed": false
+          },
+          "beta-1": {
+            "tenant": "beta",
+            "destroyed": false
+          },
+          "globex-data": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "other": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "shared-reports": {
+            "tenant": "acme",
+            "destroyed": false
+          },
+          "shared-reports-2": {
+            "tenant": "default",
+            "destroyed": false
+          }
+        }
+      }
+    },
+    {
+      "name": "a tenant whose root key cannot be obtained",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"version\": 2,\n  \"active_kid\": \"2026-10\",\n  \"root_key\": {\n    \"source\": \"vault-transit\",\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\"\n  },\n  \"keys\": [\n    {\n      \"kid\": \"2026-09\",\n      \"created\": \"2026-10-29T19:16:12.323378Z\",\n      \"wrapped\": \"Du4wiRe+BGA9i5G89ltEK4iWpByglpNcgw4BWqDE0zDJKz/7N5bNYqpgw9jKh0guYG3YPgyaZmafFCz0\"\n    },\n    {\n      \"kid\": \"2026-10\",\n      \"created\": \"2026-10-29T19:16:12.323378Z\",\n      \"wrapped\": \"I59hSSxcASbYyllpjKnloSnQ/zsEOLytDcNYxNHt2kYVpwHWG1fxUs0Z/+rq5HTPFYgtpx7TIn6dUL2r\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"A1Hl9MWsZdk0VxNju1FzSWPc2WZsUs1jsrX0oBPG2dOCAmw87OJFeC4+fEOAaGO29eztVoNJt4ZAosoK\"\n  },\n  \"generation\": 7,\n  \"directory\": \"R7CnuTEAXtakCBs6rmLjpgcm5eE4qDq0eyKH7FUH2hnFI9rd6urthh6JqeDm1tVDtVNZ4kER8mrRJQewwVeqoY+0Aoov5J5Fl5+UEYwtc9LSiW007y8tdmIjD2c93YByN8KGgFnzEYyHAOnE2mNgovy/JJuPahsHZvKviUY30eEnTD6dgOAmGCe6UK2Fesh++rM6is7KgVZmetLaX4ETN3y1wuq81uu4HmAELLAyC9CV9EgOgCsiOE2ZL5wLjIKMQzH2BVq5x8BUw3YzZOyuD41rMV103ATZGoeyNzxC3E6Fj+w4dKtAkjnrca135CjBZh9vKKojvna0vNXLCtsWYbVM+F6+X7cHDa4jNwwuivDHjaSNdkb8W/nk1SFbevi6AQZuqqX1WrjU54NBZ7aFN2dqC7EJP29in2PjFutdOFWFGibT4wRm3vkiuh4/9ZZ6mgB7eg==\",\n  \"tenants\": [\n    {\n      \"name\": \"acme\",\n      \"root_key\": {\n        \"source\": \"awskms\",\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\"\n      },\n      \"keys\": [\n        {\n          \"kid\": \"acme-2026-10\",\n          \"created\": \"2026-10-29T19:16:12.322289Z\",\n          \"wrapped\": \"BKSBObkysjiFt4Mq8ZiSc5ou/3wP7YnR+QFFJV8JS6vNXDD5z4N/f0ajKd4Ku/CHSFFr0BnxVzfXRIgy\"\n        }\n      ],\n      \"name_key\": {\n        \"wrapped\": \"PNEVzWvxlCI1TKdWS/uTdbIukAxMugmpfNRwbWJSL1Is+zwoLT7HQXJnBBmS1Ek55y217cB/KqaKApwv\"\n      }\n    },\n    {\n      \"name\": \"beta\",\n      \"keys\": [\n        {\n          \"kid\": \"beta-1\",\n          \"created\": \"2026-10-29T19:16:12.32229Z\",\n          \"wrapped\": \"wCHAVAMsigOANFkuZu9XpYcnxxOEJTy5mmM/eQ65g26QGA4LxPmBf615iQnrx9EpZMzgzrOOrRQbPgOF\"\n        }\n      ],\n      \"name_key\": {\n        \"wrapped\": \"xktv6xr+KikqLq1MtEsk+UsMD4KVuog0apV3AhHEFV5aFVHMWLXbvKkBpetGkD3C04LHfZgY9s7sRFS0\"\n      }\n    }\n  ]\n}\n",
+      "expect": {
+        "default": {
+          "active_kid": "2026-10",
+          "keks": {
+            "2026-09": "492aff7c3fe3e70bf87c78d8e0498ab266eec45b2f0864e612d516c2606c594b",
+            "2026-10": "777f57f70b94e06f5223a6faee555289d552936394ac32bf4e754a6d20f30f7a"
+          },
+          "name_key": "50ec8fdf0113b0ecab6fc44002dbee9dbf7ff7efa0f174680198b5cc3a22c1c8"
+        },
+        "tenants": {
+          "beta": {
+            "active_kid": "",
+            "keks": {
+              "beta-1": "a9488b0aa7199912d75486308bfcf2a15b7b311ed3e3b4e8eb71851fd9a457dd"
+            },
+            "name_key": "cff2acdc78936d311c7007251d901281c69928f224619a8cffa9c517ddbb42b8"
+          }
+        },
+        "unopened": [
+          "acme"
+        ],
+        "buckets": {
+          "acme": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "acme-photos": {
+            "tenant": "acme",
+            "destroyed": false
+          },
+          "beta-1": {
+            "tenant": "beta",
+            "destroyed": false
+          },
+          "globex-data": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "other": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "shared-reports": {
+            "tenant": "acme",
+            "destroyed": false
+          },
+          "shared-reports-2": {
+            "tenant": "default",
+            "destroyed": false
+          }
+        }
+      }
+    },
+    {
+      "name": "a tenant given the wrong root key",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {
+        "acme": "2a4d4cee201c0f4eaae76bab532a778d056bfca0cd65795f0592f7bdf93b5a86"
+      },
+      "file": "{\n  \"version\": 2,\n  \"active_kid\": \"2026-10\",\n  \"root_key\": {\n    \"source\": \"vault-transit\",\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\"\n  },\n  \"keys\": [\n    {\n      \"kid\": \"2026-09\",\n      \"created\": \"2026-10-29T19:16:12.323484Z\",\n      \"wrapped\": \"6IOZgwYtQT+AhVsmMdTSF+qogJm7SHeCKvLb4B20I+PinJdpZyEiBEn3FnpQ5iXNVbcHDBi46kqXu7z0\"\n    },\n    {\n      \"kid\": \"2026-10\",\n      \"created\": \"2026-10-29T19:16:12.323485Z\",\n      \"wrapped\": \"bZqqvGBaURAJsn+bsIRcbDHFOOFz+4jGgO+teLcikxiNrFAnYE2P+jSUg7rg7BiQtKSpB+1h4ejSRZgO\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"gQC7RDo4CnWemvn5LDRi41k+DQkQBFtC6WARwqX8BAH2gyTcBNn6ENHSMd3yeADewS8hPB+Jlu+JHbfK\"\n  },\n  \"generation\": 7,\n  \"directory\": \"VEOEvGXOOpJBFZAVdx6EkAV1ma6schxY5RvgGDLhFBePypsoMZIq6omn7l74/ixXNhKWl0UO0CdytCzWsnCwBa0krmS4VkTEPjW0a2LMazNiiZkZN88Zp2rqNEBvyheCQ+WkChE+w8tU1Px5ayP0AJrsWibmZE0TR2la24S440cYfhT4QKb/0CIgP65QgOAzxMq580PUiAIgVo8vqOtxU7yssXuiy4bKtpbk+saJagXTl/15clENUrKxMAfO1i67NXL0LcxprK+mLCQiz/aEH0ink2vRug0n2B08d+xNs2Nr4g7nLdSlP0BFYA==\",\n  \"tenants\": [\n    {\n      \"name\": \"acme\",\n      \"root_key\": {\n        \"source\": \"awskms\",\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\"\n      },\n      \"keys\": [\n        {\n          \"kid\": \"acme-2026-10\",\n          \"created\": \"2026-10-29T19:16:12.322292Z\",\n          \"wrapped\": \"wtK/ulQq5faCci+p+gD2WldOWMOStfbe0hoGh679ALglyPo7XxZkw9GCDcPaGgxTyM7HZz/NOorcabOY\"\n        }\n      ],\n      \"name_key\": {\n        \"wrapped\": \"89KR0L29obJ29+clETOsNNr5Jd9kZYipDT0LqUYoaxNgPV3FcuQbd84jAPnmADwTdf4Hw0i7CM7rW0R2\"\n      }\n    }\n  ]\n}\n",
+      "expect": {
+        "default": {
+          "active_kid": "2026-10",
+          "keks": {
+            "2026-09": "492aff7c3fe3e70bf87c78d8e0498ab266eec45b2f0864e612d516c2606c594b",
+            "2026-10": "777f57f70b94e06f5223a6faee555289d552936394ac32bf4e754a6d20f30f7a"
+          },
+          "name_key": "50ec8fdf0113b0ecab6fc44002dbee9dbf7ff7efa0f174680198b5cc3a22c1c8"
+        },
+        "tenants": {},
+        "unopened": [
+          "acme"
+        ],
+        "buckets": {
+          "acme": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "acme-photos": {
+            "tenant": "acme",
+            "destroyed": false
+          },
+          "beta-1": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "globex-data": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "other": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "shared-reports": {
+            "tenant": "acme",
+            "destroyed": false
+          },
+          "shared-reports-2": {
+            "tenant": "default",
+            "destroyed": false
+          }
+        }
+      }
+    },
+    {
+      "name": "a destroyed tenant",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {
+        "acme": "b3e2f296fa992f65a2aa079cad545f764c579b0d08bb783c79e1a03875d39008"
+      },
+      "file": "{\n  \"version\": 2,\n  \"active_kid\": \"2026-10\",\n  \"root_key\": {\n    \"source\": \"vault-transit\",\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\"\n  },\n  \"keys\": [\n    {\n      \"kid\": \"2026-09\",\n      \"created\": \"2026-10-29T19:16:12.323548Z\",\n      \"wrapped\": \"zLNVJIUMCUooMGSMcF4sYEBv46y/atEyoPC9qiPAP/jfEG7rNkmTmDYq0FrrltGWmOikQYqWtz+CdRhu\"\n    },\n    {\n      \"kid\": \"2026-10\",\n      \"created\": \"2026-10-29T19:16:12.323549Z\",\n      \"wrapped\": \"SyfI5lN7H1CYox5hvloyi27rna7gQsxfOf/xyVc8ZZYxcYzje7JROdh7nErsCr/QezwbBfOstUIIbs1u\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"TNn2TKO0UnB1oJpkq3k1GgK/OVNjUEN1QNE6dfQaE04/vB7+plHaL8TMcgmPpacqzuQaZ9FPi3TcsdI7\"\n  },\n  \"generation\": 7,\n  \"directory\": \"QdNeOT/rrJBzgox5etIkbP97ibcqhdHAZPg/y6UTxRw+MpqhKQ7rp3ZAFXFwcoFxBKgZHl/bAGdV7d6h91xi6BQMf+8ycxNHG+e+i54RwBbkNO6EptZXAAhnhnRgGOiCxeAZ9Rytdg8fCjPomdFyu+d29WkUYraZ3ND1/AuhA5ITtwhp5Emuaj0pILFsISGH3Ns8PxvLyl3p4qReYtzEFMAecKsgx84+ehsiqZAlwzuRznemL9rcEsoW5vsjmWvuzxzu21K37EaaKrzg5NHRLdi2UNhXs3QMspt1Tka//dO/qYImUliiT4W/u4Iao18c86b7jBSDAIVs+s6bTph5hpyCHHbLW5u+URtMlvZKlOkgA7Dq9iJBa0Ea2cVIS8EFhWsqyWjC7eO4P4D95GSfkAP132CLFHG6UKKna91x7vrveVg8BEyV9jGC46BnIJv/y0ED3PLDNNONQQ/UHxZLMXS/RUrfG7F7c8NQkOHCSaqYn9ak9byrLLjarRVxiJqlKwOJ3x02\",\n  \"tenants\": [\n    {\n      \"name\": \"acme\",\n      \"root_key\": {\n        \"source\": \"awskms\",\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\"\n      },\n      \"keys\": [\n        {\n          \"kid\": \"acme-2026-10\",\n          \"created\": \"2026-10-29T19:16:12.322294Z\",\n          \"wrapped\": \"pnegcB9g9usJwY1yfvVrG+d4xaAbI6ooXzeSQLAWc0yrcQ3/SbPidFMXklAN1i0zedvzCWUiUmXaPIcu\"\n        }\n      ],\n      \"name_key\": {\n        \"wrapped\": \"bamqFeZvf84GGIuKm7ck5K6cu/wAgirKcL3/jW7ZUK6cdfT7QmVDCCR/tWXUVkMUazN7ciL3hg+3631i\"\n      }\n    }\n  ]\n}\n",
+      "expect": {
+        "default": {
+          "active_kid": "2026-10",
+          "keks": {
+            "2026-09": "492aff7c3fe3e70bf87c78d8e0498ab266eec45b2f0864e612d516c2606c594b",
+            "2026-10": "777f57f70b94e06f5223a6faee555289d552936394ac32bf4e754a6d20f30f7a"
+          },
+          "name_key": "50ec8fdf0113b0ecab6fc44002dbee9dbf7ff7efa0f174680198b5cc3a22c1c8"
+        },
+        "tenants": {
+          "acme": {
+            "active_kid": "acme-2026-10",
+            "keks": {
+              "acme-2026-10": "f80b4e732e19838f6dd43741a0913b10a4c12f1b09bb1c6df8d59eace260e159"
+            },
+            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba"
+          }
+        },
+        "unopened": [],
+        "buckets": {
+          "acme": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "acme-photos": {
+            "tenant": "acme",
+            "destroyed": false
+          },
+          "beta-1": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "globex-data": {
+            "tenant": "globex",
+            "destroyed": true
+          },
+          "other": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "shared-reports": {
+            "tenant": "acme",
+            "destroyed": false
+          },
+          "shared-reports-2": {
+            "tenant": "default",
+            "destroyed": false
+          }
+        }
+      }
+    },
+    {
+      "name": "only a tombstone",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"version\": 2,\n  \"active_kid\": \"2026-10\",\n  \"root_key\": {\n    \"source\": \"vault-transit\",\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\"\n  },\n  \"keys\": [\n    {\n      \"kid\": \"2026-09\",\n      \"created\": \"2026-10-29T19:16:12.323628Z\",\n      \"wrapped\": \"YLYaTtXCeza09dFvOgGjmSVzDwpU6qR0HOBz2GbzoWZpfWUrAq01pjjL1Rs3SXgoGasv2Yo9+ogqxjup\"\n    },\n    {\n      \"kid\": \"2026-10\",\n      \"created\": \"2026-10-29T19:16:12.323628Z\",\n      \"wrapped\": \"p/3um90ay1y5iCQ7bvvhHiDR+pkP3EWK4hs37KhZFyTMym6eyV7yiSs4qupfwo69Zj4V/K5JlPQ8CycI\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"RV7WLuXOF5DvWFPmVoa71lYgmHO2IrvMqOsP4ii62cvTnYsxs2flIoazA4RZn24Hqrjmen3DSF6O7Vfj\"\n  },\n  \"generation\": 7,\n  \"directory\": \"UAtDGbX4VatIvXb/0jzDgVFes6RklnmWS8NFlh55Cu4UMeJ7GiwobVgSoblcBbYWpqZMzNKPrKb8oB+E0W5ZgSQlhWzSnCd/gHtaYaVfK+ys7/9tahnLqGSAW5/1oqtLNqtgN0R52xEM34vRbiTMwiBDFU9MFl8mzIUxKjhi0GSTu0O8gRCs5mFO2xHaXQXtWiT+4XTIUNaAePfTyJ0j2A5COxH+FMac1/kGMuaI597xWOCj6GF7ncdl2zgRZYDfoswVMlOruvD2QO30di753ruyk5Tl/r5sVSeycF9fV4ThVTaj\",\n  \"tenants\": []\n}\n",
+      "expect": {
+        "default": {
+          "active_kid": "2026-10",
+          "keks": {
+            "2026-09": "492aff7c3fe3e70bf87c78d8e0498ab266eec45b2f0864e612d516c2606c594b",
+            "2026-10": "777f57f70b94e06f5223a6faee555289d552936394ac32bf4e754a6d20f30f7a"
+          },
+          "name_key": "50ec8fdf0113b0ecab6fc44002dbee9dbf7ff7efa0f174680198b5cc3a22c1c8"
+        },
+        "tenants": {},
+        "unopened": [],
+        "buckets": {
+          "acme": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "acme-photos": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "beta-1": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "globex-data": {
+            "tenant": "globex",
+            "destroyed": true
+          },
+          "other": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "shared-reports": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "shared-reports-2": {
+            "tenant": "default",
+            "destroyed": false
+          }
+        }
+      }
+    },
+    {
+      "name": "a resealed tenant",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {
+        "acme": "b3e2f296fa992f65a2aa079cad545f764c579b0d08bb783c79e1a03875d39008"
+      },
+      "file": "{\n  \"version\": 2,\n  \"active_kid\": \"2026-10\",\n  \"root_key\": {\n    \"source\": \"vault-transit\",\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\"\n  },\n  \"keys\": [\n    {\n      \"kid\": \"2026-09\",\n      \"created\": \"2026-10-29T19:16:12.32367Z\",\n      \"wrapped\": \"m2L/cDU8aBq97d3HL+8NF03ruaGcL09L3ezo3JW7i7a0NIsD/a4mxH0ZMYxgGT01hUE7GpitTwB/nYDF\"\n    },\n    {\n      \"kid\": \"2026-10\",\n      \"created\": \"2026-10-29T19:16:12.32367Z\",\n      \"wrapped\": \"H1UzJs9wxk6rghyajDX78bw53kJ/Pb+AO0B9jZ68cHOm1xLzv++lOk+/wjSv6TEvzer0MLKygdJVawtO\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"DHLRaz4k0jcCN1/G3bcI+bJ2ph2jBQKxDnkMwp3Qs7NPYDm9LyPueJDonD3S2kDr7rlwTXcB+bWWr3WG\"\n  },\n  \"generation\": 7,\n  \"directory\": \"0wU1XhxsR5du6gmps9BtCtgcRowHjy1Kihtp9Wo99pKQPUdMEPv4dTC1qubP7W0nBPHjgV4B0s1zKzs1w36sZeBKQOUscvhtElIzrqkjq+/S6NDnf6yhHD7HPv/cYSY0JsSY8DfsWGxrD8mRCnX0+cKd5JS0xpB5doa8OYJyaT1g1XIA6j7XZVw+tTqS+HwIxhLmiWGfbeUgQkP53HHZLErnGEyy+vbpo5rFIrcd5gFTAbPlFZsT9uMArdgzYYKYE5kYEUDzHRHnP8t0GYnUyeLy5FgthX30D4uFZluO2OHZYyiP+J30ClAewF2LYR6mhJcG9fNPNrWqijw73uGx/4SVvPqqilMa9V+o2lwAt3yIbZZ/of9iOl9EQKKM9bU=\",\n  \"tenants\": [\n    {\n      \"name\": \"acme\",\n      \"root_key\": {\n        \"source\": \"awskms\",\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\"\n      },\n      \"keys\": [\n        {\n          \"kid\": \"acme-2026-10\",\n          \"created\": \"2026-10-29T19:16:12.322193Z\",\n          \"wrapped\": \"+yuFglaNppsnEPbn+jn/SiL0kBsuF5Ab4ez7RNX6SEAsRGQ7v3Hz7dAjz9uiuxxdrr9WFJpCL3vkGsi4\"\n        }\n      ],\n      \"name_key\": {\n        \"wrapped\": \"xdnJKwwsVkfEvbaJ88ccfSx8AcXtgVeEHcBL0BsahTld9m14IzW/xlioygL5UQnXpCpY1GQL+InvLHIj\"\n      }\n    }\n  ]\n}\n",
+      "expect": {
+        "default": {
+          "active_kid": "2026-10",
+          "keks": {
+            "2026-09": "492aff7c3fe3e70bf87c78d8e0498ab266eec45b2f0864e612d516c2606c594b",
+            "2026-10": "777f57f70b94e06f5223a6faee555289d552936394ac32bf4e754a6d20f30f7a"
+          },
+          "name_key": "50ec8fdf0113b0ecab6fc44002dbee9dbf7ff7efa0f174680198b5cc3a22c1c8"
+        },
+        "tenants": {
+          "acme": {
+            "active_kid": "acme-2026-10",
+            "keks": {
+              "acme-2026-10": "f80b4e732e19838f6dd43741a0913b10a4c12f1b09bb1c6df8d59eace260e159"
+            },
+            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba"
+          }
+        },
+        "unopened": [],
+        "buckets": {
+          "acme": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "acme-photos": {
+            "tenant": "acme",
+            "destroyed": false
+          },
+          "beta-1": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "globex-data": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "other": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "shared-reports": {
+            "tenant": "acme",
+            "destroyed": false
+          },
+          "shared-reports-2": {
+            "tenant": "default",
+            "destroyed": false
+          }
+        }
+      }
+    },
+    {
+      "name": "a tenant sealed by a passphrase",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {
+        "acme": "b3e2f296fa992f65a2aa079cad545f764c579b0d08bb783c79e1a03875d39008"
+      },
+      "file": "{\n  \"version\": 2,\n  \"active_kid\": \"2026-10\",\n  \"root_key\": {\n    \"source\": \"vault-transit\",\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\"\n  },\n  \"keys\": [\n    {\n      \"kid\": \"2026-09\",\n      \"created\": \"2026-10-29T19:16:12.323729Z\",\n      \"wrapped\": \"IJ+/0lvZGg+UatcmJEfeaOGTkH3jDLqPTAaKYuI8mVzIMM5SuTbwehYIFs+NcrR6E3Un2jC7TkNitxS8\"\n    },\n    {\n      \"kid\": \"2026-10\",\n      \"created\": \"2026-10-29T19:16:12.323729Z\",\n      \"wrapped\": \"LL57JwctDPKOfMMN70fDG6ufE27BRQfk67eNDkrnfa/Sbped6YgDcdl2h6pBAA1Z0Vl0KcjXa6GuMqPs\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"8vjq3jCIpBxRKDg8bC4GyxIiBll3LJ0nzEIHm8v+pwpkO4Of4CO4S50wrSpoJTfoNtgHUX5bHOU7Nhp7\"\n  },\n  \"generation\": 7,\n  \"directory\": \"rWLE5PaPKyOElFmLwg2fRL12ikq74G17rE020OMNTMHSuEQWkDgf+Z1C9R3XNH/MhT1KC4g1PjAMbzqDkc6qGh/FAVwnLGDKPXAL/0SdtnOiZPHuQX2Ayf/ad9Cb8VYmpIjqIDLwhQWYapJYqyOWHefzJEcsMewzAxESfhxuUqfIqyi+7IJhh6FNWBctSIFG8hVIRX4UKOwrq09TljnVqtB0tvJC6OEMc6zzK2FQzWnnjar8aOGuiw4yXeZ+dMDTlq4v6wlZIvQfbc7E7dgQ+m3gAfYmTTjC0FjxtUfHuS8RNnUN6AKHIIM1Qbo1KdbJv+Gg6kx/\",\n  \"tenants\": [\n    {\n      \"name\": \"acme\",\n      \"kdf\": {\n        \"algorithm\": \"argon2id\",\n        \"salt\": \"syEpG68yQScTH0mIGZ2eCg==\",\n        \"time\": 3,\n        \"memory_kib\": 65536,\n        \"parallelism\": 4\n      },\n      \"keys\": [\n        {\n          \"kid\": \"acme-2026-10\",\n          \"created\": \"2026-10-29T19:16:12.32228Z\",\n          \"wrapped\": \"y0Kip9+KUj3LHC4MeB1wDbKL6WhZeYDLNGE/pmAWbIsVb+bkE+CPHa7zes3eLsigGFpvSmLQ8AfirA+L\"\n        }\n      ],\n      \"name_key\": {\n        \"wrapped\": \"J8gQEHZtQtXJv9BkgxiQugAikuoX5GQZNRtsPS1uHu5zmI7dOdMJRUsfdQCYPZDfI31JoK92IrxENTC5\"\n      }\n    }\n  ]\n}\n",
+      "expect": {
+        "default": {
+          "active_kid": "2026-10",
+          "keks": {
+            "2026-09": "492aff7c3fe3e70bf87c78d8e0498ab266eec45b2f0864e612d516c2606c594b",
+            "2026-10": "777f57f70b94e06f5223a6faee555289d552936394ac32bf4e754a6d20f30f7a"
+          },
+          "name_key": "50ec8fdf0113b0ecab6fc44002dbee9dbf7ff7efa0f174680198b5cc3a22c1c8"
+        },
+        "tenants": {
+          "acme": {
+            "active_kid": "acme-2026-10",
+            "keks": {
+              "acme-2026-10": "f80b4e732e19838f6dd43741a0913b10a4c12f1b09bb1c6df8d59eace260e159"
+            },
+            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba"
+          }
+        },
+        "unopened": [],
+        "buckets": {
+          "acme": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "acme-photos": {
+            "tenant": "acme",
+            "destroyed": false
+          },
+          "beta-1": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "globex-data": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "other": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "shared-reports": {
+            "tenant": "acme",
+            "destroyed": false
+          },
+          "shared-reports-2": {
+            "tenant": "default",
+            "destroyed": false
+          }
+        }
+      }
+    },
+    {
+      "name": "a section moved to another name",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {
+        "acme": "b3e2f296fa992f65a2aa079cad545f764c579b0d08bb783c79e1a03875d39008",
+        "zeta": "b3e2f296fa992f65a2aa079cad545f764c579b0d08bb783c79e1a03875d39008"
+      },
+      "file": "{\n  \"active_kid\": \"2026-10\",\n  \"directory\": \"wq1p8rmAxbmTXIRqh1vQiGM5I3y9Dc53voeh7t1+M7aZOpXXDVUtgkHMQ0U4GVL40Rw53kBbqGZwQMvotZMIXsIX5OtPCnrOQ0X7Eh6zcSkIZHOrkmZFsmnb3hmQSklJeH9wX8P+WD5hzpsydcDiQ1yMDgkU5i0EKTMjAhTSId05eXDiNtwKj9tgHjcevBvIMSSYn1AK9oc3YrmuEYHg17qFszaB9WR61pb8Y4uIUap0LnCKfhoZEBLMuPn9r2E8cea2kChylBBaA7tFiWsxWHFadwAx6UVYYgbyvogIoqkrI3GOKPoLBLj7+g==\",\n  \"generation\": 7,\n  \"keys\": [\n    {\n      \"created\": \"2026-10-29T19:16:12.32379Z\",\n      \"kid\": \"2026-09\",\n      \"wrapped\": \"iAzc8jNtnVwvdR4OGgi9RWeLqzzOrC5UPZlpAVKNzGMxIKTHTpt4ndva1HiRJF72BxUg12iTH8RvJKM2\"\n    },\n    {\n      \"created\": \"2026-10-29T19:16:12.323792Z\",\n      \"kid\": \"2026-10\",\n      \"wrapped\": \"7UWFsaU9Hi9aGCZo0GnY+66KIFgwg1ApQ4Z1O1Njcv9oAwtiYJXZ1YsCz8DGUuPw5rnE4bgYe5vxtsij\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"k7hg4wMjZvlhuboPy4cTJzwJcvNaD1sMqVxeDaXpa0jTELk4qO2Lpe7pQEiyBGd5ErXZKwUDRa3644E+\"\n  },\n  \"root_key\": {\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\",\n    \"source\": \"vault-transit\"\n  },\n  \"tenants\": [\n    {\n      \"keys\": [\n        {\n          \"created\": \"2026-10-29T19:16:12.322295Z\",\n          \"kid\": \"acme-2026-10\",\n          \"wrapped\": \"Z0gu2JUa+YSH5W2JnnwYQ6O15/9QvlmzhyYOjLY9HBKF3podpnHQfPzwToYeUM7fYcV9Mibbrnlss87i\"\n        }\n      ],\n      \"name\": \"zeta\",\n      \"name_key\": {\n        \"wrapped\": \"Uq/j2v3i/W4RO50KvP/4U3AVS8E27C3Hji3+CVIoJZ8qB6g8HL/fyQew8d6c7L95dcCi1/bgh3/cbsxl\"\n      },\n      \"root_key\": {\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\",\n        \"source\": \"awskms\"\n      }\n    }\n  ],\n  \"version\": 2\n}",
+      "expect": {
+        "default": {
+          "active_kid": "2026-10",
+          "keks": {
+            "2026-09": "492aff7c3fe3e70bf87c78d8e0498ab266eec45b2f0864e612d516c2606c594b",
+            "2026-10": "777f57f70b94e06f5223a6faee555289d552936394ac32bf4e754a6d20f30f7a"
+          },
+          "name_key": "50ec8fdf0113b0ecab6fc44002dbee9dbf7ff7efa0f174680198b5cc3a22c1c8"
+        },
+        "tenants": {},
+        "unopened": [
+          "zeta"
+        ],
+        "buckets": {
+          "acme": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "acme-photos": {
+            "tenant": "zeta",
+            "destroyed": false
+          },
+          "beta-1": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "globex-data": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "other": {
+            "tenant": "default",
+            "destroyed": false
+          },
+          "shared-reports": {
+            "tenant": "zeta",
+            "destroyed": false
+          },
+          "shared-reports-2": {
+            "tenant": "default",
+            "destroyed": false
+          }
+        }
+      }
+    },
+    {
+      "name": "no directory",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"active_kid\": \"2026-10\",\n  \"generation\": 7,\n  \"keys\": [\n    {\n      \"created\": \"2026-10-29T19:16:12.323916Z\",\n      \"kid\": \"2026-09\",\n      \"wrapped\": \"b412iEcqsm8qT/tJeH7UFb53r3iajzf4dn8yb6t5HoIVF1r0p2WQ1BP7yE0SREsrVZD43jaxXf6fB9Qp\"\n    },\n    {\n      \"created\": \"2026-10-29T19:16:12.323916Z\",\n      \"kid\": \"2026-10\",\n      \"wrapped\": \"Xh8v3ermi/DvIU9EOnqFLq2acUlJeXXwb9QzFil+eXQTGAXpaBSOVCh2CfuLC4472C+NjmnRVxvOQxqY\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"W7lxDn0Ch2mRb8t6wJ97kPAod+rvMlPzcS67FqQgD5pO17N0134M/NPjMmOJZOlo/pXGcMmBjirmBUa7\"\n  },\n  \"root_key\": {\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\",\n    \"source\": \"vault-transit\"\n  },\n  \"tenants\": [\n    {\n      \"keys\": [\n        {\n          \"created\": \"2026-10-29T19:16:12.322297Z\",\n          \"kid\": \"acme-2026-10\",\n          \"wrapped\": \"RnS38rtyPzn2rapPO6YRQTyNw9uKOhuHXX2uL1VYdfLXgoEU5coThcOAiDFDC7H5uAAYyhhSf26M42Pe\"\n        }\n      ],\n      \"name\": \"acme\",\n      \"name_key\": {\n        \"wrapped\": \"atIPobqDYqFRsicV5/LNerN5+rnzFGCBr9+T8LX/SCg8fDxIm86gjCQdi/t9/IyffNaRISHlczRgytQW\"\n      },\n      \"root_key\": {\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\",\n        \"source\": \"awskms\"\n      }\n    }\n  ],\n  \"version\": 2\n}",
+      "refused": "the directory is missing"
+    },
+    {
+      "name": "a directory under another key",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"active_kid\": \"2026-10\",\n  \"directory\": \"GIBA0hauhLwcnYbXfOhHsnr5Nmp7S1OeCFzpyJuIkM8gXJO2O4elydIbPJ0DwIYfEw3Z2ciQTrAto0VDaT7/EdY3rd+PNXiBPZG1SJ3TA7nfs5B8/g6irXnZnkAdsF4ca97h2Fuq2grIYq+N1wtNYCX73yJal6mAFgs0uEzDR4bwF/ldfGTf2wQmxU7tz4UmSd6LQdkpDrqZOThVLY91Hda3OTl33mxEb8eL4L/3bRFQJuiD6ajNMrbpiAfX8n9YHb8zNeacYYrSG8xlzsyzGkw/rY3mAE1Yy+pzfWwUTvNh4RS5DRytjo4Mgw==\",\n  \"generation\": 7,\n  \"keys\": [\n    {\n      \"created\": \"2026-10-29T19:16:12.32398Z\",\n      \"kid\": \"2026-09\",\n      \"wrapped\": \"H2ZQgZFnZVdbVl4Ucb5iYjGi8jrvmYb8YZ5MFWojfv8fCP53E5L/+rINsjvQ2hpv91e+zZTsHhlqTekv\"\n    },\n    {\n      \"created\": \"2026-10-29T19:16:12.323981Z\",\n      \"kid\": \"2026-10\",\n      \"wrapped\": \"STN+uEm6RezHqXwWVuxNUzpErWl7kenzeAGTPhEhw1y5kevRazikPImsiCp/nNP1WW4HMcR/6l5r7htt\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"d6BZPbrkjZr4jFMhNQlbUzULllKd/J3DmjdeYY3OBn34CX8q4d6nvCQGhLz8PI6VMMZxTbJyowdtO+mc\"\n  },\n  \"root_key\": {\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\",\n    \"source\": \"vault-transit\"\n  },\n  \"tenants\": [\n    {\n      \"keys\": [\n        {\n          \"created\": \"2026-10-29T19:16:12.322298Z\",\n          \"kid\": \"acme-2026-10\",\n          \"wrapped\": \"0RSH9Nx3as95ZfrNI/K7fvKlTd+07cff+cUtmfFID91F98h/7AOo+uD9kSlKnRrbad7N1rdAjIQxlJd9\"\n        }\n      ],\n      \"name\": \"acme\",\n      \"name_key\": {\n        \"wrapped\": \"T1WzxgTLBWGDmjBDKhO1xv/qDrvGwQ7yz+FnxAZqsGApY4Arn48zcUvHOtjXAc0CHYWy2lhq/69vbgjH\"\n      },\n      \"root_key\": {\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\",\n        \"source\": \"awskms\"\n      }\n    }\n  ],\n  \"version\": 2\n}",
+      "refused": "the directory does not open"
+    },
+    {
+      "name": "generations differ",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"active_kid\": \"2026-10\",\n  \"directory\": \"1WGKl8IJBsvRr6PQ8uab5/KeUv96vjOuAfyEukOCJTv+umva/7dL2pQF5qg4J0QqZ9R1ARymV3PCNYsgjiGas1vdr9wANhhVRo74AQbuC6jsTF5mF1VWAN45K9ml41fKXVJ13ha+tzM459XN93NtjOHkL05swBUpoTcNZZS9aOwhtz1VLcMGanTDvZ41HbmLEcCisyareLIz7S7zkRQZvvKBZsGBom26vFkZsppj/11SosoZddsqk7xZiAWMwyTGnP8+NqrleigyWTqodutonibv+2VRShbIKq0pxTS/VBAF1cHoEUhsDRNyTA==\",\n  \"generation\": 8,\n  \"keys\": [\n    {\n      \"created\": \"2026-10-29T19:16:12.324049Z\",\n      \"kid\": \"2026-09\",\n      \"wrapped\": \"P0sw9yg6Rm8m515JBkgbi2CyYc5UxK3DpozKgy5LcDgc57KmbufDAOd4ue+9jOpPDrEtf9dtzkDcsG3F\"\n    },\n    {\n      \"created\": \"2026-10-29T19:16:12.324049Z\",\n      \"kid\": \"2026-10\",\n      \"wrapped\": \"pNPZmRCcyJH6dp2SC3Std1hYlpkbrbPw+QmuyjWu4aPpPv8jNex9zaUeHw5KSo+yJ8CWxlC9QyhMq362\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"Bz4CEAe9BxVWUVL4JgqlkT0myeavxQSKc+7wwAoxVDx70pn40uczC5PNzAx76liS6jOwGMhmUDqbN526\"\n  },\n  \"root_key\": {\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\",\n    \"source\": \"vault-transit\"\n  },\n  \"tenants\": [\n    {\n      \"keys\": [\n        {\n          \"created\": \"2026-10-29T19:16:12.322299Z\",\n          \"kid\": \"acme-2026-10\",\n          \"wrapped\": \"eqax3HEUtVwIqUtsp9ub786TCyUEaWPB6GlhtDYUDQpvjFADFOOCKrwa/TT+1rzKM+s+WFS4Uap3jsjW\"\n        }\n      ],\n      \"name\": \"acme\",\n      \"name_key\": {\n        \"wrapped\": \"1mHOHF3JpcbaIP6CYZVM6KKZn61GWRIknXgBYSREAMquyjqP6zO6tlDYoqT2G1p7BjSMcz5wSovK+Gsd\"\n      },\n      \"root_key\": {\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\",\n        \"source\": \"awskms\"\n      }\n    }\n  ],\n  \"version\": 2\n}",
+      "refused": "the generations differ"
+    },
+    {
+      "name": "a tenant named default",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"active_kid\": \"2026-10\",\n  \"directory\": \"2nPpPSd6Rs59qtMKqoKu4Mx8IWsyYZyLD4TJ49oeL9GhOrHM4Fjnns3hAlXsiyjEko6eCpjzKPhmRrlFPl7mOzti6gwZzif4aoyHb9pqRVfDG+xUltIdXVoRPsM+aNQK+JuDYF5pMMsY1Q1hqe/FGMp/6iKfCYp6fTrkwsL+M2/lON6cwKqGjdSc11R1XOC0G9fWU2FPvnOu/wYDKNk8xH1CbwekWuJmLaQIpv08CbejWA9/JhmFpYKpMtPRFfR08dAxSLMXra40IVWapydxQx0+6Bc0jpQyjd+4ZzQUJTmjY+7wSfd2j/nzP4KqVg==\",\n  \"generation\": 7,\n  \"keys\": [\n    {\n      \"created\": \"2026-10-29T19:16:12.324106Z\",\n      \"kid\": \"2026-09\",\n      \"wrapped\": \"xCW/dMmNq79FrrdtS97DLEjWQPp7lR6JumbL9a7uGFLweLibic4Mk5HLdx5cPR9Qkm+hg12RTD//yKsq\"\n    },\n    {\n      \"created\": \"2026-10-29T19:16:12.324106Z\",\n      \"kid\": \"2026-10\",\n      \"wrapped\": \"Tam2RFlxv3LHRaEJklDNDaV50hXL2HyD3cdmlElN4uK8uqpgifLj5Mc4BJ+ZMThrTeLjdZ0WR1tAO2ll\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"hEFHkfoAUjHnvISzEHPlgZFA/c8WvLMvkut37R/Mb7b2HUVi2qWdZI84EGXiwlxXfnDvg3+UEbbCpvBD\"\n  },\n  \"root_key\": {\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\",\n    \"source\": \"vault-transit\"\n  },\n  \"tenants\": [\n    {\n      \"keys\": [\n        {\n          \"created\": \"2026-10-29T19:16:12.322301Z\",\n          \"kid\": \"acme-2026-10\",\n          \"wrapped\": \"d11k19nZC83UJc+Z2ep5ukCp35kMP5gnBHweB/skE9CIcdpy+ZNeAumk+aBgAX6cwe3vZ+JtbR3Gzqi0\"\n        }\n      ],\n      \"name\": \"default\",\n      \"name_key\": {\n        \"wrapped\": \"1rBjL/VCfYQzIOwSZpuT3/1m9e9r61X323XOLrNm3UWGc3bOVszugIhW7SWI/Dku0nn0r6Gfv3uoXIJe\"\n      },\n      \"root_key\": {\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\",\n        \"source\": \"awskms\"\n      }\n    }\n  ],\n  \"version\": 2\n}",
+      "refused": "a tenant is named default"
+    },
+    {
+      "name": "a name both live and destroyed",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"active_kid\": \"2026-10\",\n  \"directory\": \"9Il+ZkWIoCd5rx7W1k4ihiBXQn+PMn1/hxcPZvhLKZ8bydsdkPrIKtECjfejT0mKfj3YsGLWNUXi59YTsWmQ4OXWXvcXFaNK6pmpg9bzyI7gGKp2wlHtVk5cuC050YdeqG+Urzitd6/kWxyJbgyqQ9w1KPWXNtZwDsVDB+uc8SeNW6SKPuJBl71MbIqOad2BMO2KWgkJyrAzk8XNFOuM1sBM40o/jBBnAwu6hauAwZ1VjMr3CsgXUaVWYYUC97H4bfzA7WUyrXyKdsx/ChcRpWaQhm+IngiMv9TsapR6ETpG2IRpqtVeAasMJAqcIOkjXqeie4pScDSyM7b+OdiPFM7X9J3Lr7hFf2wG2vg4DMQfwWlV7DGVywgKQKju+JS5QMIxYFMBour6cHtZ+zt+4ZR+crVqDJlU7IRIlgqGkmYTZlPYMoR1znajSH2ZU3jy69iuUDAhrc/HYhKwfgxYOZ+2Reb8CJCQ\",\n  \"generation\": 7,\n  \"keys\": [\n    {\n      \"created\": \"2026-10-29T19:16:12.324179Z\",\n      \"kid\": \"2026-09\",\n      \"wrapped\": \"WGlnpDxbnl0VKoQPawE4OL3gTccg4AcE/saujJYHQ2+1H1CgU6GdtkJPG6rD4YrvQMNsB99p906DVet8\"\n    },\n    {\n      \"created\": \"2026-10-29T19:16:12.32418Z\",\n      \"kid\": \"2026-10\",\n      \"wrapped\": \"76I8ExhBBKXx2RYgc8SYhY1G7xEK5pNX0TKKuMOyMceD69PwbsVpzyiiDM7rE8AgrotjRJh3DcsMef9M\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"6onPmgaCnZW6/c9DkLGoN/TqQ+8mphPxB1rx3Frx33+y9TmbeCXr4jcofR45N4trWQYI6wqJe3geTzI8\"\n  },\n  \"root_key\": {\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\",\n    \"source\": \"vault-transit\"\n  },\n  \"tenants\": [\n    {\n      \"keys\": [\n        {\n          \"created\": \"2026-10-29T19:16:12.322302Z\",\n          \"kid\": \"acme-2026-10\",\n          \"wrapped\": \"fRTT2ysDd9LLB6y/+urXFpA4aF/9mJ4HwRt3cSKzVnOkAZYwpm116BUZVFH6sE8R4ws1vjgi623t/F40\"\n        }\n      ],\n      \"name\": \"acme\",\n      \"name_key\": {\n        \"wrapped\": \"tu1JNNIFuzsBhS/Htfro7ZyGkRyUnlH5X4R5Cnk96+UODIhqQig/KSeYBidC3NTKXtLr6OcBbZC/GHJN\"\n      },\n      \"root_key\": {\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\",\n        \"source\": \"awskms\"\n      }\n    }\n  ],\n  \"version\": 2\n}",
+      "refused": "a tenant name is used twice"
+    },
+    {
+      "name": "a key id the default tenant has",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"active_kid\": \"2026-10\",\n  \"directory\": \"ivAtYYsg0MyECn0DSCEuNTJwm7PCUjODh/AkT0lX2WjdoEtGR481KFgsdiEwwR/RU5SnYhJXd/d0tKSE2hXdXvoghaFBDI9d4yyRgw9o5GqjGT3iHhI5Ct8KyoqABI1tFNmb28zw2YA+G57ZLKZovx0SMHRuE6lQlQXA5fhA+jmsqBEZsAza9AAMWDdzdodzuGEtIfcbZUJHBgUkUP1uUqapeVGDVS3vxOuHecRGxYfHgyn19X+jSFZW0AftV4jQTqiTTYAdup25RE5ueMgk7OGPgAh00KSGAXTIltr/z3lzGiuIIIt1IYhTy394UdUWyLUz9EJNABODqhXdOF7HNf40CXu6awYUOyQ3kBCHS00Md/Bv2m4yAH12/7CxxWtP9+bMQHYPi9owqpzdJDW88nINdjqfbA+8aLslm+bLrHwK4UDRu+yOGBW1XGqsKfJ3iTBgNzDZP/uLLe5gl04xXkPwkw==\",\n  \"generation\": 7,\n  \"keys\": [\n    {\n      \"created\": \"2026-10-29T19:16:12.324256Z\",\n      \"kid\": \"2026-09\",\n      \"wrapped\": \"0mnDUwHurwI93CNyDiVv4ijTDCxuJFORpMX+S4O2I8pHg3gorvOUsydzuD7zIIf3vcJojNOh0APbfiTo\"\n    },\n    {\n      \"created\": \"2026-10-29T19:16:12.324257Z\",\n      \"kid\": \"2026-10\",\n      \"wrapped\": \"zDiyyuuqLJbU1ZUfNz+vVY99SQLZT/Bk65SXltdgwF/hdSuWi3AWXcJs+O1HYFNykb2k9x4oCdi0Xla6\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"s98QjWghDTAhg1d82zre3LidYJ4WbF7cYfNb2STve03HrytzPg2JXjoPfrkyG4aw9gnLizHvaebZesHB\"\n  },\n  \"root_key\": {\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\",\n    \"source\": \"vault-transit\"\n  },\n  \"tenants\": [\n    {\n      \"keys\": [\n        {\n          \"created\": \"2026-10-29T19:16:12.322304Z\",\n          \"kid\": \"acme-2026-10\",\n          \"wrapped\": \"Ze67bAXxwx5yRTu2dLI88txBkQB7mrcIsb2+ruSJbqltBWLjRhbvd5HbVVkkFNpzdhg4K/8hdKTim81m\"\n        }\n      ],\n      \"name\": \"acme\",\n      \"name_key\": {\n        \"wrapped\": \"mCXi0PUVZTdDYA9uHqANapgr0Dm4xWvJ5gMPa5PMutULJEMewS+WFumjJ0+N0HsZTlG72H3D+n4zjY++\"\n      },\n      \"root_key\": {\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\",\n        \"source\": \"awskms\"\n      }\n    }\n  ],\n  \"version\": 2\n}",
+      "refused": "a key id is used twice"
+    },
+    {
+      "name": "overlapping bucket entries",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"active_kid\": \"2026-10\",\n  \"directory\": \"5heUyxThdW7e4dbZFfMJMDKaL2g0MfTeb7S8DZf8SiNuRghUj7QUC4WNX5CAkSFWb0tGTyRSfa6Hc/a/72Xi23mDwoXUk/g9a/7oga8plAVkHX6oOAuR+4zJOpTUUcJfhKZZovosZg/mEi9omwj0wVBLVTIwbrp48vhKJtZecfhQojt7SIpls26OGDnq6vyBT2jDx5jD8b9IAYS81FdtKmzgCG7wtHpvH8AdSdXknCw5sJinzANM1SHQY38wLfKrlgQYj26Dych9DjnK+Bb5aPNI1HPBtkft+91diCrS6UpvbJpylQB5QKxcXmDGO3rpJ0KwTetBtUeCxls0vCNyqPpS80ebzFWXFkA9+rUNQz3AeS1MGK/cWN/YbYJODUPIdGlsmXwHoXaGQj5N8uO3rLCjJ3HN7GkINIjT5RgwZTWDtixthw3ke5BcM21O3iuo6v/vEQWn7KFDdFMv1orpgCZtm7t4ikdnYg==\",\n  \"generation\": 7,\n  \"keys\": [\n    {\n      \"created\": \"2026-10-29T19:16:12.324327Z\",\n      \"kid\": \"2026-09\",\n      \"wrapped\": \"mp6UK1gUeRYh8lED6GqrJrzDexgTFztfoC9zFmyY/DP4foWG9/xFz738gFMmNRcdxh1dQWU6QsMUceqG\"\n    },\n    {\n      \"created\": \"2026-10-29T19:16:12.324328Z\",\n      \"kid\": \"2026-10\",\n      \"wrapped\": \"bMBqPncpUCLE/dumGi8KUzq0x9JxLMaTIR884tUXGWdD4Eu0dTE+WY9VuwdPF5GMl8UsI4A5bVA4d3Mf\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"bnSMd7Pow5UvL7PZpBx6Yczbrfgph7cXKoGSTb99cyIWfGZY8kuIadVWm+rYFdWWbZHebNjcy4CSpcSI\"\n  },\n  \"root_key\": {\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\",\n    \"source\": \"vault-transit\"\n  },\n  \"tenants\": [\n    {\n      \"keys\": [\n        {\n          \"created\": \"2026-10-29T19:16:12.322308Z\",\n          \"kid\": \"acme-2026-10\",\n          \"wrapped\": \"ZK248zIOYrTLqMwq7qLYw2xXXBSLham7l+VZegmI9z1ErLtYEMG5gxKfsu+or0HqEmZFEStfvigAJh2P\"\n        }\n      ],\n      \"name\": \"acme\",\n      \"name_key\": {\n        \"wrapped\": \"Ed+SqCTy8XKoP6RIW2ReU0f+QMaH0HmPf+u6t5saQSlWDg721Z9A55n3gcK9CH/rPb8nq3R6dclwV0lw\"\n      },\n      \"root_key\": {\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\",\n        \"source\": \"awskms\"\n      }\n    }\n  ],\n  \"version\": 2\n}",
+      "refused": "bucket entries overlap"
+    },
+    {
+      "name": "a malformed bucket entry",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"active_kid\": \"2026-10\",\n  \"directory\": \"3Gd4+z4HW/GFfCrBcRNwV8nCK8s5LfngGUIo7xY8A17ywRd1ZYAn0/HURPqS7DIHAfOifMtqFJYh4PMx0ks0uqyPQjmYZfsaUmCbcSm4pRKLukPP91TzyjuwVYH638GzDEZYrGqRUqT27bi4cI+AKcvzz3738jkyF2UuI4S1U1u8YTt3phJS0cxTQH4PrGkw8HK23E9yVWtp+NSc2hm9iVFrTmqNc4gwpTNEJoq0P14didHWsjCCC4mcKfDUpkN244wVJf/6Z2BkMF9SAt40PnXutxF/rdiZxZA=\",\n  \"generation\": 7,\n  \"keys\": [\n    {\n      \"created\": \"2026-10-29T19:16:12.324398Z\",\n      \"kid\": \"2026-09\",\n      \"wrapped\": \"cQ8L2A5MVx5Pn5X/QtX0DnDQvPgZpgF8P9OS0OoYwD4VG7zLeFtPMuCHLqj4ln1tuMD6hIviOH1ilFif\"\n    },\n    {\n      \"created\": \"2026-10-29T19:16:12.324399Z\",\n      \"kid\": \"2026-10\",\n      \"wrapped\": \"qLLuVImvhCS5LMForzkjwiysLj5Pi/zrBRtQvOJCS1YMgw4pUs0c+ab3cfCT/ulqbBpZZSSSQ3eczDO/\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"22/IyQVi8pTh0sCf5aEeA8G8Q6oe00jTkyl3p79FKxKrmg5mSy2HOt7Tn1oovmKw67cyvpkBgyyx1E4L\"\n  },\n  \"root_key\": {\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\",\n    \"source\": \"vault-transit\"\n  },\n  \"tenants\": [\n    {\n      \"keys\": [\n        {\n          \"created\": \"2026-10-29T19:16:12.322309Z\",\n          \"kid\": \"acme-2026-10\",\n          \"wrapped\": \"A1kHkcm/gKfBJmanX7IaYvWmmBqrdn2F0vJWwtEcylXeTZuy5GIKqvR80cWpQvPe1jh6sZmgBbzueBQH\"\n        }\n      ],\n      \"name\": \"acme\",\n      \"name_key\": {\n        \"wrapped\": \"o7CRMH6YRxcR8Id2zm4MyBPMmpHxikYxHQCkv1eZsDRsapBudnoMQJG9K0TZR8BQIYTHlprZc3T0R1GM\"\n      },\n      \"root_key\": {\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\",\n        \"source\": \"awskms\"\n      }\n    }\n  ],\n  \"version\": 2\n}",
+      "refused": "a bucket entry is malformed"
+    },
+    {
+      "name": "an active key not the tenant's",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"active_kid\": \"2026-10\",\n  \"directory\": \"QV0XqGZkhvjv9piWpng0evSwpUK1W3T910dTpFkLQh0ZfvYfxCBJcRjU87oop7sndB/vaCcSs220uylCESC7q8x3xQcMCw4ZAviIU1xY0hSSNKdLxTTshYRAyZvFCQtzMxRN+2fGoc0pw3Ccuct0ld4UWTxPAET4T6hywTkoF1RQOYZqL7gwKMbS9183oKKPmm87k0L0QHAd0I8c6WX99a+kenB9lqTInEOWKhP0l3snoMD83ie/UwMRNlHEEzaqOvPVelUu9+Fs2NMjcF9eZU1u8QIQ8Z7qMooEpwCTfY1E+/2H+Fg=\",\n  \"generation\": 7,\n  \"keys\": [\n    {\n      \"created\": \"2026-10-29T19:16:12.324477Z\",\n      \"kid\": \"2026-09\",\n      \"wrapped\": \"1liQ9HwLOv3P7gIsrvUEewuK59UFbShwH92YmkPhU8BYrGJ7NtylHxDsIbbsntwS3pQsDGzZ8DKyRjwM\"\n    },\n    {\n      \"created\": \"2026-10-29T19:16:12.324478Z\",\n      \"kid\": \"2026-10\",\n      \"wrapped\": \"I5xJfx1RcqTnDusYJzBFY460gJkk0PwTf43aGz5QGwwwjzpgfOrbiZGrKmQdAA2oZVNVc9c0AS5FT6ko\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"mk5gCJFvIRoskxWVt61OzosloSotmUqjO2ytUBg+g0G9IHcR1LrVbftyvx5Fp2bYSg/npimAfC4zCSpB\"\n  },\n  \"root_key\": {\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\",\n    \"source\": \"vault-transit\"\n  },\n  \"tenants\": [\n    {\n      \"keys\": [\n        {\n          \"created\": \"2026-10-29T19:16:12.322311Z\",\n          \"kid\": \"acme-2026-10\",\n          \"wrapped\": \"DmFhfVNrT+dcZYtbhjT5+8gytOhlT+1cd7nVIN673i9ubpn6u+zVX9qpTbUdZ3t2EC3KZMJzLdEewDF4\"\n        }\n      ],\n      \"name\": \"acme\",\n      \"name_key\": {\n        \"wrapped\": \"p/sLR+hK6BVtPw1YujxHC/7XLU/l/8lz5bERKuAVTjHZfJ0d28dvPkGHH9HVz2l0UN012B6q6urz9kNQ\"\n      },\n      \"root_key\": {\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\",\n        \"source\": \"awskms\"\n      }\n    }\n  ],\n  \"version\": 2\n}",
+      "refused": "active_kid is not one of the tenant's kids"
+    },
+    {
+      "name": "a tenant without a section",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"active_kid\": \"2026-10\",\n  \"directory\": \"uT7AO0M3ANqH+rf4KVbAirRCjlttjjo10tQmmRKDJaioLndmNSPzzIDrXcLO1xDagGfoVWYPNs2GjlcpFy7VpR1AFutYhdw++PQsaZcbheBqz+XU+4LHh7FFJhywVRr3Izjr2VnNStSKcVpEAAutr133Sjmui+Wylu63QR8HRgQjdLugEapmTAYQDv6VU5ZqkabB6XT3kWHAxtcENCAQzwIklgNhFFavHaDe4Yh8w1ePxfq/7inKhpF8cUeMnyH9PkDJWT/95bcYBbA9fnF2OefJt1WNQ3MhtB9GdewsbkicO6S4vUCxSR+RIQ==\",\n  \"generation\": 7,\n  \"keys\": [\n    {\n      \"created\": \"2026-10-29T19:16:12.324552Z\",\n      \"kid\": \"2026-09\",\n      \"wrapped\": \"ev4YrFnY/Na3y1NeGHLoOmU1lklyKmcuc5XDTIEMGAP0cQTcWC7B/LX3kVmALeVuIj+QRdKAsxgI+1+w\"\n    },\n    {\n      \"created\": \"2026-10-29T19:16:12.324553Z\",\n      \"kid\": \"2026-10\",\n      \"wrapped\": \"8jex/PvXe7YFsyO6DIPlUd1qhvB4iiAtnE8mPZpbPXBlUC9XtMBHY8RJQSgeXE0fUwQ0LnR82BcHBjhE\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"yS17Yz42pFLc7N1ujics8GPqLwdusbi53hlUDLcEqxtB5GaV+IKtwRq24etyPIbxaJF6FcodMa6tk0LR\"\n  },\n  \"root_key\": {\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\",\n    \"source\": \"vault-transit\"\n  },\n  \"tenants\": [],\n  \"version\": 2\n}",
+      "refused": "tenants and sections do not correspond"
+    },
+    {
+      "name": "a section with a key the directory does not list",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"active_kid\": \"2026-10\",\n  \"directory\": \"+uOWwI3u5UPPmTh5yC8VE5PDA1jICcaGasBNI9W9+MnIgMI7xyaLGUgoLFCiTlfwaU2GLE6VKB7r0eMrte5pEiFDh1uFH4KIni2ij1saFrA1rhFUSD+6CQbSHcrb5jsau3C3eOlLjvcqrejS+IJcj5uWgCLGmCyh7OkrvypO7+suu4JB2p6m25F8B0nXNXrvvueduxnLt2tVxvM+NFQH7avXF+XcCZP327l8WeaNvVyU2F5HIYIIPmdaAKAofEjkir5zO0avUibtmB1kOCYJauIBZU9Fv/hlFv2UUQFPhNh0Kr+6JE6mAOvKmg==\",\n  \"generation\": 7,\n  \"keys\": [\n    {\n      \"created\": \"2026-10-29T19:16:12.32461Z\",\n      \"kid\": \"2026-09\",\n      \"wrapped\": \"IthcvxzUG9LWzEgq1WoiBqNyqE1Z+cijB5gqEVotUg1LRB9+o+2+mcLdTnJYLxhMPnFpiAJiW7OHLDtv\"\n    },\n    {\n      \"created\": \"2026-10-29T19:16:12.32461Z\",\n      \"kid\": \"2026-10\",\n      \"wrapped\": \"kTYP/65XH1HzZzbx12At4ndf5ivEmPpAU/qFOi/uy00bTV/B9af7bXMhO+ugQ0qYsFfw0VKjP6b5wCeL\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"S0ybF/ZEsf1NpDSGiwLSG3hy62L76MMWKRPvyGmwD4v0Z4HrktIt6w06FtogQ1HjCSl3fpZm3mjmpkv1\"\n  },\n  \"root_key\": {\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\",\n    \"source\": \"vault-transit\"\n  },\n  \"tenants\": [\n    {\n      \"keys\": [\n        {\n          \"created\": \"2026-10-29T19:16:12.32232Z\",\n          \"kid\": \"acme-2026-10\",\n          \"wrapped\": \"I9p6/Fnc5WpzKiicIU+FcvwEP7lJzNcWzHFRvsx1cZUfV6nTZxknlF3dY7IUQouz25MMZb+GQtK61iE8\"\n        },\n        {\n          \"created\": \"2026-10-29T19:16:12.32232Z\",\n          \"kid\": \"acme-extra\",\n          \"wrapped\": \"I9p6/Fnc5WpzKiicIU+FcvwEP7lJzNcWzHFRvsx1cZUfV6nTZxknlF3dY7IUQouz25MMZb+GQtK61iE8\"\n        }\n      ],\n      \"name\": \"acme\",\n      \"name_key\": {\n        \"wrapped\": \"S76YveY35TfnM2Z4+3gWuh4kfgOlLyL2wmIDKehPIJ1+LiYHTBw/5U502P+ONagA6yAyytCioYgx3j0n\"\n      },\n      \"root_key\": {\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\",\n        \"source\": \"awskms\"\n      }\n    }\n  ],\n  \"version\": 2\n}",
+      "refused": "a section's keys are not its tenant's kids"
+    },
+    {
+      "name": "a section without a name key",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"active_kid\": \"2026-10\",\n  \"directory\": \"MLwYvH1AwFeuFYU63mWhB3U9g0b1xswldwoZylH/ldkSTjcIGCGM7EMYHtC12yeSMCYqPei1MM/DTguRc3kuSwJAYJHut0u7boMjfXnrRI8ejmpldBcmCnQ+Q6vhRaT3OESCVljn++zmQZHUt3wfDclTBVBNrD5+huikZPi2TaRXY/slwBLm3TWD/ap4d1SqY+EhFcO/+ndBR6sTLI5f4E17bqzsHy5W7A8I+tgkO/nlMxMz/7yhb/4xoL3GF7Ly7/rO8ZTKPz3lHCFtmbyb8ZJbIf5V2DBLUzBB2MEg+eZr2RpHC6rU/oavLw==\",\n  \"generation\": 7,\n  \"keys\": [\n    {\n      \"created\": \"2026-10-29T19:16:12.324664Z\",\n      \"kid\": \"2026-09\",\n      \"wrapped\": \"xiPZOt3AYb06+aFtKtqdyieb0IZjjoI2+6CntXIrGJcLOO5n6plipIsJlDFep6fcX1XYTL/0We1D/04f\"\n    },\n    {\n      \"created\": \"2026-10-29T19:16:12.324664Z\",\n      \"kid\": \"2026-10\",\n      \"wrapped\": \"0Y3leQhYgON2dpR8MTlR3J6aTVMBXYUpObVGC+KCshyI3uNVmpQictT7VNMnWwiwZpUmqfy/g7f7gCXm\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"mbp+wMHOzCEEfE5qgJY71PD4r/GG3QeLGeH1nBAKXqGrfe2UJFctFzPIJCyHsZW23SVkfi01aYKHYcf+\"\n  },\n  \"root_key\": {\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\",\n    \"source\": \"vault-transit\"\n  },\n  \"tenants\": [\n    {\n      \"keys\": [\n        {\n          \"created\": \"2026-10-29T19:16:12.322322Z\",\n          \"kid\": \"acme-2026-10\",\n          \"wrapped\": \"/BQN/9h5sVTrF7rwjOlaZcKdSZ/ZV6AW/gdUETapqK91UeqPMT72rc4E4IiwbVE9BzmZXWs9V+dT1822\"\n        }\n      ],\n      \"name\": \"acme\",\n      \"root_key\": {\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\",\n        \"source\": \"awskms\"\n      }\n    }\n  ],\n  \"version\": 2\n}",
+      "refused": "a section has no name_key"
+    },
+    {
+      "name": "a section sealed by another lock than recorded",
+      "deployment_root": "0d5e383890bd20c5964341296ce6b3211ce67cf00b784a37b27634a8c4f869a5",
+      "tenant_roots": {},
+      "file": "{\n  \"active_kid\": \"2026-10\",\n  \"directory\": \"ThqvRteYOn4l8ePnRthTUNKVUDHS9VJtRVQutqD+7Q7YaPZ7nNdazke3F5jf19cpawukCZ+aF0lbGqAXuadCLvEoJB8OuVod2FFhkcdm/TSiFj7AtZnYz21WwqAKZZmCeuUA+G2idIzpdhHnfpKtrVjDI/yNsyJKhO6L3i+5kRfyFt++xxQl7+nRQd75xwR/3W+QA6pkQy1Cx1Ws0tAXc0HYoTwJFRCYguqbhUQDkLTIK8DcEp5qczF1mY2j9aCOtRgiDbkUHLOiaa8An1JjyySAC2Ka2tbztlcVCGKLSxRPPnPV1rAgsb+s484dopYp\",\n  \"generation\": 7,\n  \"keys\": [\n    {\n      \"created\": \"2026-10-29T19:16:12.324721Z\",\n      \"kid\": \"2026-09\",\n      \"wrapped\": \"Z7Ae/cVFAI60I+phXcrfvi8SEGTvCQHbgsRwZgaNJrbDvxsmQEOs4QWiug+P0aWuWDezkqMpaB/2Imci\"\n    },\n    {\n      \"created\": \"2026-10-29T19:16:12.324722Z\",\n      \"kid\": \"2026-10\",\n      \"wrapped\": \"BJhM1onXOnQWgL4iqP829R9XBUtJGt2XlWZg+w4WrpD1xISsC6MrhVxJk80rITLGwZNjsE3x7ZgVnMAX\"\n    }\n  ],\n  \"name_key\": {\n    \"wrapped\": \"241ws7lDDfwsZkpbU03Nh96kkn2bNZ3DedmNbrYH6zSNdV7CgcHkYPz9/r484ZbXtDB8KWGqm1F7P/aZ\"\n  },\n  \"root_key\": {\n    \"ciphertext\": \"vault:v1:vector\",\n    \"key_name\": \"bb-deployment\",\n    \"source\": \"vault-transit\"\n  },\n  \"tenants\": [\n    {\n      \"keys\": [\n        {\n          \"created\": \"2026-10-29T19:16:12.322323Z\",\n          \"kid\": \"acme-2026-10\",\n          \"wrapped\": \"0eCzV35m8JrD3YuHjhObv23Vt3W4BtZWZ9pmoc8GMLU3LNLL3XE4wukRqwqqn+Ral2bbFLS9h3iYnnbJ\"\n        }\n      ],\n      \"name\": \"acme\",\n      \"name_key\": {\n        \"wrapped\": \"Ysf5w3I1/3iUBzZsJ25TuJIyNRb35otdrVgtD3N19HJvVmXTv7vZG+GrrQx2bODVsHBiyAVeS9KIX0bZ\"\n      },\n      \"root_key\": {\n        \"ciphertext\": \"AQICAHvector\",\n        \"key_name\": \"alias/bb-acme\",\n        \"source\": \"awskms\"\n      }\n    }\n  ],\n  \"version\": 2\n}",
+      "refused": "a section does not match its last lock"
+    }
+  ]
+}

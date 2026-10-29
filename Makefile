@@ -109,6 +109,8 @@ tla: $(TLA_TOOLS) ## Check every TLA+ model configuration.
 ref-vectors: ## Check the Python reference against known vectors.
 	cd ref/python && python3 test_vectors.py
 	cd ref/python && python3 test_names_vectors.py
+	cd ref/python && python3 test_tags_vectors.py
+	cd ref/python && python3 test_keyring_vectors.py
 
 # Differential test against the Go decoder. COUNT is the number of inputs;
 # The floor is 100000, which takes a few minutes.
