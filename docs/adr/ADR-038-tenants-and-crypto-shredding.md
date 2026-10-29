@@ -140,11 +140,12 @@ shows it. Two rules follow, and they apply to a new KEK today as much as to a te
    restarted cannot read what one that has wrote (`MCTenantsActivateEarly`).
    `keygen --add` keeps activating by default for single-instance deployments, and
    the documentation for several instances says to pass `--activate=false`.
-2. **Count only after every instance serves the tenant.** A destruction is preceded
-   by a census of the tenant's buckets (below). An instance that still serves a
-   keyring without the tenant writes its buckets under the default tenant's keys,
-   and if it does so after the census, those objects survive the destruction
-   (`MCTenantsStaleInstance`).
+2. **Count only after every instance serves the active tenant.** A destruction is
+   preceded by a census of the tenant's buckets (below). An instance that still
+   serves a generation without the tenant, or with it not yet active, writes its
+   buckets under the default tenant's keys, and if it does so after the census,
+   those objects survive the destruction (`MCTenantsStaleInstance`). The same holds
+   for a running `rotate` or `encrypt-existing` that loaded such a generation.
 
 ### Destroying a tenant
 
@@ -167,8 +168,10 @@ shows it. Two rules follow, and they apply to a new KEK today as much as to a te
    lock in the tombstone, for example the KMS key to schedule for deletion. It does
    not do it itself: the gateway's credentials need `Decrypt` on a tenant's key, and
    they should not also need the right to destroy it. The lock is destroyed last,
-   after the rollout. Destroyed earlier, it stops every instance that restarts before
-   step 2 from opening its keyring (`MCTenantsLockFirst`).
+   after the rollout, because it is the one step that cannot be undone. Destroyed
+   before the tombstone has reached every process, it makes the tenant's objects
+   unreadable while the destruction could still be called off, for instance because
+   the census found objects to rotate first (`MCTenantsLockFirst`).
 
 **Every lock the tenant ever had.** `reseal --tenant` moves a tenant to a new lock
 as [ADR-023](ADR-023-resealing-a-keyring.md) moves the deployment, and the copies of
@@ -231,7 +234,7 @@ objects in it, one created in the tenant, one staying in the default tenant.
 |---|---|
 | `Shredded` | After destruction completes, no object in the tenant's buckets is wrapped under a key that any reachable copy of the keyring, or any running process, still opens |
 | `NoCollateral` | A destruction never makes an object outside the tenant's buckets unreadable |
-| `StartsAfterRestart` | An instance that restarts can always open the keyring it is given |
+| `Abortable` | Until the tombstone is written, nothing is unreadable yet: the destruction can still be called off |
 | `ReadableEverywhere` | An object a live tenant wrote is readable through every running instance |
 
 | Configuration | Expected | What it shows |
@@ -239,7 +242,7 @@ objects in it, one created in the tenant, one staying in the default tenant.
 | `MCTenants` | passes | The order above |
 | `MCTenantsNoCensus` | `Shredded` fails | A tombstone without a census strands objects on the default tenant's keys |
 | `MCTenantsStaleInstance` | `Shredded` fails | A census before every instance serves the tenant |
-| `MCTenantsLockFirst` | `StartsAfterRestart` fails | The lock destroyed before the rollout |
+| `MCTenantsLockFirst` | `Abortable` fails | The lock destroyed before the tombstone has reached every process |
 | `MCTenantsActivateEarly` | `ReadableEverywhere` fails | A tenant activated before every instance serves it |
 | `MCTenantsMoveBucket` | `NoCollateral` fails | A bucket allowed to leave a tenant |
 | `MCTenantsForeignRotate` | `NoCollateral` fails | `rotate --to-kid` accepting a key that is not the bucket's tenant's |
