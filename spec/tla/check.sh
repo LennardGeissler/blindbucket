@@ -2,14 +2,15 @@
 # Runs TLC over every configuration in this directory and checks that each one
 # reports what it is supposed to report.
 #
-# Fourteen of the eighteen configurations are expected to FAIL: a model that
+# Twenty-one of the twenty-six configurations are expected to FAIL: a model that
 # cannot reproduce the two races ADR-010 records is too coarse to be evidence
 # for anything, so "TLC found no counterexample" is a failure there. The same
 # holds for Migrate.tla, whose failing configurations are the mistakes ADR-022's
 # design avoids and the one precondition it cannot do without, and for the
 # three that show what a provider ranking writes by when they began does to the
 # rules as they were (ADR-025), and for MCTagsNoAge, gc without the minimum age
-# that alone protects a PUT's tag sidecar (ADR-037).
+# that alone protects a PUT's tag sidecar (ADR-037), and for seven of the eight
+# of Tenants.tla, each one step of ADR-038's destruction left out or reordered.
 #
 # Usage:  ./check.sh [config-name ...]     (default: all of them but MCFixedFull,
 #                                            which runs only when named: hours)
@@ -46,6 +47,14 @@ CASES=(
   "MCMigrateStaleWriter    Migrate    NoLostWrite   an instance still serving names in clear, If-Match or not"
   "MCMigrateClientDelete   Migrate    NoLostDelete  a client delete of an object not yet migrated"
   "MCMigrateAwsOrder       Migrate    NoLostWrite   the copy with If-None-Match alone, against an upload in flight"
+  "MCTenants               Tenants    holds         a destroyed tenant is unreadable everywhere and nothing else is (ADR-038)"
+  "MCTenantsNoCensus       Tenants    Shredded      the tombstone without a census"
+  "MCTenantsStaleInstance  Tenants    Shredded      the census while an instance still serves the tenant inactive"
+  "MCTenantsLockFirst      Tenants    Abortable     the locks destroyed before the tombstone reached every process"
+  "MCTenantsActivateEarly  Tenants    ReadableEverywhere  a tenant added active"
+  "MCTenantsMoveBucket     Tenants    NoCollateral  a bucket allowed to leave the tenant"
+  "MCTenantsForeignRotate  Tenants    NoCollateral  rotate accepting a key that is not the bucket's tenant's"
+  "MCTenantsResealedLock   Tenants    Shredded      after a reseal, only the current lock destroyed"
 )
 
 run_one() {

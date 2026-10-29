@@ -1,12 +1,12 @@
 name: Formal model
 
-# The models in spec/tla cover the manifest coordination (ADR-010, ADR-009) and
-# the name migration (ADR-022), not the Go code, so they run when a model or
+# The models in spec/tla cover the manifest coordination (ADR-010, ADR-009),
+# the name migration (ADR-022) and tenants (ADR-038), not the Go code, so they run when a model or
 # the coordination logic changes rather than on every push. MCFixed and
 # MCMigrate explore ~8.7 and ~8.1 million states and are the reason for the
 # path filter; MCFixedFull, with a third upload, is run by hand (ADR-025). rotate and
-# objcopy are in it because the model's Rot process is theirs, and migrate
-# because Migrate.tla is.
+# objcopy are in it because the model's Rot process is theirs, migrate
+# because Migrate.tla is, and crypto/keys because the keyring is Tenants.tla's.
 on:
   push:
     branches: [main]
@@ -18,6 +18,7 @@ on:
       - "internal/objcopy/**"
       - "internal/rotate/**"
       - "internal/migrate/**"
+      - "internal/crypto/keys/**"
       - ".github/workflows/tla.yml"
   pull_request:
     paths:
@@ -27,6 +28,7 @@ on:
       - "internal/objcopy/**"
       - "internal/rotate/**"
       - "internal/migrate/**"
+      - "internal/crypto/keys/**"
       - ".github/workflows/tla.yml"
   workflow_dispatch:
 
@@ -66,7 +68,7 @@ jobs:
           make tla-translate
           git diff --exit-code -- spec/tla/
 
-      # Eight of the ten configurations are expected to produce a
+      # Twenty-one of the twenty-six configurations are expected to produce a
       # counterexample; check.sh fails if one of them does not.
       - name: Check every configuration
         run: make tla

@@ -281,8 +281,9 @@ Changes to the manifest lifecycle have a parallel obligation: the rules are
 modelled in [`spec/tla/Multipart.tla`](spec/tla/Multipart.tla) and checked with
 TLC, all but the design's configurations are *required* to produce a counterexample,
 and each counterexample is also an integration test. The same holds for
-`migrate-names` and [`spec/tla/Migrate.tla`](spec/tla/Migrate.tla). `make tla`
-must still pass.
+`migrate-names` and [`spec/tla/Migrate.tla`](spec/tla/Migrate.tla), and for
+tenants, the keyring's sections and the order of a destruction, and
+[`spec/tla/Tenants.tla`](spec/tla/Tenants.tla). `make tla` must still pass.
 
 ## How we behave here
 

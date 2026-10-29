@@ -1,4 +1,4 @@
-# Formal models of the manifest coordination and the name migration
+# Formal models of the manifest coordination, the name migration and tenants
 
 [`Multipart.tla`](Multipart.tla) models the coordination described in
 [ADR-010](../../docs/adr/ADR-010-manifest-lifecycle-under-concurrency.md) and
@@ -11,6 +11,11 @@ different instances, and any of them may die at any point.
 from the key it was stored under in clear to its encrypted key. It is a module of its own
 because it is the one operation that spans two stored keys; it has
 [a section of its own](#migrating-names--migratetla) below.
+
+[`Tenants.tla`](Tenants.tla) models tenants and their destruction
+([ADR-038](../../docs/adr/ADR-038-tenants-and-crypto-shredding.md)): which copies of which
+keys exist where, and which objects they still open. It checks a different question from
+the other two, and has [its own section](#tenants--tenantstla) below.
 
 It exists because those rules — R1 to R4 — were derived by *reasoning*. Version 0.1 of the
 design contained two race conditions that were also derived by reasoning, and they survived
@@ -89,10 +94,11 @@ keeps one around is still perfectly readable.
 
 ## Configurations
 
-Nine of the thirteen configurations of `Multipart.tla` are expected to **fail**, and five
-of the six of `Migrate.tla` (listed [with that model](#migrating-names--migratetla)). A model that cannot reproduce the
+Nine of the fourteen configurations of `Multipart.tla` are expected to **fail**, and five
+of the six of `Migrate.tla` (listed [with that model](#migrating-names--migratetla)), and seven of the eight of
+`Tenants.tla` ([with that model](#tenants--tenantstla)). A model that cannot reproduce the
 two races the design already knows about is too coarse to be evidence about the races it
-does not know about, so "no counterexample" is a failing result for those fourteen.
+does not know about, so "no counterexample" is a failing result for those twenty-one.
 
 | Configuration | Rules | Expected |
 |---|---|---|
@@ -129,7 +135,7 @@ they are.
 
 ```sh
 make tla-tools     # downloads tla2tools.jar into .tools/ (not committed)
-make tla           # runs the eighteen configurations of both models
+make tla           # runs the twenty-six configurations of the three models
 make tla-translate # re-run the PlusCal translator after editing an algorithm
 ```
 
@@ -141,7 +147,7 @@ make tla-translate # re-run the PlusCal translator after editing an algorithm
 
 `MCFixed` explores about 8.7 million distinct states and `MCMigrate` about 8.1 million,
 each in five to seven CPU-minutes, `MCEncrypt` about 2.7 million and `MCTags` about 1.2
-million; the other fourteen finish in seconds, and `make tla` takes about two minutes on ten cores. The CI job runs on changes to `spec/tla/` or to the
+million; the other twenty-two, `Tenants.tla`'s eight among them, finish in seconds, and `make tla` takes about two minutes on ten cores. The CI job runs on changes to `spec/tla/` or to the
 coordination code rather than on every push.
 
 `MCFixedFull` is not among them. Until ADR-025, `MCFixed` ran three uploads under the
@@ -161,10 +167,10 @@ states there is a small chance two distinct states collide and one subtree goes 
 TLC estimates that probability itself and `check.sh` prints it — for `MCFixed` it lands
 between 1e-4 and 3e-3 depending on the run. That is a property of the hash width, not of the
 machine, so more memory does not move it; rerunning with a different `-fp` seed and getting
-the same answer is what buys extra confidence. The fourteen counterexample runs are unaffected: a
+the same answer is what buys extra confidence. The twenty-one counterexample runs are unaffected: a
 trace TLC prints is a trace that exists.
 
-Each checked-in module contains both its PlusCal algorithm and its translation. CI re-runs
+Each checked-in PlusCal module contains both its algorithm and its translation. CI re-runs
 the translator and fails if the result differs, so the two can never drift apart.
 
 ## The counterexamples
@@ -496,6 +502,96 @@ HEAD and the delete. For a multipart upload the open upload covers that window; 
 nothing does. The minimum age is what does. A sidecar listed as younger than eight days
 is never deleted, and no PUT takes that long between its sidecar and its object. The code
 has to carry the same age check for sidecars that it carries for manifests.
+
+## Tenants — `Tenants.tla`
+
+A tenant is deleted by destroying its keys ([ADR-038](../../docs/adr/ADR-038-tenants-and-crypto-shredding.md)),
+so what can go wrong is not a lost request but a key: one that still opens what the
+destruction was meant to make unreadable, or one gone that opened something it was not
+meant to touch. The model therefore tracks keys, not requests. It is plain TLA+ rather
+than PlusCal: its steps are an operator's and a process's, each atomic, and none of them
+is a sequence of requests whose interleaving matters.
+
+Keys live in four kinds of place, and the model has all four: the keyring file, which the
+operator rewrites, each write a new generation; every earlier generation, as backups and a
+Secret's history keep them, opened today with whatever locks still exist; the memory of each
+gateway instance, which loaded a generation at its last restart; and the memory of a running
+`rotate`.
+
+| In the model | Not in the model |
+|---|---|
+| One tenant, T, and the default tenant; buckets `x` (has an object, joins T), `z` (joins T empty), `y` (stays in the default tenant) | The requests a write or a rotation makes, and their conditions: `Multipart.tla` checks those, and a rotation step here is atomic |
+| Two instances, each serving the generation it loaded at its last restart | A second KEK of the same tenant: it changes which of T's keys an object is on, never whether |
+| Client writes through either instance; two `rotate` runs that may die at any point, each with its own snapshot | Names and audit entries: their keys sit in the same sections as the KEKs and share their fate |
+| The operator: add, activate, reseal to a second lock, census, tombstone, destroy the locks | |
+| Every generation of the file ever written | |
+
+### Invariants
+
+- **Shredded** — once the destruction is over (locks destroyed, every process serving the
+  tombstone), no object in T's buckets is on a key that any copy of the file or any running
+  process still opens.
+- **NoCollateral** — no object outside T's buckets ever becomes unreadable.
+- **Abortable** — until the tombstone is written, nothing is unreadable: the destruction can
+  still be called off.
+- **ReadableEverywhere** — an instance that serves a bucket can read the object in it.
+
+### Configurations
+
+| Configuration | Variation | Expected |
+|---|---|---|
+| `MCTenants` | the design: add inactive, activate once every instance serves T, a census once no instance and no `rotate` run can still write T's buckets under another key, the tombstone, then every lock T ever had | no counterexample (7,778 states) |
+| `MCTenantsNoCensus` | the tombstone without a census | **Shredded violated** |
+| `MCTenantsStaleInstance` | the census while an instance still serves T inactive | **Shredded violated** |
+| `MCTenantsLockFirst` | the locks destroyed before the tombstone has reached every process | **Abortable violated** |
+| `MCTenantsActivateEarly` | T added active | **ReadableEverywhere violated** |
+| `MCTenantsMoveBucket` | a bucket may leave T | **NoCollateral violated** |
+| `MCTenantsForeignRotate` | `rotate` accepts a key that is not the bucket's tenant's | **NoCollateral violated** |
+| `MCTenantsResealedLock` | after a reseal, only the current lock destroyed | **Shredded violated** |
+
+`MCTenantsMoveBucket` and `MCTenantsForeignRotate` leave `ReadableEverywhere` out. An
+instance that restarts onto the tombstone no longer opens T's key, so it cannot read the
+stranded object either: the same harm, seen from the instance, which TLC would otherwise
+report first.
+
+Writing the model corrected the ADR twice before it was merged. A lock destroyed too early
+was thought to stop instances from starting; it does not, since a tenant that will not open
+is refused rather than fatal, and the harm is `Abortable`'s. And the census waits not only
+for instances but for a running `rotate` that loaded an earlier generation, which writes T's
+buckets under the default key exactly as a stale instance does.
+
+### 13. A census before every instance serves the tenant — `MCTenantsStaleInstance`
+
+| # | Who | Step | Result |
+|---|---|---|---|
+| 1 | operator | add T, inactive; both instances restart onto it | |
+| 2 | operator | activate T; only i1 restarts | i2 serves T inactive |
+| 3 | i1 | write `x` | `x` on `t1` |
+| 4 | operator | census: every object of T's buckets on `t1` | passes |
+| 5 | operator | tombstone; i1 restarts onto it | |
+| 6 | i2 | write `z` — T is inactive in what it loaded | **`z` on `d1`** |
+| 7 | i2 restarts; operator destroys the locks | | `z` still opens |
+
+Every check the operator ran was true when it ran. The census counted what was there, and
+`z` was written after it, by an instance the census could not see. Rule 2 of ADR-038 is
+what closes it: the census waits until the keyring generation every instance and every
+running command reports is the one with T active, which the
+`blindbucket_keyring_generation` metric makes checkable.
+
+### 14. A reseal, and only the new lock destroyed — `MCTenantsResealedLock`
+
+| # | Who | Step | Result |
+|---|---|---|---|
+| 1 | operator | add T under lock `L1` | the file of this generation is backed up |
+| 2 | operator | reseal T to `L2`; activate | |
+| 3 | i1 | write `x` | `x` on `t1` |
+| 4 | operator | census, tombstone, every process restarted | |
+| 5 | operator | destroy `L2`, the lock the file names | **the backup from step 1 still opens `t1` under `L1`** |
+
+The current file was never the problem. A reseal changes the lock, not the keys
+([ADR-023](../../docs/adr/ADR-023-resealing-a-keyring.md)), so every copy from before it
+is a second door to the same tenant. The tombstone records every lock T was ever sealed
+under, and the destruction names all of them.
 
 ## Where the rules ended up in the code
 

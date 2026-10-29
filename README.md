@@ -768,7 +768,7 @@ the gateway already costs per request.
 | [ref/python/](ref/python/) | A second decoder written from the format spec alone, and the differential test that compares it against the Go one. |
 | [bench/](bench/) | Benchmark scripts, the figures they produce, and the methodology notes that came out of getting them wrong first. |
 | [demo/](demo/) | The end-to-end demo, as scripts: upload through the gateway, ciphertext at the provider, identical hash back, and `tamper.sh` — the hostile provider, by hand, in one command. |
-| [spec/tla/](spec/tla/) | The formal models of the manifest coordination, of `migrate-names`, of `encrypt-existing` and of the tag sidecars, the eighteen TLC configurations `make tla` runs, and the counterexamples written out. |
+| [spec/tla/](spec/tla/) | The formal models of the manifest coordination, of `migrate-names`, of `encrypt-existing`, of the tag sidecars and of tenants and their destruction, the twenty-six TLC configurations `make tla` runs, and the counterexamples written out. |
 | [CHANGELOG.md](CHANGELOG.md) | What each release contains, and what it does not. |
 
 ## Roadmap
@@ -945,7 +945,7 @@ way to a client's upload in flight
 ([ADR-025](docs/adr/ADR-025-writes-rank-by-when-they-began.md)).
 
 ```sh
-make tla        # thirteen configurations of both models; eleven must fail, two must not
+make tla        # twenty-six configurations of three models; twenty-one must fail, five must not
 ```
 
 ## Development
