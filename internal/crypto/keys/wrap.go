@@ -16,6 +16,10 @@ const (
 	// WrappedDEKSize is the exact size of a wrapped data key: nonce, key and tag.
 	// It is 80 characters of unpadded base64url in object metadata.
 	WrappedDEKSize = wrapNonceSize + KeySize + wrapTagSize
+	// maxSealed bounds what sealKey wraps. A secret is 32 bytes; the largest
+	// thing it seals is a keyring's directory (docs/FORMAT.md section 18.3),
+	// which at this size would list tens of thousands of tenants.
+	maxSealed = 1 << 20
 )
 
 // sealKey wraps plain under kek, binding it to aad.
@@ -24,6 +28,9 @@ const (
 // proxy instances to count with, and at 96 bits the collision probability stays
 // negligible for any realistic number of objects under one KEK.
 func sealKey(kek, plain, aad []byte) ([]byte, error) {
+	if len(plain) > maxSealed {
+		return nil, fmt.Errorf("keys: refusing to seal %d bytes, at most %d", len(plain), maxSealed)
+	}
 	aead, err := newWrapAEAD(kek)
 	if err != nil {
 		return nil, err

@@ -100,3 +100,12 @@ func TestLoadKeyringRefusesVersion2(t *testing.T) {
 		t.Fatal("LoadKeyringWithRootKey opened a version 2 keyring")
 	}
 }
+
+func TestSealKeyRefusesAnOversizedPlaintext(t *testing.T) {
+	if _, err := sealKey(vkey("k"), make([]byte, maxSealed+1), nil); err == nil {
+		t.Fatal("sealed more than maxSealed")
+	}
+	if _, err := sealKey(vkey("k"), make([]byte, maxSealed), nil); err != nil {
+		t.Fatal(err)
+	}
+}
