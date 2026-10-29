@@ -61,8 +61,9 @@ document is gone, so they are kept here.
 | [035](ADR-035-dashboard.md) | A read-only dashboard, on a listener of its own, on loopback | Accepted | M13 |
 | [036](ADR-036-presigned-uploads.md) | Presigned uploads: served when the operator sets a size limit, with CORS for the browser | Accepted | M14 |
 | [037](ADR-037-encrypted-object-tags.md) | Object tags, sealed in a sidecar bound to the object version | Accepted | M14 |
+| [038](ADR-038-tenants-and-crypto-shredding.md) | Tenants: keys per set of buckets, each under its own lock, and a tenant deleted by destroying them | Proposed | M15 |
 
-Every entry is Accepted. 037 was Proposed until its code landed, in four PRs, and 036 until its code landed, in three PRs. 025 was Accepted with its code: it corrects an assumption
+Every entry but 038 is Accepted; 038 stays Proposed until its model passes and its code lands. 037 was Proposed until its code landed, in four PRs, and 036 until its code landed, in three PRs. 025 was Accepted with its code: it corrects an assumption
 010 had stated as fact, which the AWS workflow disproved, and amends 009 and 022 for
 the same reason. 024 was Proposed until the gateway and the Helm chart
 used what it decides. 022 was Proposed between its model and its code, which
