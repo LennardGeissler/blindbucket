@@ -140,6 +140,30 @@ keys:
 	}
 }
 
+// A tenant's lock is configured like the deployment's, and its credentials are
+// referenced the same way.
+func TestLoadResolvesTenantCredentials(t *testing.T) {
+	t.Setenv("TEST_ACME_VAULT_TOKEN", "resolved-acme-token")
+	base := strings.TrimSuffix(minimal, "keys:\n  keyring: keyring.json\n")
+	cfg, err := Load(write(t, base+`
+keys:
+  keyring: keyring.json
+  tenants:
+    acme:
+      provider: vault
+      vault:
+        address: http://127.0.0.1:8200
+        token: ${TEST_ACME_VAULT_TOKEN}
+        key_name: bb-acme
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Keys.Tenants["acme"].Vault.Token; got != "resolved-acme-token" {
+		t.Errorf("acme's vault token = %q, want the resolved value", got)
+	}
+}
+
 // TestLoadFailsOnMissingEnvReference matters because the alternative is starting
 // with an empty credential and failing on every request instead.
 func TestLoadFailsOnMissingEnvReference(t *testing.T) {
@@ -567,6 +591,18 @@ func TestValidationNamesTheProblem(t *testing.T) {
 		"kms without a key id": {doc(upstreamOK, clientsOK,
 			`keys: {provider: awskms, keyring: k, awskms: {region: r, access_key_id: a, secret_access_key: s}}`),
 			"keys.awskms.key_id is required"},
+		"a tenant without a provider": {doc(upstreamOK, clientsOK,
+			`keys: {provider: file, keyring: k, tenants: {acme: {vault: {key_name: n}}}}`),
+			"keys.tenants.acme.provider is required"},
+		"a tenant's vault without a token": {doc(upstreamOK, clientsOK,
+			`keys: {provider: file, keyring: k, tenants: {acme: {provider: vault, vault: {address: "http://v", key_name: n}}}}`),
+			"keys.tenants.acme.vault.token is required"},
+		"a tenant with a keyring of its own": {doc(upstreamOK, clientsOK,
+			`keys: {provider: file, keyring: k, tenants: {acme: {provider: file, keyring: other}}}`),
+			"keys.tenants.acme.keyring"},
+		"a tenant called default": {doc(upstreamOK, clientsOK,
+			`keys: {provider: file, keyring: k, tenants: {default: {provider: file}}}`),
+			"keys.tenants.default"},
 		"kms without credentials": {doc(upstreamOK, clientsOK,
 			`keys: {provider: awskms, keyring: k, awskms: {region: r, key_id: i}}`), "keys.awskms credentials are required"},
 		"upstream without keys or a source": {doc(`upstream: {endpoint: "http://x", region: r}`,

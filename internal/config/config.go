@@ -425,6 +425,13 @@ type Keys struct {
 
 	Vault  VaultKeys  `yaml:"vault"`
 	AWSKMS AWSKMSKeys `yaml:"awskms"`
+
+	// Tenants says, for each tenant sealed by a lock of its own, how to open
+	// that lock: a provider and its settings, as above, without a keyring
+	// (ADR-038). Which tenants exist and which buckets are theirs is recorded
+	// in the keyring, not here. A tenant missing here is one this process
+	// cannot open; a tenant under the deployment's lock needs no entry.
+	Tenants map[string]Keys `yaml:"tenants"`
 }
 
 // VaultKeys addresses the Transit key that seals the keyring.
@@ -624,6 +631,20 @@ func Load(path string) (*Config, error) {
 			return nil, err
 		}
 	}
+	for tenant, t := range cfg.Keys.Tenants {
+		at := "keys.tenants." + tenant
+		for name, field := range map[string]*string{
+			at + ".vault.token":              &t.Vault.Token,
+			at + ".awskms.access_key_id":     &t.AWSKMS.AccessKeyID,
+			at + ".awskms.secret_access_key": &t.AWSKMS.SecretAccessKey,
+			at + ".awskms.session_token":     &t.AWSKMS.SessionToken,
+		} {
+			if err := expandEnv(name, field); err != nil {
+				return nil, err
+			}
+		}
+		cfg.Keys.Tenants[tenant] = t
+	}
 	for i := range cfg.Clients {
 		for name, field := range map[string]*string{
 			"access_key_id":     &cfg.Clients[i].AccessKeyID,
@@ -717,30 +738,55 @@ func validateCredentials(section, source, id, secret, token string) error {
 // A missing field here is a process that starts and then cannot open its
 // keyring, which is worse than one that refuses to start.
 func (k Keys) validate() error {
+	if err := k.validateSource("keys"); err != nil {
+		return err
+	}
+	for name, t := range k.Tenants {
+		at := "keys.tenants." + name
+		switch {
+		case name == "default":
+			return fmt.Errorf("%s: the default tenant is sealed by the keys section itself", at)
+		case t.Provider == "":
+			return fmt.Errorf("%s.provider is required: \"file\", \"vault\" or \"awskms\"", at)
+		case t.Keyring != "":
+			return fmt.Errorf("%s.keyring: a tenant is a section of keys.keyring, not a file of its own", at)
+		case len(t.Tenants) != 0:
+			return fmt.Errorf("%s.tenants: tenants do not nest", at)
+		}
+		if err := t.validateSource(at); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateSource checks one root-key source, the deployment's or a tenant's,
+// whose settings are under at.
+func (k Keys) validateSource(at string) error {
 	switch k.Provider {
 	case "file":
 		return nil
 	case "vault":
 		switch {
 		case k.Vault.Address == "":
-			return fmt.Errorf("keys.vault.address is required for provider \"vault\"")
+			return fmt.Errorf("%s.vault.address is required for provider \"vault\"", at)
 		case k.Vault.Token == "":
-			return fmt.Errorf("keys.vault.token is required for provider \"vault\"")
+			return fmt.Errorf("%s.vault.token is required for provider \"vault\"", at)
 		case k.Vault.KeyName == "":
-			return fmt.Errorf("keys.vault.key_name is required for provider \"vault\"")
+			return fmt.Errorf("%s.vault.key_name is required for provider \"vault\"", at)
 		}
-		return validateURL("keys.vault.address", k.Vault.Address)
+		return validateURL(at+".vault.address", k.Vault.Address)
 	case "awskms":
 		switch {
 		case k.AWSKMS.Region == "":
-			return fmt.Errorf("keys.awskms.region is required for provider \"awskms\"")
+			return fmt.Errorf("%s.awskms.region is required for provider \"awskms\"", at)
 		case k.AWSKMS.KeyID == "":
-			return fmt.Errorf("keys.awskms.key_id is required for provider \"awskms\"")
+			return fmt.Errorf("%s.awskms.key_id is required for provider \"awskms\"", at)
 		}
-		return validateCredentials("keys.awskms", k.AWSKMS.CredentialSource,
+		return validateCredentials(at+".awskms", k.AWSKMS.CredentialSource,
 			k.AWSKMS.AccessKeyID, k.AWSKMS.SecretAccessKey, k.AWSKMS.SessionToken)
 	default:
-		return fmt.Errorf("keys.provider %q is not one of \"file\", \"vault\", \"awskms\"", k.Provider)
+		return fmt.Errorf("%s.provider %q is not one of \"file\", \"vault\", \"awskms\"", at, k.Provider)
 	}
 }
 
