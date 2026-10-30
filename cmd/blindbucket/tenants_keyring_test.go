@@ -133,3 +133,30 @@ func TestKeysListShowsTenants(t *testing.T) {
 		t.Errorf("the JSON does not name acme's key's tenant: %s", stdout)
 	}
 }
+
+// A tenant under the deployment's lock moves with the deployment: after a
+// reseal it opens with the new passphrase and with nothing else.
+func TestResealMovesTenantsUnderTheDeploymentsLock(t *testing.T) {
+	path := setupKeyring(t, "2026-09")
+	addTenantDirectly(t, path, "acme", "acme-1", "acme-*")
+	before := openWhole(t, path).Tenant("acme")
+
+	newPass := writePassphraseFile(t, "a different passphrase")
+	if _, _, err := runCLI(t, "reseal", "--keyring", path, "--new-passphrase-file", newPass); err != nil {
+		t.Fatalf("reseal: %v", err)
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // a test's own file.
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := keys.OpenFileWithPassphrase(data, []byte("a different passphrase"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acme := f.Tenant("acme"); acme == nil || acme.Ring == nil || !acme.Ring.Equal(before.Ring) {
+		t.Fatalf("acme did not follow the deployment: %+v", acme)
+	}
+	if _, err := keys.OpenFileWithPassphrase(data, []byte(testPassphrase), nil); err == nil {
+		t.Error("the old passphrase still opens the resealed keyring")
+	}
+}

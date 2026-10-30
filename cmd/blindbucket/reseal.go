@@ -86,16 +86,20 @@ Flags:
 		return err
 	}
 
-	ring, opened, err := openKeyringFile(ctx, *keyring, from, &pass)
+	// Only the deployment's lock changes. Tenants under it are sealed again
+	// with it; tenants with locks of their own are written back as they are,
+	// so none of their locks is asked for.
+	f, opened, err := openFile(ctx, *keyring, from, &pass, openTenant(ctx, from))
 	if err != nil {
 		return err
 	}
+	ring := f.Default
 	before, err := keys.ReadRootKeyRef(opened)
 	if err != nil {
 		return err
 	}
 
-	sealed, err := sealKeyring(ctx, ring, to, &newPass, true)
+	sealed, err := sealKeyring(ctx, f, to, &newPass, true)
 	if err != nil {
 		return fmt.Errorf("sealing under %s: %w", sealedBy(to), err)
 	}
@@ -108,13 +112,13 @@ Flags:
 	// a keyring that can be opened: a service may encrypt for a principal it
 	// will not decrypt for, and finding that out after the file was replaced
 	// is finding it out with every object locked away.
-	reopened, err := unlockKeyring(ctx, *keyring, sealed, to, &newPass)
+	reopened, err := unlockFile(ctx, *keyring, sealed, to, &newPass, openTenant(ctx, to))
 	if err != nil {
 		return fmt.Errorf("%s sealed the keyring but cannot open it again (%w); "+
 			"nothing was written -- check that the configured credentials may decrypt "+
 			"as well as encrypt", sealedBy(to), err)
 	}
-	if !ring.Equal(reopened) {
+	if !f.Equal(reopened) {
 		return fmt.Errorf("the keyring sealed under %s opened with different keys; "+
 			"nothing was written", sealedBy(to))
 	}
