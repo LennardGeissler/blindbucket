@@ -283,62 +283,62 @@ func tenantNameAAD(tenant string) ([]byte, error) {
 	return appendLP([]byte(aadTenantNamePrefix), tenant)
 }
 
-// TenantSeal is what writing one tenant's section takes: its keys, and the
-// lock to seal them under.
-type TenantSeal struct {
-	Name    string
-	Buckets []string
-	Ring    *Keyring // the tenant's KEKs, its active key and its name key
-	// Inactive writes the tenant with no active key: it owns its buckets, but
-	// writes to them still use the default tenant's (ADR-038, rule 1).
-	Inactive bool
-	// RootKey is the tenant's own root key, or the deployment's for a tenant
-	// without a lock of its own (RootRef and KDF both nil).
-	RootKey []byte
-	RootRef *RootKeyRef
-	KDF     *KDFParams
-	// Previous locks, oldest first, before the current one.
-	Previous []Lock
-}
-
-// MarshalV2 writes a version 2 keyring: the default tenant under the
-// deployment's root key as in version 1, the directory sealed under it, and
-// one section per tenant under that tenant's root key.
-func MarshalV2(def *Keyring, rootKey []byte, ref RootKeyRef, params *KDFParams,
-	generation uint64, tenants []TenantSeal, tombstones []Tombstone,
-) ([]byte, error) {
-	base, err := def.buildFile(rootKey, ref, params)
-	if err != nil {
-		return nil, err
+// sealSection seals a tenant's KEKs and name key under rootKey, recording ref
+// or kdf as its lock; both nil is the deployment's lock.
+func sealSection(name string, ring *Keyring, rootKey []byte, ref *RootKeyRef, kdf *KDFParams) (tenantSection, error) {
+	ring.mu.RLock()
+	defer ring.mu.RUnlock()
+	if ring.name == nil {
+		return tenantSection{}, fmt.Errorf("keys: tenant %q has no name key", name)
 	}
-	base.Version = keyringVersion2
-	file := keyringFileV2{keyringFile: base, Generation: generation}
-	dir := Directory{Generation: generation, Tenants: []DirectoryTenant{}, Tombstones: tombstones}
-	if dir.Tombstones == nil {
-		dir.Tombstones = []Tombstone{}
+	if len(ring.keks) == 0 {
+		return tenantSection{}, fmt.Errorf("keys: tenant %q has no keys", name)
 	}
-	for _, t := range tenants {
-		section, err := sealSection(t)
+	section := tenantSection{Name: name, RootKey: ref, KDF: kdf}
+	for _, kid := range sortedKeys(ring.keks) {
+		aad, err := tenantKEKAAD(name, kid)
 		if err != nil {
-			return nil, err
+			return tenantSection{}, err
 		}
-		file.Tenants = append(file.Tenants, section)
-		active := t.Ring.ActiveKID()
-		if t.Inactive {
-			active = ""
+		kek := ring.keks[kid]
+		wrapped, err := sealKey(rootKey, kek[:], aad)
+		if err != nil {
+			return tenantSection{}, err
 		}
-		dir.Tenants = append(dir.Tenants, DirectoryTenant{
-			Name: t.Name, Buckets: t.Buckets, KIDs: t.Ring.KIDs(), ActiveKID: active,
-			Locks: append(slices.Clone(t.Previous), section.lock()),
+		section.Keys = append(section.Keys, keyEntry{
+			KID: kid, Created: ring.created[kid], Wrapped: base64.StdEncoding.EncodeToString(wrapped),
 		})
 	}
-	if file.Tenants == nil {
-		file.Tenants = []tenantSection{}
+	secret := ring.name.Secret()
+	defer clear(secret)
+	aad, err := tenantNameAAD(name)
+	if err != nil {
+		return tenantSection{}, err
 	}
+	wrapped, err := sealKey(rootKey, secret, aad)
+	if err != nil {
+		return tenantSection{}, err
+	}
+	section.NameKey = &nameEntry{Wrapped: base64.StdEncoding.EncodeToString(wrapped)}
+	return section, nil
+}
+
+// writeV2 completes a version 2 file: base is the default tenant as version 1
+// writes it, and the directory is checked and sealed under rootKey.
+func writeV2(base keyringFile, rootKey []byte, sections []tenantSection, dir Directory, defaultKIDs []string) ([]byte, error) {
 	if len(dir.Tenants) == 0 && len(dir.Tombstones) == 0 {
 		return nil, fmt.Errorf("keys: a keyring without tenants or tombstones is written as version 1")
 	}
-	if err := dir.validate(def.KIDs()); err != nil {
+	if dir.Tenants == nil {
+		dir.Tenants = []DirectoryTenant{}
+	}
+	if dir.Tombstones == nil {
+		dir.Tombstones = []Tombstone{}
+	}
+	if sections == nil {
+		sections = []tenantSection{}
+	}
+	if err := dir.validate(defaultKIDs); err != nil {
 		return nil, err
 	}
 	plain, err := json.Marshal(dir)
@@ -346,50 +346,20 @@ func MarshalV2(def *Keyring, rootKey []byte, ref RootKeyRef, params *KDFParams,
 		return nil, err
 	}
 	wrapped, err := sealKey(rootKey, plain, []byte(aadDirectory))
+	clear(plain)
 	if err != nil {
 		return nil, err
 	}
-	file.Directory = base64.StdEncoding.EncodeToString(wrapped)
+	base.Version = keyringVersion2
+	file := keyringFileV2{
+		keyringFile: base, Generation: dir.Generation, Tenants: sections,
+		Directory: base64.StdEncoding.EncodeToString(wrapped),
+	}
 	out, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return append(out, '\n'), nil
-}
-
-func sealSection(t TenantSeal) (tenantSection, error) {
-	t.Ring.mu.RLock()
-	defer t.Ring.mu.RUnlock()
-	if t.Ring.name == nil {
-		return tenantSection{}, fmt.Errorf("keys: tenant %q has no name key", t.Name)
-	}
-	section := tenantSection{Name: t.Name, RootKey: t.RootRef, KDF: t.KDF}
-	for _, kid := range sortedKeys(t.Ring.keks) {
-		aad, err := tenantKEKAAD(t.Name, kid)
-		if err != nil {
-			return tenantSection{}, err
-		}
-		kek := t.Ring.keks[kid]
-		wrapped, err := sealKey(t.RootKey, kek[:], aad)
-		if err != nil {
-			return tenantSection{}, err
-		}
-		section.Keys = append(section.Keys, keyEntry{
-			KID: kid, Created: t.Ring.created[kid], Wrapped: base64.StdEncoding.EncodeToString(wrapped),
-		})
-	}
-	secret := t.Ring.name.Secret()
-	defer clear(secret)
-	aad, err := tenantNameAAD(t.Name)
-	if err != nil {
-		return tenantSection{}, err
-	}
-	wrapped, err := sealKey(t.RootKey, secret, aad)
-	if err != nil {
-		return tenantSection{}, err
-	}
-	section.NameKey = &nameEntry{Wrapped: base64.StdEncoding.EncodeToString(wrapped)}
-	return section, nil
 }
 
 // KeyringV2 is an opened version 2 keyring.

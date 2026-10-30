@@ -83,6 +83,48 @@ func vring(t *testing.T, label string, kids ...string) *Keyring {
 	return r
 }
 
+// TenantSeal is a tenant as a vector writes it, with every field of its
+// directory entry set directly, so that a vector can hold what the commands
+// would only reach in several steps: a resealed tenant, an inactive one.
+type TenantSeal struct {
+	Name     string
+	Buckets  []string
+	Ring     *Keyring
+	Inactive bool
+	RootKey  []byte
+	RootRef  *RootKeyRef
+	KDF      *KDFParams
+	Previous []Lock
+}
+
+// MarshalV2 writes a version 2 file from its parts.
+func MarshalV2(def *Keyring, rootKey []byte, ref RootKeyRef, params *KDFParams,
+	generation uint64, tenants []TenantSeal, tombstones []Tombstone,
+) ([]byte, error) {
+	base, err := def.buildFile(rootKey, ref, params)
+	if err != nil {
+		return nil, err
+	}
+	dir := Directory{Generation: generation, Tombstones: tombstones}
+	var sections []tenantSection
+	for _, t := range tenants {
+		s, err := sealSection(t.Name, t.Ring, t.RootKey, t.RootRef, t.KDF)
+		if err != nil {
+			return nil, err
+		}
+		sections = append(sections, s)
+		active := t.Ring.ActiveKID()
+		if t.Inactive {
+			active = ""
+		}
+		dir.Tenants = append(dir.Tenants, DirectoryTenant{
+			Name: t.Name, Buckets: t.Buckets, KIDs: t.Ring.KIDs(), ActiveKID: active,
+			Locks: append(slices.Clone(t.Previous), s.lock()),
+		})
+	}
+	return writeV2(base, rootKey, sections, dir, def.KIDs())
+}
+
 var deploymentRef = RootKeyRef{Source: SourceVaultTransit, Ciphertext: "vault:v1:vector", KeyName: "bb-deployment"}
 
 // vectorBuckets are resolved in every accepted vector, so each one shows where
