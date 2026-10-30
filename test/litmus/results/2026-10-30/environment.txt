@@ -1,0 +1,7 @@
+date: 2026-10-30T08:38:13.110124+00:00
+host: Darwin 25.6.0 arm64, Apple M4
+python: Python 3.14.7
+minio: minio version RELEASE.2026-09-22T19-25-18Z (commit-id=df34868a88cc8c396807e04a7e220810b321bdaa)
+garage: dxflrs/garage:v2.4.1
+gateway: blindbucket v1.5.1 (tag) and v1.6.0 (tag, bf5b41a), built from the tags with go1.27.1, each configured by its own `init --non-interactive` (names in the clear), one gateway per version and provider, all on this host
+gw-<version>-<provider>: the same tests through that gateway, signed with the client credential init generated
