@@ -51,11 +51,19 @@ type Config struct {
 	Upstream *upstream.Client
 	Keys     keys.KeyProvider
 	// Names is the mapping objects are moved into. Required: it is the point.
-	Names  *names.Encrypter
+	Names *names.Encrypter
+	// From is an earlier mapping whose objects move into Names as well as
+	// those in clear: the default tenant's, for a bucket whose tenant is
+	// active and maps its names under its own name key (ADR-038). Nil moves
+	// objects in clear only. A copy keeps its data key, which is bound to the
+	// name in clear, so moving between two mappings is the same copy and
+	// delete as moving out of clear (spec/tla/Migrate.tla).
+	From   *names.Encrypter
 	Bucket string
 	// Prefix restricts the run to keys in clear under it. It is a prefix of the
 	// keys as they are stored now, which is to say in clear, so unlike rotate's
-	// it need not end on a '/'.
+	// it need not end on a '/' -- unless From is set: then it is also looked
+	// for under From, where only whole segments have an encrypted form.
 	Prefix string
 	// Log2ChunkSize is the fallback for objects whose metadata records none.
 	Log2ChunkSize uint8
@@ -127,7 +135,7 @@ func (e *UnguardedError) Error() string {
 
 // Result reports what a run did, or in a dry run would have done.
 type Result struct {
-	// Scanned counts keys in clear the listing returned. One that another run
+	// Scanned counts keys in clear, or under From, the listing returned. One that another run
 	// finished while this one was getting to it is counted in nothing else.
 	Scanned int64
 	// Migrated counts objects copied to their encrypted key and deleted in
@@ -169,6 +177,12 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		return nil, errors.New("migrate-names: a name encrypter is required")
 	case cfg.Bucket == "":
 		return nil, errors.New("migrate-names: a bucket is required")
+	}
+	if cfg.From != nil {
+		if _, whole, err := cfg.From.EncryptPrefix(cfg.Prefix); err != nil || !whole {
+			return nil, fmt.Errorf("migrate-names: prefix %q does not end on a '/', and objects "+
+				"under encrypted names can only be found by whole segments", cfg.Prefix)
+		}
 	}
 	if cfg.Concurrency <= 0 {
 		cfg.Concurrency = 8
@@ -229,16 +243,41 @@ type source struct {
 }
 
 // eachKeyInClear walks the prefix and hands on every key that is not already
-// encrypted.
+// under Names: those in clear, and with From, those under From.
 //
-// The listing is the provider's, so it holds both kinds of key, and the copies
+// The listing is the provider's, so it holds every kind of key, and the copies
 // this run publishes appear in it as it goes. A key that decrypts is at its
 // encrypted name already; the synthetic IV it carries (FORMAT §15.4) makes it
-// impossible for a key in clear to pass for one.
+// impossible for a key in clear to pass for one, or for a key under one
+// mapping to pass for one under another.
 func eachKeyInClear(ctx context.Context, cfg Config, visit func(source) bool) error {
+	if cfg.From == nil {
+		return listSources(ctx, cfg, cfg.Prefix, true, false, visit)
+	}
+	fromPrefix, _, err := cfg.From.EncryptPrefix(cfg.Prefix)
+	if err != nil {
+		return err
+	}
+	if fromPrefix == cfg.Prefix {
+		// The whole bucket: one listing holds both kinds.
+		return listSources(ctx, cfg, cfg.Prefix, true, true, visit)
+	}
+	// Each listing hands on one kind only, so an object found by both is
+	// moved once.
+	if err := listSources(ctx, cfg, cfg.Prefix, true, false, visit); err != nil {
+		return err
+	}
+	return listSources(ctx, cfg, fromPrefix, false, true, visit)
+}
+
+// listSources lists one stored prefix and hands on the keys in clear, those
+// under From, or both.
+func listSources(ctx context.Context, cfg Config, prefix string, inClear, underFrom bool,
+	visit func(source) bool,
+) error {
 	query := url.Values{"list-type": {"2"}, "max-keys": {"1000"}}
-	if cfg.Prefix != "" {
-		query.Set("prefix", cfg.Prefix)
+	if prefix != "" {
+		query.Set("prefix", prefix)
 	}
 	for {
 		page, err := cfg.Upstream.ListObjects(ctx, cfg.Bucket, query)
@@ -254,7 +293,18 @@ func eachKeyInClear(ctx context.Context, cfg Config, visit func(source) bool) er
 			if _, err := cfg.Names.DecryptKey(entry.Key); err == nil {
 				continue
 			}
-			if !visit(source{identity: entry.Key, stored: entry.Key}) {
+			src := source{identity: entry.Key, stored: entry.Key}
+			if cfg.From != nil {
+				if plain, err := cfg.From.DecryptKey(entry.Key); err == nil {
+					if !underFrom {
+						continue
+					}
+					src.identity = plain
+				} else if !inClear {
+					continue
+				}
+			}
+			if !visit(src) {
 				return ctx.Err()
 			}
 		}

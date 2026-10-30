@@ -610,3 +610,75 @@ func TestIntegrationMigrateKeepsTags(t *testing.T) {
 		t.Fatalf("after migration the tags are %q", got)
 	}
 }
+
+// A bucket whose tenant is active maps names under the tenant's name key
+// (ADR-038). Its objects in clear and those under the default tenant's
+// encrypted names both move there, multipart included, and come back in sight
+// through a gateway that serves the tenant; nothing is left where it was.
+func TestIntegrationMigrateMovesATenantsBucketToItsNameKey(t *testing.T) {
+	tn := proxytest.NewTenancy(t)
+	defaultOption, defaultNames := proxytest.WithEncryptedNames(t)
+	inClear := proxytest.New(t, proxytest.WithKeys(tn.Inactive))
+	underDefault := proxytest.New(t, defaultOption, proxytest.WithKeys(tn.Inactive))
+	active := proxytest.New(t, defaultOption, proxytest.WithKeys(tn.Active))
+
+	acmeKey, _ := tn.Active.Tenants()[0].Ring.NameKey()
+	secret := acmeKey.Secret()
+	acmeNames, err := names.New(secret)
+	clear(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prefix := proxytest.TestKey(t, "tenant") + "/"
+	plain, encrypted, multi := prefix+"clear.bin", prefix+"default.bin", prefix+"multi.bin"
+	for _, key := range []string{plain, encrypted, multi} {
+		for _, enc := range []*names.Encrypter{defaultNames, acmeNames} {
+			stored, err := enc.EncryptKey(key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			active.CleanupStored(t, stored)
+		}
+	}
+	bodies := map[string][]byte{plain: proxytest.RandomBytes(t, 4000), encrypted: proxytest.RandomBytes(t, 4000)}
+	inClear.Store(t, plain, bodies[plain])
+	underDefault.Store(t, encrypted, bodies[encrypted])
+	bodies[multi] = underDefault.MpuStore(t, multi,
+		[][]byte{proxytest.RandomBytes(t, proxytest.TestPart), proxytest.RandomBytes(t, 321)})
+	multiStored, _ := defaultNames.EncryptKey(multi)
+	oldManifest, _ := underDefault.ManifestKeyOf(t, multiStored)
+	defaultStored, _ := defaultNames.EncryptKey(encrypted)
+
+	for key := range bodies {
+		if got := status(t, active, http.MethodHead, key); got != http.StatusNotFound {
+			t.Fatalf("before the migration %s answers %d through the tenant's gateway", key, got)
+		}
+	}
+
+	cfg := migrate.Config{
+		Upstream: active.Upstream, Keys: tn.Active, Names: acmeNames, From: defaultNames,
+		Bucket: proxytest.Bucket, Prefix: prefix, Log2ChunkSize: stream.MinLog2ChunkSize,
+		Concurrency: 4, Log: proxytest.DiscardLogger(),
+		AllowUnconditional: !testprovider.Require(t).MigrationGuarded(),
+	}
+	if result, err := migrate.Run(t.Context(), cfg); err != nil || result.Migrated != 3 || result.Incomplete() {
+		t.Fatalf("migrate: %+v, %v; want three moved", result, err)
+	}
+
+	for key, body := range bodies {
+		if got := active.MustRead(t, key, "after the migration"); !bytes.Equal(got, body) {
+			t.Errorf("%s reads back different", key)
+		}
+	}
+	for _, gone := range []string{plain, defaultStored, multiStored, oldManifest} {
+		if exists(t, active, gone) {
+			t.Errorf("%s is still at the provider", gone)
+		}
+	}
+
+	cfg.Prefix = strings.TrimSuffix(prefix, "/")
+	if _, err := migrate.Run(t.Context(), cfg); err == nil {
+		t.Error("a prefix that is not a whole segment was accepted with an earlier mapping")
+	}
+}

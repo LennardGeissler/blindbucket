@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/LennardGeissler/blindbucket/internal/config"
+	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
+	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
 	"github.com/LennardGeissler/blindbucket/internal/migrate"
 )
 
@@ -42,6 +44,11 @@ write to an object's encrypted key is safe: the copy is published with
 If-None-Match, so a client that got there first keeps its write. An instance
 still serving names in clear loses what is written through it. ADR-022 has the
 reasoning, and spec/tla/Migrate.tla the counterexamples.
+
+In a bucket whose tenant is active, names are mapped under the tenant's own name
+key (ADR-038), and objects under the default tenant's encrypted names move there
+too. Activate the tenant and roll that out to every instance first, as for the
+switch itself; with a prefix, it has to end on a '/'.
 
 A run is idempotent, and finishes what an interrupted one left: an object
 already copied to its encrypted key is deleted in clear and counted as resumed.
@@ -106,11 +113,7 @@ Flags:
 	if err != nil {
 		return err
 	}
-	if err := defaultTenantOnly("migrate-names", bucket, bucketKeys); err != nil {
-		return err
-	}
-	ring := served.Default()
-	nameEnc, err := nameEncrypterFrom(cfg, ring, "migrating names needs the name key")
+	nameEnc, fromEnc, err := migrationNames(cfg, served, bucketKeys)
 	if err != nil {
 		return err
 	}
@@ -129,7 +132,7 @@ Flags:
 
 	started := time.Now().UTC()
 	result, err := migrate.Run(ctx, migrate.Config{
-		Upstream: client, Keys: ring, Names: nameEnc, Bucket: bucket, Prefix: prefix,
+		Upstream: client, Keys: served, Names: nameEnc, From: fromEnc, Bucket: bucket, Prefix: prefix,
 		Log2ChunkSize: cfg.Crypto.Log2ChunkSize, Concurrency: *workers, DryRun: *dryRun,
 		AllowUnconditional: *uncond, Log: log,
 	})
@@ -244,4 +247,35 @@ func marshalMigrateJSON(run migrateRun, r *migrate.Result) ([]byte, error) {
 		return nil, err
 	}
 	return append(data, '\n'), nil
+}
+
+// migrationNames returns the mapping a bucket's objects move into, the one
+// the gateway maps its names with, and the earlier mapping they may still be
+// under: the default tenant's, once the bucket's tenant is active and maps
+// them under its own name key (ADR-038). Built whatever names.encrypt says,
+// so that a dry run before the switch works.
+func migrationNames(
+	cfg *config.Config, served *keys.Served, bk keys.BucketKeys,
+) (to, from *names.Encrypter, err error) {
+	def := served.Default()
+	if bk.NameTenant == keys.DefaultTenant {
+		to, err = nameEncrypterFrom(cfg, def, "migrating names needs the name key")
+		return to, nil, err
+	}
+	if bk.Name == nil {
+		return nil, nil, fmt.Errorf("tenant %s has no name key", bk.NameTenant)
+	}
+	secret := bk.Name.Secret()
+	defer clear(secret)
+	if to, err = names.New(secret); err != nil {
+		return nil, nil, err
+	}
+	// A keyring without a default name key never encrypted a name under it,
+	// so there is nothing to move from.
+	if _, ok := def.NameKey(); ok {
+		if from, err = nameEncrypterFrom(cfg, def, "migrating names needs the name key"); err != nil {
+			return nil, nil, err
+		}
+	}
+	return to, from, nil
 }

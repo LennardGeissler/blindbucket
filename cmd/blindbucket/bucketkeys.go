@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -47,18 +46,6 @@ func loadBucketKeyring(
 		return nil, keys.BucketKeys{}, err
 	}
 	return served, bk, nil
-}
-
-// errTenantBucket refuses a tenant's bucket in a command not yet taught that
-// its keys and names are the tenant's.
-var errTenantBucket = errors.New("does not serve a tenant's buckets yet")
-
-// defaultTenantOnly refuses a bucket that is not the default tenant's.
-func defaultTenantOnly(command, bucket string, bk keys.BucketKeys) error {
-	if bk.Tenant == keys.DefaultTenant {
-		return nil
-	}
-	return fmt.Errorf("s3://%s belongs to tenant %s, and %s %w", bucket, bk.Tenant, command, errTenantBucket)
 }
 
 // tenantKIDs returns the key ids of a tenant of served, the default tenant's
