@@ -10,12 +10,13 @@ import (
 )
 
 // ErrKeyringHasTenants is what LoadKeyring returns for a version 2 file. The
-// gateway and the commands that read and write objects open a keyring with
-// LoadKeyring, and until they route a bucket to its tenant's keys they must not
-// open one with tenants: opening only the default tenant would wrap every
-// tenant's buckets under the default tenant's keys (ADR-038).
-var ErrKeyringHasTenants = errors.New("keys: this keyring has tenants (version 2), which the gateway " +
-	"and the object commands do not serve yet; only tenants, keys, keygen and reseal open it")
+// commands that read and write objects open a keyring with LoadKeyring, and
+// until they route a bucket to its tenant's keys they must not open one with
+// tenants: opening only the default tenant would wrap every tenant's buckets
+// under the default tenant's keys (ADR-038). The gateway opens the file whole
+// and serves it through Served.
+var ErrKeyringHasTenants = errors.New("keys: this keyring has tenants (version 2), which the object " +
+	"commands do not serve yet; serve and the keyring commands open it")
 
 // File is a keyring file opened whole, version 1 or 2: the default tenant and,
 // with tenants, the directory and every tenant's keys.

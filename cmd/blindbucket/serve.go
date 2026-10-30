@@ -77,10 +77,13 @@ Flags:
 	if pass.file == "" {
 		pass.file = cfg.Keys.PassphraseFile
 	}
-	ring, err := loadServerKeyring(ctx, cfg, &pass)
+	served, err := openServedKeyring(ctx, cfg, &pass, log)
 	if err != nil {
 		return err
 	}
+	// The deployment's keys: the default tenant, and with it the audit, name
+	// and freshness keys. Writes to a bucket take theirs from served.
+	ring := served.Default()
 
 	// The registry is built before the upstream client so that the client can
 	// report how long the provider takes without knowing what a metric is.
@@ -187,7 +190,7 @@ Flags:
 
 	handler, err := proxy.New(proxy.Config{
 		Upstream:              client,
-		Keys:                  ring,
+		Keys:                  served,
 		Verifier:              verifier,
 		BaseDomain:            cfg.Server.BaseDomain,
 		Log2ChunkSize:         cfg.Crypto.Log2ChunkSize,
@@ -615,6 +618,46 @@ func freshnessStore(l *freshness.Local) freshness.Store {
 	return l
 }
 
+// openServedKeyring opens the gateway's keyring whole: the default tenant,
+// which has to open or the gateway does not start, and every tenant
+// keys.tenants can open. A tenant that does not open is logged and its buckets
+// answer 503 until a restart opens it; one tenant's key service is not every
+// tenant's outage (ADR-038). Nothing is prompted for: a tenant's passphrase
+// comes from its passphrase_file.
+func openServedKeyring(
+	ctx context.Context, cfg *config.Config, pass *passphraseFlags, log *slog.Logger,
+) (*keys.Served, error) {
+	roots := openTenants(ctx, cfg.Keys)
+	defer roots.wipe()
+	f, _, err := openFile(ctx, cfg.Keys.Keyring, cfg.Keys, pass, roots)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range f.Tenants {
+		switch {
+		case t.Ring == nil:
+			log.Error("a tenant's keys did not open; its buckets answer 503 until a restart opens them",
+				"tenant", t.Name, "lock", describeLock(t.Lock()), "err", t.Err)
+		case t.Lock().Source == keys.LockDeployment:
+			log.Warn("a tenant is sealed under the deployment's lock; destroying it will not reach "+
+				"kept copies of the keyring", "tenant", t.Name)
+		}
+	}
+	for name := range cfg.Keys.Tenants {
+		if f.Tenant(name) == nil {
+			log.Warn("keys.tenants names a tenant the keyring does not have", "tenant", name)
+		}
+	}
+	if len(f.Tenants) > 0 || len(f.Tombstones) > 0 {
+		log.Info("keyring has tenants", "generation", f.Generation,
+			"tenants", len(f.Tenants), "destroyed", len(f.Tombstones))
+	}
+	return keys.NewServed(f), nil
+}
+
+// loadServerKeyring opens the default tenant for the commands that read and
+// write objects, and refuses a keyring with tenants until they route a bucket
+// to its tenant's keys.
 func loadServerKeyring(ctx context.Context, cfg *config.Config, pass *passphraseFlags) (*keys.Keyring, error) {
 	return openKeyring(ctx, cfg.Keys.Keyring, cfg.Keys, pass)
 }

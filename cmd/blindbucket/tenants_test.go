@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 )
@@ -212,5 +215,52 @@ func TestTenantsWithAServiceLock(t *testing.T) {
 	stdout, _, err = runCLI(t, "tenants", "list", "--keyring", path, "--config", underVault, "--json")
 	if err != nil || !strings.Contains(stdout, `"opened":false`) {
 		t.Errorf("Vault still opens acme after the move: %v %s", err, stdout)
+	}
+}
+
+// The gateway serves a keyring with tenants. A tenant whose lock it cannot
+// open does not stop it: it says so and starts, and the tenant's buckets are
+// refused while every other bucket is served (ADR-038).
+func TestServeOpensAKeyringWithTenants(t *testing.T) {
+	path := setupKeyring(t, "2026-09")
+	acmeConf := tenantPassphraseConfig(t, "acme", writePassphraseFile(t, "acme's passphrase"))
+	if _, _, err := runCLI(t, "tenants", "create", "--keyring", path, "--config", acmeConf, "acme", "acme-*"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runCLI(t, "tenants", "create", "--keyring", path, "--deployment-lock", "beta", "beta-*"); err != nil {
+		t.Fatal(err)
+	}
+	provider, _ := stubProvider(t)
+	adminAddr := freeAddr(t)
+
+	var stopErr error
+	logs := captureStderr(t, func() {
+		// keys.tenants names no lock for acme, so acme does not open here.
+		stop := startServe(t, fmt.Sprintf(`
+server: { listen: %q }
+admin: { listen: %q }
+upstream: { endpoint: %q, region: us-east-1, path_style: true, access_key_id: a, secret_access_key: b }
+keys:
+  provider: file
+  keyring: %q
+  tenants:
+    gamma: { provider: file, passphrase_file: /nonexistent }
+clients: [{ name: tester, access_key_id: TESTCLIENT, secret_access_key: s, buckets: ["*"] }]
+`, freeAddr(t), adminAddr, provider.URL, path))
+		_ = waitFor(t, &http.Client{Timeout: time.Second}, "http://"+adminAddr+"/healthz", http.StatusOK).Body.Close()
+		stopErr = stop()
+	})
+	if stopErr != nil {
+		t.Fatalf("serve: %v", stopErr)
+	}
+	for _, want := range []string{
+		`"msg":"keyring has tenants","generation":2,"tenants":2`,
+		`a tenant's keys did not open`, `"tenant":"acme"`,
+		`sealed under the deployment's lock`, `"tenant":"beta"`,
+		`keys.tenants names a tenant the keyring does not have","tenant":"gamma"`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("no log line containing %s in:\n%s", want, logs)
+		}
 	}
 }
