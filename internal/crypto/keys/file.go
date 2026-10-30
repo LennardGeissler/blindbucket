@@ -326,6 +326,28 @@ func openSection(s tenantSection, active string, rootKey []byte) (*Keyring, erro
 	return ring, nil
 }
 
+// OpenTenant opens one tenant that did not open with the file, with the root
+// key tenantRoot returns for it. A command that works on one bucket opens the
+// file with the deployment's root key alone and then that bucket's tenant, so
+// it asks one key service and no other. It returns why the tenant did not
+// open, or nil; a tenant already open is left as it is.
+func (f *File) OpenTenant(name string, tenantRoot TenantRootFunc) error {
+	t := f.Tenant(name)
+	if t == nil {
+		return fmt.Errorf("keys: no tenant %q", name)
+	}
+	if t.Ring != nil {
+		return nil
+	}
+	if t.Lock().Source == LockDeployment {
+		// It opened, or failed to, with the deployment's root key along with
+		// the file; trying again would fail the same way.
+		return t.Err
+	}
+	t.Ring, t.Err = openTenant(t, nil, tenantRoot)
+	return t.Err
+}
+
 // Directory returns the directory as it now stands.
 func (f *File) Directory() Directory {
 	d := Directory{Generation: f.Generation, Tombstones: f.Tombstones}

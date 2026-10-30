@@ -337,3 +337,30 @@ func TestOpenFileWipesTenantRoots(t *testing.T) {
 		t.Error("the tenant's root key was left in memory")
 	}
 }
+
+// A tenant opened after the file opens to what it would have opened to with
+// it, and one that cannot open says why and stays unopened.
+func TestOpenTenantLater(t *testing.T) {
+	data := withTenants(t)
+	atOnce := openV(t, data, fileRoot, acmeRoots)
+
+	f := openV(t, data, fileRoot, nil)
+	if err := f.OpenTenant("acme", rootsFunc(map[string][]byte{"acme": vkey("not acme's")})); err == nil {
+		t.Error("acme opened with another root key")
+	}
+	if f.Tenant("acme").Ring != nil {
+		t.Error("a failed OpenTenant left acme open")
+	}
+	if err := f.OpenTenant("acme", rootsFunc(acmeRoots)); err != nil {
+		t.Fatal(err)
+	}
+	if !f.Equal(atOnce) {
+		t.Error("acme opened later holds other keys than acme opened with the file")
+	}
+	if err := f.OpenTenant("beta", nil); err != nil {
+		t.Errorf("beta, under the deployment's lock, was open already: %v", err)
+	}
+	if err := f.OpenTenant("zeta", rootsFunc(acmeRoots)); err == nil {
+		t.Error("opened a tenant the file does not have")
+	}
+}
