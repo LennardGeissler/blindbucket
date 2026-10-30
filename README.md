@@ -802,7 +802,7 @@ the gateway already costs per request.
 | M12 | Works with software that cannot be changed: Nextcloud, Velero, GitLab, Loki and Mastodon storing through the gateway, each as a CI job and a guide, with what breaks written down, and an existing bucket's objects encrypted in place (ADR-034) | **done** |
 | M13 | A read-only dashboard: instance health, keyring and root-key source, the audit log verified — nothing on it changes state, served on loopback only until M15 brings sign-in (ADR-035) | **done** in 1.6 |
 | M14 | What is refused today, decided again: presigned uploads, served where the operator sets a size limit and with CORS for the browser (ADR-036), and object tags, stored sealed in a sidecar per object version (ADR-037) | **done** in 1.6 |
-| M15 | Several tenants on one gateway: keys per tenant, a tenant deleted by destroying its key, OIDC sign-in for the dashboard, the audit log exported | planned |
+| M15 | Several tenants on one gateway: keys per tenant, a tenant deleted by destroying its key, OIDC sign-in for the dashboard, the audit log exported | in progress |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
 clients" actually means for anything over 8 MiB. M3.5 existed to get its coordination rules

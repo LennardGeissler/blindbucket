@@ -21,8 +21,14 @@ version 1 would keep being readable.
 - **The keyring file is specified, with version 2 for tenants.** FORMAT.md §18 writes
   down the keyring as every release has written it, and version 2, which holds tenants
   under locks of their own ([ADR-038](docs/adr/ADR-038-tenants-and-crypto-shredding.md)).
-  Twenty-two known-answer vectors pin it, and the Python reference reads them. Nothing
-  reads or writes version 2 yet: this release still refuses such a file.
+  Twenty-two known-answer vectors pin it, and the Python reference reads them.
+- **Tenants in the keyring.** `blindbucket tenants create | assign | activate | list` adds
+  tenants with keys of their own under a lock of their own, configured in `keys.tenants`,
+  and gives them buckets; `reseal --tenant` moves a tenant to another lock and keeps the
+  old one in its history. `keygen`, `keys remove` and `reseal` keep a keyring's tenants,
+  and `keys list` gains a `TENANT` column and `tenant` and `opened` in `--json`. The
+  gateway and the object commands do not serve tenants yet and refuse such a keyring by
+  name ([#133](https://github.com/LennardGeissler/blindbucket/issues/133)).
 
 ### Fixed
 

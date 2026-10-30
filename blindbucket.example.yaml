@@ -141,6 +141,24 @@ keys:
   #   encryption_context:
   #     deployment: prod-eu
 
+  # Tenants with a lock of their own (ADR-038): how to open each one, in the
+  # same shape as above and without a keyring -- a tenant is a section of this
+  # one. Which tenants exist and which buckets are theirs is recorded in the
+  # keyring, not here. A tenant missing here cannot be opened by this process;
+  # one sealed under the deployment's lock needs no entry. A tenant's
+  # passphrase comes from its passphrase_file or the terminal, never from
+  # $BLINDBUCKET_PASSPHRASE.
+  # tenants:
+  #   acme:
+  #     provider: awskms
+  #     awskms:
+  #       region: eu-central-1
+  #       key_id: alias/blindbucket-acme
+  #       credential_source: web_identity
+  #   globex:
+  #     provider: file
+  #     passphrase_file: /run/secrets/globex-passphrase
+
 crypto:
   log2_chunk_size: 16                    # 64 KiB
 

@@ -20,8 +20,9 @@ is `internal/upload`, section 14 is `internal/audit`, section 15 is
 `internal/crypto/names`, pinned by its own vectors. Section 17 is
 `internal/crypto/tags`, pinned by its own vectors as well, and the gateway has
 written tag sidecars since `v1.6.0`. Section 18 is `internal/crypto/keys`; its
-version 1 is what every release has written, and version 2, tenants, is specified
-ahead of the code ([ADR-038](adr/ADR-038-tenants-and-crypto-shredding.md)).
+version 1 is what every release has written, and version 2, tenants, is read and
+written by the keyring commands, while the gateway does not serve it yet
+([ADR-038](adr/ADR-038-tenants-and-crypto-shredding.md)).
 
 This document is the authoritative specification of the bytes blindbucket writes to
 object storage. It is written so that an independent implementation can interoperate
