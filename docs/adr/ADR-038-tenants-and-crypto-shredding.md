@@ -109,7 +109,13 @@ default tenant.
 - **Names follow buckets.** With `names.encrypt`, a tenant's buckets map names under
   the tenant's name key. A bucket that joins a tenant with encrypted names in it is
   moved by `migrate-names` from the default name key to the tenant's, under
-  ADR-022's rule: every instance switched first, then the migration.
+  ADR-022's rule: every instance switched first, then the migration. *Amended
+  while writing the gateway's side: the name key switches when the tenant is
+  activated, with the KEK, not when the bucket is assigned. Until then a tenant's
+  buckets behave exactly as the default tenant's. An instance that does not yet
+  serve the tenant maps names under the default name key, and a switch at
+  assignment would have split a bucket's names between instances during the
+  rollout, which for names, unlike KEKs, nothing reads across.*
 - **Audit entries about a tenant's buckets** encrypt their names under a key derived
   from the tenant's name key, and record nothing else about the tenant. A reader
   finds the key by trying those it holds, which the name encryption's own check
