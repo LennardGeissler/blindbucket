@@ -353,7 +353,7 @@ func unsealFix(cfg config.Keys) string {
 // Written to stderr rather than the log, because every command that opens a
 // keyring should say it, and only one of them has a logger.
 func warnIfExposed(kind, path string) {
-	info, err := os.Stat(path)
+	info, err := os.Stat(path) //nolint:gosec // the operator's own key file; only its mode is read.
 	if err != nil || !info.Mode().IsRegular() {
 		// Not readable, or not a file. Whatever the caller does next will
 		// report that properly.

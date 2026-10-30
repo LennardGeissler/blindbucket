@@ -22,6 +22,7 @@ _blindbucket() {
     'keygen:create a keyring, or add a key to an existing one'
     'keys:list the keys in a keyring, or retire one'
     'reseal:seal a keyring under another passphrase, Vault or KMS'
+    'tenants:add tenants, give them buckets, activate and list them'
     'gc:remove orphaned multipart manifests and tag sidecars'
     'rotate:re-wrap data keys under a new KEK'
     'migrate-names:move objects stored in clear to their encrypted names'
@@ -47,13 +48,18 @@ _blindbucket() {
   (( CURRENT-- ))
 
   case $cmd in
-    keys|audit)
+    keys|tenants|audit)
       if (( CURRENT == 2 )); then
         local -a subcommands
         case $cmd in
           keys) subcommands=(
             'list:show the key-encryption keys in a keyring, and how old they are'
             'remove:retire a key that nothing references any more') ;;
+          tenants) subcommands=(
+            'create:add a tenant, inactive, with its keys, its lock and its buckets'
+            'assign:give a tenant more buckets, for good'
+            'activate:write a tenant'"'"'s buckets under its own keys from now on'
+            'list:show the tenants, their buckets, keys and locks') ;;
           audit) subcommands=(
             "verify:check a log's hash chain and checkpoint signatures"
             'pubkey:print the public key a verifier needs') ;;
@@ -220,6 +226,39 @@ _blindbucket() {
         '--keyring[keyring file]:file:_files' \
         '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
         ':key id'
+      ;;
+    'tenants create')
+      _arguments \
+        '--config[configuration naming the root-key provider, and each tenant'"'"'s lock]:file:_files' \
+        '--deployment-lock[seal the tenant under the deployment'"'"'s lock]' \
+        '--keyring[keyring file]:file:_files' \
+        '--kid[id of the tenant'"'"'s first key]:key id' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        ':tenant name' \
+        '*:bucket'
+      ;;
+    'tenants assign')
+      _arguments \
+        '--config[configuration naming the root-key provider, and each tenant'"'"'s lock]:file:_files' \
+        '--keyring[keyring file]:file:_files' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        ':tenant name' \
+        '*:bucket'
+      ;;
+    'tenants activate')
+      _arguments \
+        '--config[configuration naming the root-key provider, and each tenant'"'"'s lock]:file:_files' \
+        '--keyring[keyring file]:file:_files' \
+        '--kid[the key to activate]:key id' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        ':tenant name'
+      ;;
+    'tenants list')
+      _arguments \
+        '--config[configuration naming the root-key provider, and each tenant'"'"'s lock]:file:_files' \
+        '--json[emit the tenant list as JSON]' \
+        '--keyring[keyring file]:file:_files' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files'
       ;;
     'audit verify')
       _arguments \

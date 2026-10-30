@@ -31,6 +31,10 @@ _blindbucket_flags() {
 	decrypt) echo --config -i --keyring -o --passphrase-file ;;
 	inspect) echo --json ;;
 	"keys list") echo --config --json --keyring --passphrase-file ;;
+	"tenants create") echo --config --deployment-lock --keyring --kid --passphrase-file ;;
+	"tenants assign") echo --config --keyring --passphrase-file ;;
+	"tenants activate") echo --config --keyring --kid --passphrase-file ;;
+	"tenants list") echo --config --json --keyring --passphrase-file ;;
 	"keys remove") echo --config --force --keyring --passphrase-file ;;
 	"audit verify") echo --config --expect --keyring --passphrase-file --print --public-key ;;
 	"audit pubkey") echo --config --keyring --open --passphrase-file ;;
@@ -44,17 +48,18 @@ _blindbucket() {
 	COMPREPLY=()
 
 	if [ "$COMP_CWORD" -eq 1 ]; then
-		COMPREPLY=($(compgen -W "init doctor serve keygen keys reseal gc rotate migrate-names encrypt-existing
+		COMPREPLY=($(compgen -W "init doctor serve keygen keys reseal tenants gc rotate migrate-names encrypt-existing
 			probe scrub audit encrypt decrypt inspect version help" -- "$cur"))
 		return
 	fi
 
 	cmd=${COMP_WORDS[1]}
 	case $cmd in
-	keys | audit)
+	keys | tenants | audit)
 		if [ "$COMP_CWORD" -eq 2 ]; then
 			case $cmd in
 			keys) COMPREPLY=($(compgen -W "list remove" -- "$cur")) ;;
+			tenants) COMPREPLY=($(compgen -W "create assign activate list" -- "$cur")) ;;
 			audit) COMPREPLY=($(compgen -W "verify pubkey" -- "$cur")) ;;
 			esac
 			return

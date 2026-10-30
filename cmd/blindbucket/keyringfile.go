@@ -64,7 +64,7 @@ func replaceKeyring(path string, opened, data []byte) error {
 	renamed := false
 	defer func() {
 		if !renamed {
-			_ = os.Remove(tmp)
+			_ = os.Remove(tmp) //nolint:gosec // beside the operator's own keyring.
 		}
 	}()
 
@@ -76,6 +76,7 @@ func replaceKeyring(path string, opened, data []byte) error {
 	if !bytes.Equal(current, opened) {
 		return fmt.Errorf("%s: %w", path, errKeyringChanged)
 	}
+	//nolint:gosec // the path is the operator's own keyring.
 	if err := os.Rename(tmp, path); err != nil {
 		return err
 	}

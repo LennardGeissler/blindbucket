@@ -76,6 +76,7 @@ func (p *passphraseFlags) wipe() {
 func (p *passphraseFlags) read(prompt string, confirm bool) ([]byte, error) {
 	if p.file != "" {
 		warnIfExposed("passphrase file", p.file)
+		//nolint:gosec // a flag or keys.passphrase_file the operator set.
 		data, err := os.ReadFile(p.file)
 		if err != nil {
 			return nil, fmt.Errorf("reading the passphrase file %s (keys.passphrase_file or "+

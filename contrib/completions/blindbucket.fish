@@ -7,14 +7,14 @@
 # cmd/blindbucket/completions_test.go fails when the flags offered here and
 # the ones `blindbucket <command> -h` lists differ.
 
-# The command on the line, with the subcommand for keys and audit: "rotate",
-# "keys list". A subcommand has to come right after keys or audit, which is
-# what the CLI requires too.
+# The command on the line, with the subcommand for keys, tenants and audit:
+# "rotate", "keys list". A subcommand has to come right after its command,
+# which is what the CLI requires too.
 function __blindbucket_command
     set -l words (commandline -opc)
     set -q words[2]; or return
     switch $words[2]
-        case keys audit
+        case keys tenants audit
             if set -q words[3]
                 echo "$words[2] $words[3]"
             else
@@ -44,6 +44,7 @@ complete -c blindbucket -n "$without_command" -a serve -d 'run the S3 gateway'
 complete -c blindbucket -n "$without_command" -a keygen -d 'create a keyring, or add a key to an existing one'
 complete -c blindbucket -n "$without_command" -a keys -d 'list the keys in a keyring, or retire one'
 complete -c blindbucket -n "$without_command" -a reseal -d 'seal a keyring under another passphrase, Vault or KMS'
+complete -c blindbucket -n "$without_command" -a tenants -d 'add tenants, give them buckets, activate and list them'
 complete -c blindbucket -n "$without_command" -a gc -d 'remove orphaned multipart manifests and tag sidecars'
 complete -c blindbucket -n "$without_command" -a rotate -d 're-wrap data keys under a new KEK'
 complete -c blindbucket -n "$without_command" -a migrate-names -d 'move objects stored in clear to their encrypted names'
@@ -60,6 +61,10 @@ complete -c blindbucket -n "$without_command" -a help -d 'list the commands'
 # Subcommands.
 complete -c blindbucket -n '__blindbucket_using keys' -a list -d 'show the key-encryption keys in a keyring, and how old they are'
 complete -c blindbucket -n '__blindbucket_using keys' -a remove -d 'retire a key that nothing references any more'
+complete -c blindbucket -n '__blindbucket_using tenants' -a create -d 'add a tenant, inactive, with its keys, its lock and its buckets'
+complete -c blindbucket -n '__blindbucket_using tenants' -a assign -d 'give a tenant more buckets, for good'
+complete -c blindbucket -n '__blindbucket_using tenants' -a activate -d "write a tenant's buckets under its own keys from now on"
+complete -c blindbucket -n '__blindbucket_using tenants' -a list -d 'show the tenants, their buckets, keys and locks'
 complete -c blindbucket -n '__blindbucket_using audit' -a verify -d "check a log's hash chain and checkpoint signatures"
 complete -c blindbucket -n '__blindbucket_using audit' -a pubkey -d 'print the public key a verifier needs'
 
@@ -203,6 +208,18 @@ complete -c blindbucket -n $c -l config -r -F -d 'configuration file naming the 
 complete -c blindbucket -n $c -l force -d 'confirm that no object is wrapped under the key any more'
 complete -c blindbucket -n $c -l keyring -r -F -d 'keyring file'
 complete -c blindbucket -n $c -l passphrase-file -r -F -d 'read the keyring passphrase from this file'
+
+# tenants create, assign, activate and list
+for sub in create assign activate list
+    set c "__blindbucket_using tenants $sub"
+    complete -c blindbucket -n $c -l config -r -F -d "configuration naming the root-key provider, and each tenant's lock"
+    complete -c blindbucket -n $c -l keyring -r -F -d 'keyring file'
+    complete -c blindbucket -n $c -l passphrase-file -r -F -d 'read the keyring passphrase from this file'
+end
+complete -c blindbucket -n '__blindbucket_using tenants create' -l deployment-lock -d "seal the tenant under the deployment's lock"
+complete -c blindbucket -n '__blindbucket_using tenants create' -l kid -x -d "id of the tenant's first key"
+complete -c blindbucket -n '__blindbucket_using tenants activate' -l kid -x -d 'the key to activate'
+complete -c blindbucket -n '__blindbucket_using tenants list' -l json -d 'emit the tenant list as JSON'
 
 # audit verify and audit pubkey
 set c '__blindbucket_using audit verify'
