@@ -31,13 +31,14 @@ func TestMarshalKeysJSON(t *testing.T) {
 		active:  "2026-09",
 	}
 
-	data, err := marshalKeysJSON(now, ring)
+	data, err := marshalKeysJSON(now, ringRows("default", ring))
 	if err != nil {
 		t.Fatalf("marshalKeysJSON: %v", err)
 	}
 
 	var got struct {
 		Keys []struct {
+			Tenant     string  `json:"tenant"`
 			KID        string  `json:"kid"`
 			Created    *string `json:"created"`
 			AgeSeconds *int64  `json:"age_seconds"`
@@ -50,7 +51,7 @@ func TestMarshalKeysJSON(t *testing.T) {
 	if len(got.Keys) != 2 {
 		t.Fatalf("got %d keys, want 2", len(got.Keys))
 	}
-	if got.Keys[0].KID != "2026-09" || !got.Keys[0].Active {
+	if got.Keys[0].KID != "2026-09" || !got.Keys[0].Active || got.Keys[0].Tenant != "default" {
 		t.Errorf("active entry = %+v", got.Keys[0])
 	}
 	expectedCreated := created.UTC().Format(time.RFC3339)
@@ -130,15 +131,17 @@ func TestKeysListThroughTheCommand(t *testing.T) {
 		if len(lines) != 2 {
 			t.Fatalf("the table has %d lines, want a header and one key:\n%s", len(lines), stdout)
 		}
-		if fields := strings.Fields(lines[0]); strings.Join(fields, " ") != "KEY ID CREATED AGE" {
+		if fields := strings.Fields(lines[0]); strings.Join(fields, " ") != "TENANT KEY ID CREATED AGE" {
 			t.Errorf("header is %q", lines[0])
 		}
 		row := strings.Fields(lines[1])
-		if len(row) != 4 || row[0] != "2026-09" || row[3] != "active" {
-			t.Errorf("row is %q, want the key id, its creation time, its age and \"active\"", lines[1])
+		if len(row) != 5 || row[0] != "default" || row[1] != "2026-09" || row[4] != "active" {
+			t.Errorf("row is %q, want the tenant, the key id, its creation time, its age and \"active\"", lines[1])
 		}
-		if _, err := time.Parse(time.RFC3339, row[1]); err != nil {
-			t.Errorf("created column %q is not RFC 3339: %v", row[1], err)
+		if len(row) > 2 {
+			if _, err := time.Parse(time.RFC3339, row[2]); err != nil {
+				t.Errorf("created column %q is not RFC 3339: %v", row[2], err)
+			}
 		}
 		if !strings.Contains(stderr, "readable beyond its owner") || strings.Contains(stdout, "warning") {
 			t.Errorf("the warning is not on stderr alone:\nstdout: %s\nstderr: %s", stdout, stderr)

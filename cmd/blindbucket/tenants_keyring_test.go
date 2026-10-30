@@ -107,3 +107,29 @@ func TestObjectCommandsRefuseAKeyringWithTenants(t *testing.T) {
 		t.Errorf("encrypt with a keyring with tenants: %v, want ErrKeyringHasTenants", err)
 	}
 }
+
+func TestKeysListShowsTenants(t *testing.T) {
+	path := setupKeyring(t, "2026-09")
+	addTenantDirectly(t, path, "acme", "acme-1", "acme-*")
+
+	stdout, _, err := runCLI(t, "keys", "list", "--keyring", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(rows) != 3 {
+		t.Fatalf("want a header and two keys:\n%s", stdout)
+	}
+	// acme is not active yet, so its row carries no marker.
+	if f := strings.Fields(rows[2]); len(f) != 4 || f[0] != "acme" || f[1] != "acme-1" {
+		t.Errorf("acme's row is %q", rows[2])
+	}
+
+	stdout, _, err = runCLI(t, "keys", "list", "--keyring", path, "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, `"tenant":"acme","kid":"acme-1"`) {
+		t.Errorf("the JSON does not name acme's key's tenant: %s", stdout)
+	}
+}

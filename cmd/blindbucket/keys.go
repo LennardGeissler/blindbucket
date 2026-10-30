@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -49,8 +50,10 @@ func runKeysList(ctx context.Context, args []string) error {
 	fs.Usage = func() {
 		_, _ = fmt.Fprintf(fs.Output(), `Usage: blindbucket keys list --keyring <file> [flags]
 
-Lists the key-encryption keys in a keyring: which one new objects are wrapped
-under, and how long each has been in use.
+Lists the key-encryption keys in a keyring, by tenant: which one new objects are
+wrapped under, and how long each has been in use. A tenant whose lock this
+configuration cannot open (keys.tenants) is listed from the keyring's directory,
+with what only its keys would say left unknown.
 
 Age is what decides whether a rotation is due, so it is what this prints. The
 keyring is opened rather than read, so what it shows is authenticated: a key id
@@ -80,35 +83,47 @@ Flags:
 	if err != nil {
 		return err
 	}
-	ring, err := openKeyring(ctx, *keyring, keysCfg, &pass)
+	roots := openTenants(ctx, keysCfg)
+	defer roots.wipe()
+	f, _, err := openFile(ctx, *keyring, keysCfg, &pass, roots)
 	if err != nil {
 		return err
 	}
+	ring := f.Default
+	rows := keyRows(f)
 
 	now := time.Now().UTC()
 	var jsonData []byte
 	if *jsonOut {
-		jsonData, err = marshalKeysJSON(now, ring)
+		jsonData, err = marshalKeysJSON(now, rows)
 		if err != nil {
 			return err
 		}
 	} else {
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		_, _ = fmt.Fprintln(w, "KEY ID\tCREATED\tAGE\t")
-		for _, kid := range ring.KIDs() {
+		_, _ = fmt.Fprintln(w, "TENANT\tKEY ID\tCREATED\tAGE\t")
+		for _, r := range rows {
 			created, age := "unknown", ""
-			if t, ok := ring.Created(kid); ok && !t.IsZero() {
-				created = t.Format(time.RFC3339)
-				age = humanAge(now.Sub(t))
+			if r.created != nil {
+				created = r.created.Format(time.RFC3339)
+				age = humanAge(now.Sub(*r.created))
 			}
-			marker := ""
-			if kid == ring.ActiveKID() {
-				marker = "active"
+			var marker []string
+			if r.active {
+				marker = append(marker, "active")
 			}
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", kid, created, age, marker)
+			if !r.opened {
+				marker = append(marker, "not opened")
+			}
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.tenant, r.kid, created, age, strings.Join(marker, ", "))
 		}
 		if err := w.Flush(); err != nil {
 			return err
+		}
+	}
+	for _, t := range f.Tenants {
+		if t.Ring == nil {
+			fmt.Fprintf(os.Stderr, "\ntenant %s did not open: %v\n", t.Name, t.Err)
 		}
 	}
 
@@ -132,26 +147,65 @@ Flags:
 	return nil
 }
 
+// keyRow is one key in the list.
+type keyRow struct {
+	tenant  string
+	kid     string
+	created *time.Time
+	active  bool
+	// opened is false for a tenant that did not open: its key ids are the
+	// directory's, and what is unknown about them stays unknown.
+	opened bool
+}
+
+// keyRows lists the default tenant's keys and then each tenant's.
+func keyRows(f *keys.File) []keyRow {
+	rows := ringRows(keys.DefaultTenant, f.Default)
+	for _, t := range f.Tenants {
+		if t.Ring != nil {
+			rows = append(rows, ringRows(t.Name, t.Ring)...)
+			continue
+		}
+		for _, kid := range t.KIDs {
+			rows = append(rows, keyRow{tenant: t.Name, kid: kid, active: kid == t.ActiveKID})
+		}
+	}
+	return rows
+}
+
+func ringRows(tenant string, ring obs.KeyringInfo) []keyRow {
+	var rows []keyRow
+	for _, kid := range ring.KIDs() {
+		r := keyRow{tenant: tenant, kid: kid, active: kid == ring.ActiveKID(), opened: true}
+		if t, ok := ring.Created(kid); ok && !t.IsZero() {
+			r.created = &t
+		}
+		rows = append(rows, r)
+	}
+	return rows
+}
+
 type keyListJSON struct {
 	Keys []keyListEntryJSON `json:"keys"`
 }
 
 type keyListEntryJSON struct {
+	Tenant     string  `json:"tenant"`
 	KID        string  `json:"kid"`
 	Created    *string `json:"created"`
 	AgeSeconds *int64  `json:"age_seconds"`
 	Active     bool    `json:"active"`
+	Opened     bool    `json:"opened"`
 }
 
 // marshalKeysJSON renders the key list as newline-terminated JSON with UTC timestamps.
-func marshalKeysJSON(now time.Time, ring obs.KeyringInfo) ([]byte, error) {
-	kids := ring.KIDs()
-	out := keyListJSON{Keys: make([]keyListEntryJSON, 0, len(kids))}
-	for _, kid := range kids {
-		entry := keyListEntryJSON{KID: kid, Active: kid == ring.ActiveKID()}
-		if t, ok := ring.Created(kid); ok && !t.IsZero() {
-			created := t.UTC().Format(time.RFC3339)
-			age := int64(now.Sub(t).Seconds())
+func marshalKeysJSON(now time.Time, rows []keyRow) ([]byte, error) {
+	out := keyListJSON{Keys: make([]keyListEntryJSON, 0, len(rows))}
+	for _, r := range rows {
+		entry := keyListEntryJSON{Tenant: r.tenant, KID: r.kid, Active: r.active, Opened: r.opened}
+		if r.created != nil {
+			created := r.created.UTC().Format(time.RFC3339)
+			age := int64(now.Sub(*r.created).Seconds())
 			entry.Created = &created
 			entry.AgeSeconds = &age
 		}
