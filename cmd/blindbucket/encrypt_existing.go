@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/LennardGeissler/blindbucket/internal/config"
-	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
 	"github.com/LennardGeissler/blindbucket/internal/encrypt"
 )
 
@@ -98,16 +97,11 @@ Flags:
 	if err != nil {
 		return err
 	}
-	if err := defaultTenantOnly("encrypt-existing", bucket, bucketKeys); err != nil {
+	// Under the keys and the names the gateway's own writes to the bucket
+	// use: its tenant's once the tenant is active (ADR-038).
+	nameEnc, err := bucketNames(cfg, served, bucketKeys, log)
+	if err != nil {
 		return err
-	}
-	ring := served.Default()
-	var nameEnc *names.Encrypter
-	if cfg.Names.Encrypt {
-		nameEnc, err = nameEncrypterFrom(cfg, ring, "encrypting objects under encrypted names needs the name key")
-		if err != nil {
-			return err
-		}
 	}
 
 	client, _, err := upstreamClient(cfg, nil)
@@ -135,7 +129,7 @@ Flags:
 
 	started := time.Now().UTC()
 	result, err := encrypt.Run(ctx, encrypt.Config{
-		Upstream: client, Keys: ring, Names: nameEnc, Bucket: bucket, Prefix: prefix,
+		Upstream: client, Keys: served, KID: bucketKeys.KID, Names: nameEnc, Bucket: bucket, Prefix: prefix,
 		Log2ChunkSize: cfg.Crypto.Log2ChunkSize, Concurrency: *workers, DryRun: *dryRun,
 		AllowUnconditional: *uncond, KeepVersions: *keepVersions, Log: log,
 	})

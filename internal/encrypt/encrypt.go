@@ -62,6 +62,10 @@ const DefaultPartSize = 64 << 20
 type Config struct {
 	Upstream *upstream.Client
 	Keys     keys.KeyProvider
+	// KID is the KEK data keys are wrapped under: the one the gateway's writes
+	// to the bucket use, its tenant's once the tenant is active (ADR-038).
+	// Empty means Keys.ActiveKID().
+	KID string
 	// Names is the mapping objects are written into. Nil means names in clear:
 	// each object is overwritten at its own key.
 	Names  *names.Encrypter
@@ -615,7 +619,10 @@ func write(ctx context.Context, cfg Config, key, stored string, info *upstream.O
 	}
 	multipart := plainSize > partSize
 
-	kid := cfg.Keys.ActiveKID()
+	kid := cfg.KID
+	if kid == "" {
+		kid = cfg.Keys.ActiveKID()
+	}
 	// Bound to the key the client names, whichever key it is stored under
 	// (FORMAT §6.1).
 	aad, err := keys.ObjectAAD(kid, cfg.Bucket, key)

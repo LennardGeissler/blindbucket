@@ -340,3 +340,26 @@ func TestIntegrationEncryptLeavesGatewayObjects(t *testing.T) {
 		t.Error("the run rewrote an object the gateway wrote")
 	}
 }
+
+// In a tenant's bucket a run wraps under the key the gateway's writes to the
+// bucket use, the tenant's, so what it encrypts goes with the tenant when the
+// tenant is destroyed (ADR-038).
+func TestIntegrationEncryptUnderTheBucketsTenantKey(t *testing.T) {
+	tn := proxytest.NewTenancy(t)
+	h := proxytest.New(t, proxytest.WithKeys(tn.Active))
+	prefix := proxytest.TestKey(t, "tenant") + "/"
+	body := proxytest.RandomBytes(t, 5000)
+	putPlain(t, h, prefix+"doc.txt", body, "text/plain", nil)
+
+	cfg := config(t, h, prefix, false)
+	cfg.Keys, cfg.KID = tn.Active, proxytest.TenantKID
+	if result := run(t, cfg); result.Encrypted != 1 || result.Incomplete() {
+		t.Fatalf("got %+v, want one encrypted", *result)
+	}
+	if kid := h.ObjectKID(t, prefix+"doc.txt"); kid != proxytest.TenantKID {
+		t.Errorf("encrypted under %q, want acme's key", kid)
+	}
+	if got := h.MustRead(t, prefix+"doc.txt", "after encrypting"); !bytes.Equal(got, body) {
+		t.Error("the object reads back different")
+	}
+}

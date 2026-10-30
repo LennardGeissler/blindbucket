@@ -345,7 +345,7 @@ func TestBucketCommandsAndTenants(t *testing.T) {
 	}
 
 	// Commands not yet taught a tenant's keys refuse its buckets.
-	for _, command := range commands[2:] {
+	for _, command := range commands[3:] {
 		args := append(append([]string{}, command...), "--config", withAcme, "s3://acme-data")
 		if _, _, err := runCLI(t, args...); err == nil || !strings.Contains(err.Error(), "does not serve a tenant's buckets yet") {
 			t.Errorf("%s on a tenant's bucket: %v", command[0], err)
