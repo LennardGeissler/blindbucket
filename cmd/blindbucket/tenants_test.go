@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -233,7 +234,10 @@ func TestServeOpensAKeyringWithTenants(t *testing.T) {
 	provider, _ := stubProvider(t)
 	adminAddr := freeAddr(t)
 
-	var stopErr error
+	var (
+		stopErr error
+		metrics string
+	)
 	logs := captureStderr(t, func() {
 		// keys.tenants names no lock for acme, so acme does not open here.
 		stop := startServe(t, fmt.Sprintf(`
@@ -248,10 +252,23 @@ keys:
 clients: [{ name: tester, access_key_id: TESTCLIENT, secret_access_key: s, buckets: ["*"] }]
 `, freeAddr(t), adminAddr, provider.URL, path))
 		_ = waitFor(t, &http.Client{Timeout: time.Second}, "http://"+adminAddr+"/healthz", http.StatusOK).Body.Close()
+		resp := waitFor(t, &http.Client{Timeout: time.Second}, "http://"+adminAddr+"/metrics", http.StatusOK)
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		metrics = string(body)
 		stopErr = stop()
 	})
 	if stopErr != nil {
 		t.Fatalf("serve: %v", stopErr)
+	}
+	for _, want := range []string{
+		"blindbucket_keyring_generation 2",
+		`blindbucket_tenant_open{tenant="acme"} 0`,
+		`blindbucket_tenant_open{tenant="beta"} 1`,
+	} {
+		if !strings.Contains(metrics, want) {
+			t.Errorf("missing from /metrics: %s", want)
+		}
 	}
 	for _, want := range []string{
 		`"msg":"keyring has tenants","generation":2,"tenants":2`,

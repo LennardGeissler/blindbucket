@@ -38,6 +38,8 @@ var metricContract = map[string]struct {
 	"blindbucket_audit_export_failures_total":           {dto.MetricType_COUNTER, "destination"},
 	"blindbucket_keyring_keys":                          {dto.MetricType_GAUGE, ""},
 	"blindbucket_keyring_key_created_timestamp_seconds": {dto.MetricType_GAUGE, "active,kid"},
+	"blindbucket_keyring_generation":                    {dto.MetricType_GAUGE, ""},
+	"blindbucket_tenant_open":                           {dto.MetricType_GAUGE, "tenant"},
 }
 
 type contractRing struct{}
@@ -66,6 +68,7 @@ func TestMetricsAreAContract(t *testing.T) {
 	m.ChecksumMismatch("CRC32")
 	m.AuditFailure()
 	m.KeyringLoaded(contractRing{})
+	m.TenantsLoaded(1, map[string]bool{"acme": true})
 
 	families, err := registry.Gather()
 	if err != nil {

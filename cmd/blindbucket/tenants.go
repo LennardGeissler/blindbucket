@@ -49,7 +49,8 @@ Subcommands:
   list      show the tenants, their buckets, keys and locks
 
 Every change writes the keyring as its next generation. It reaches an instance
-when the instance restarts, so roll each change out before the next one.
+when the instance restarts, so roll each change out before the next one:
+blindbucket_keyring_generation says which generation each instance serves.
 
 Run "blindbucket tenants <subcommand> -h" for a subcommand's flags.
 `)
@@ -198,8 +199,9 @@ command, then run "blindbucket tenants activate".
 		fmt.Fprintf(os.Stderr, "  Its buckets: %s\n", strings.Join(buckets, ", "))
 	}
 	fmt.Fprintf(os.Stderr, "  It is not active: its buckets are still written under the default tenant's keys.\n"+
-		"  Roll this keyring out to every instance and every running command, then run\n"+
-		"  `blindbucket tenants activate %s` and roll that out too.\n", name)
+		"  Roll this keyring out to every instance and every running command. Once\n"+
+		"  blindbucket_keyring_generation is %d on every instance, run\n"+
+		"  `blindbucket tenants activate %s` and roll that out too.\n", f.Generation+1, name)
 	if *deployment {
 		fmt.Fprintf(os.Stderr, "warning: %s has keys of its own but no lock of its own. Any copy of this\n"+
 			"  keyring opens them with the deployment's root key, so destroying %s will not\n"+
@@ -245,8 +247,9 @@ tenant is active and every instance serves this keyring.
 	}
 	fmt.Fprintf(os.Stderr, "assigned %s to tenant %s in %s; generation %d\n"+
 		"  They stay %s's for good. Objects already in them stay on the keys they were\n"+
-		"  written under until they are rotated onto %s's. Roll this keyring out.\n",
-		strings.Join(buckets, ", "), name, *t.keyring, f.Generation+1, name, name)
+		"  written under until they are rotated onto %s's. Roll this keyring out until\n"+
+		"  blindbucket_keyring_generation is %d on every instance.\n",
+		strings.Join(buckets, ", "), name, *t.keyring, f.Generation+1, name, name, f.Generation+1)
 	return nil
 }
 
@@ -290,9 +293,10 @@ that writes are never pointed at keys nothing has checked.
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "activated tenant %s in %s with key %q; generation %d\n"+
-		"  Instances write %s's buckets under it once they serve this keyring. Roll it out.\n"+
-		"  Objects written before stay on the keys they were written under until rotated.\n",
-		name, *t.keyring, f.Tenant(name).ActiveKID, f.Generation+1, name)
+		"  Instances write %s's buckets under it once they serve this keyring: roll it out\n"+
+		"  until blindbucket_keyring_generation is %d on every instance. Objects written\n"+
+		"  before stay on the keys they were written under until rotated.\n",
+		name, *t.keyring, f.Tenant(name).ActiveKID, f.Generation+1, name, f.Generation+1)
 	return nil
 }
 

@@ -92,6 +92,11 @@ Flags:
 		collectors.ProcessCollectorOpts{}))
 	metrics := obs.NewMetrics(registry, obs.MetricsConfig{Version: version})
 	metrics.KeyringLoaded(ring)
+	opened := map[string]bool{}
+	for _, t := range served.Tenants() {
+		opened[t.Name] = t.Ring != nil
+	}
+	metrics.TenantsLoaded(served.Generation(), opened)
 
 	client, upstreamCreds, err := upstreamClient(cfg, metrics.Upstream)
 	if err != nil {

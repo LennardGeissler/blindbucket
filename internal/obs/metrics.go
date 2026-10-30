@@ -67,6 +67,8 @@ type Metrics struct {
 	auditExportFailures *prometheus.CounterVec
 	keyringKeys         prometheus.Gauge
 	keyringCreated      *prometheus.GaugeVec
+	keyringGeneration   prometheus.Gauge
+	tenantOpen          *prometheus.GaugeVec
 }
 
 // KeyringInfo is what this package needs to know about a keyring. It is an
@@ -184,6 +186,23 @@ func NewMetrics(reg prometheus.Registerer, cfg MetricsConfig) *Metrics {
 			Help: "When each key-encryption key was created, as a Unix timestamp. " +
 				"Absent for keys whose keyring records no date.",
 		}, []string{"kid", "active"}),
+
+		// What ADR-038's rollout rules wait for: a tenant is activated, and a
+		// destruction's census taken, only once every instance serves the
+		// generation that carries the change. An instance reports what it
+		// loaded at startup, so min and max of this gauge across instances
+		// agreeing is the check.
+		keyringGeneration: factory.gauge(prometheus.GaugeOpts{
+			Name: "blindbucket_keyring_generation",
+			Help: "Generation of the keyring this instance serves; 0 for a keyring " +
+				"without tenants. A keyring change reaches an instance when it restarts.",
+		}),
+
+		tenantOpen: factory.gaugeVec(prometheus.GaugeOpts{
+			Name: "blindbucket_tenant_open",
+			Help: "1 for a tenant whose keys opened at startup, 0 for one whose lock " +
+				"did not open; its buckets answer 503 until a restart opens it.",
+		}, []string{"tenant"}),
 	}
 
 	// Every integrity kind starts at zero rather than appearing at its first
@@ -221,6 +240,25 @@ func (m *Metrics) KeyringLoaded(ring KeyringInfo) {
 			active = "true"
 		}
 		m.keyringCreated.WithLabelValues(kid, active).Set(float64(created.Unix()))
+	}
+}
+
+// TenantsLoaded records the generation of the keyring the gateway started
+// with, and for each tenant whether its keys opened. Called once, at startup,
+// for the reason KeyringLoaded is; the label cardinality is the number of
+// tenants.
+func (m *Metrics) TenantsLoaded(generation uint64, opened map[string]bool) {
+	if m == nil {
+		return
+	}
+	m.keyringGeneration.Set(float64(generation))
+	m.tenantOpen.Reset()
+	for tenant, ok := range opened {
+		v := 0.0
+		if ok {
+			v = 1
+		}
+		m.tenantOpen.WithLabelValues(tenant).Set(v)
 	}
 }
 

@@ -151,6 +151,24 @@ func TestBuildInfoIsExportedWithoutTraffic(t *testing.T) {
 
 // TestKeyringMetricsExposeKeyAge covers the number a rotation policy is written
 // against. Key age used to be visible only by opening the keyring by hand.
+func TestTenantMetrics(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	m := NewMetrics(registry, MetricsConfig{})
+	m.TenantsLoaded(7, map[string]bool{"acme": true, "globex": false})
+
+	h := handlerFor(t, AdminConfig{Registry: registry})
+	_, body := get(t, h, "/metrics")
+	for _, want := range []string{
+		`blindbucket_keyring_generation 7`,
+		`blindbucket_tenant_open{tenant="acme"} 1`,
+		`blindbucket_tenant_open{tenant="globex"} 0`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing from /metrics: %s", want)
+		}
+	}
+}
+
 func TestKeyringMetricsExposeKeyAge(t *testing.T) {
 	registry := prometheus.NewRegistry()
 	m := NewMetrics(registry, MetricsConfig{})
