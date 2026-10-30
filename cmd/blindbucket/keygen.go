@@ -74,13 +74,20 @@ Flags:
 	return createKeyring(ctx, *out, *kid, keysCfg, &pass)
 }
 
+// sealable is a keyring that can be written: a *keys.Keyring, or a whole
+// *keys.File with its tenants.
+type sealable interface {
+	Marshal(passphrase []byte, params keys.KDFParams) ([]byte, error)
+	MarshalWithRootKey(rootKey []byte, ref keys.RootKeyRef) ([]byte, error)
+}
+
 // sealKeyring writes a keyring under whichever root key the configuration names.
 //
 // The passphrase path and the service path differ only in where the root key
 // comes from: Argon2id over something the operator knows, or 32 random bytes
 // the service will hand back. What they protect, and how, is identical.
 func sealKeyring(
-	ctx context.Context, ring *keys.Keyring, cfg config.Keys, pass *passphraseFlags, confirm bool,
+	ctx context.Context, ring sealable, cfg config.Keys, pass *passphraseFlags, confirm bool,
 ) ([]byte, error) {
 	source, err := newRootKeySource(cfg)
 	if err != nil {
@@ -196,10 +203,13 @@ func addStandaloneKeys(
 	ctx context.Context, path string, withAudit, withName, withFresh bool,
 	cfg config.Keys, pass *passphraseFlags,
 ) error {
-	ring, opened, err := openKeyringFile(ctx, path, cfg, pass)
+	roots := openTenant(ctx, cfg)
+	defer roots.wipe()
+	f, opened, err := openFile(ctx, path, cfg, pass, roots)
 	if err != nil {
 		return err
 	}
+	ring := f.Default
 	if withAudit {
 		if err := attachAuditKey(ring, path); err != nil {
 			return err
@@ -216,7 +226,7 @@ func addStandaloneKeys(
 		}
 	}
 
-	updated, err := sealKeyring(ctx, ring, cfg, pass, false)
+	updated, err := sealKeyring(ctx, f, cfg, pass, false)
 	if err != nil {
 		return err
 	}
@@ -320,10 +330,16 @@ func addKey(
 	ctx context.Context, path, kid string, activate, withAudit, withName, withFresh bool,
 	cfg config.Keys, pass *passphraseFlags,
 ) error {
-	ring, opened, err := openKeyringFile(ctx, path, cfg, pass)
+	roots := openTenant(ctx, cfg)
+	defer roots.wipe()
+	f, opened, err := openFile(ctx, path, cfg, pass, roots)
 	if err != nil {
 		return err
 	}
+	if owner, used := f.KIDOwner(kid); used && owner != keys.DefaultTenant {
+		return fmt.Errorf("key id %q is tenant %s's; key ids are unique across the keyring", kid, owner)
+	}
+	ring := f.Default
 	if err := ring.Generate(kid); err != nil {
 		return err
 	}
@@ -351,7 +367,7 @@ func addKey(
 	// Re-sealed rather than patched: a new root key on every write means a
 	// keyring that is added to does not accumulate ciphertext under one key
 	// forever, and for the passphrase case it re-runs the KDF with a new salt.
-	updated, err := sealKeyring(ctx, ring, cfg, pass, false)
+	updated, err := sealKeyring(ctx, f, cfg, pass, false)
 	if err != nil {
 		return err
 	}

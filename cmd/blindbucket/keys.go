@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/LennardGeissler/blindbucket/internal/config"
+	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 	"github.com/LennardGeissler/blindbucket/internal/obs"
 )
 
@@ -221,12 +222,18 @@ Flags:
 	if err != nil {
 		return err
 	}
-	ring, opened, err := openKeyringFile(ctx, *keyring, keysCfg, &pass)
+	roots := openTenant(ctx, keysCfg)
+	defer roots.wipe()
+	f, opened, err := openFile(ctx, *keyring, keysCfg, &pass, roots)
 	if err != nil {
 		return err
 	}
+	ring := f.Default
 	// Checked before --force, so that a typo in the key id is reported as a
 	// typo rather than answered with a warning about data loss.
+	if owner, used := f.KIDOwner(kid); used && owner != keys.DefaultTenant {
+		return fmt.Errorf("%q is tenant %s's key; keys remove retires the default tenant's", kid, owner)
+	}
 	if _, ok := ring.Created(kid); !ok {
 		return fmt.Errorf("%s holds no key %q (see `blindbucket keys list`)", *keyring, kid)
 	}
@@ -241,7 +248,7 @@ Flags:
 		return err
 	}
 
-	updated, err := sealKeyring(ctx, ring, keysCfg, &pass, false)
+	updated, err := sealKeyring(ctx, f, keysCfg, &pass, false)
 	if err != nil {
 		return err
 	}
