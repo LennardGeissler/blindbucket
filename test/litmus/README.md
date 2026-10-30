@@ -86,3 +86,35 @@ temporary credentials (`aws configure export-credentials`).
 Ceph RGW was planned as the fourth store. Its demo image exists for amd64
 only, and under emulation on an arm64 Mac its OSD fails to create its object
 store, so it is not here.
+
+## Through the gateway, 2026-10-30
+
+A gateway in front of a store is a store to its clients, so the same tests
+were run through it: through v1.5.1 and v1.6.0, each in front of MinIO and of
+Garage, five repetitions each, with the stores measured directly alongside as
+the control ([`results/2026-10-30/`](results/2026-10-30/)). Each gateway was
+configured by its own `blindbucket init --non-interactive`, names in the
+clear, and the harness signed with the client credential `init` generated.
+
+| Test | MinIO | v1.5.1 → MinIO | v1.6.0 → MinIO | Garage | v1.5.1 → Garage | v1.6.0 → Garage |
+|---|---|---|---|---|---|---|
+| `cond-put-inm` | enforced | **ignored** | enforced | ignored | ignored | ignored |
+| `cond-put-im` | enforced | **ignored** | enforced | ignored | ignored | ignored |
+| `cond-complete-im` | enforced | **ignored** | enforced | ignored | ignored | ignored |
+| `cond-complete-inm` | enforced | **ignored** | enforced | ignored | ignored | ignored |
+| `copy-source-im` | enforced | enforced | enforced | enforced | enforced | enforced |
+| `overlap-mpu-mpu` | last completed | last completed | last completed | last created; loser refused | the same | the same |
+| `overlap-mpu-put` | last completed | last completed | last completed | last begun; loser refused | the same | the same |
+| `read-after-write` | consistent | consistent | consistent | consistent | consistent | consistent |
+
+Every cell 5/5, and no error inside a `200` anywhere.
+
+Up to 1.5, the gateway was a store that ignores conditional writes, whatever
+was behind it: it dropped a client's `If-None-Match` and `If-Match` without a
+word ([#168](https://github.com/LennardGeissler/blindbucket/issues/168)), so
+in front of MinIO it answered exactly as Garage does. The copy-source
+condition was enforced in both versions.
+Since 1.6 the gateway passes the conditions on and takes the store's
+semantics: enforced in front of MinIO, ignored in front of Garage. Overlapping
+writes keep the store's ranking in both versions, and the loser hears what the
+store tells it.
