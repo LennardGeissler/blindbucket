@@ -46,6 +46,13 @@ Afterwards, every instance's configuration has to name the new source before
 it restarts; one that does not refuses to start and says which source the
 keyring needs.
 
+With --tenant, the tenant's own lock is moved instead: --config names how it is
+sealed now, under keys.tenants, and --to-config's keys.tenants entry for it the
+lock to seal it with. The deployment and every other tenant stay as they are.
+The old lock stays in the tenant's lock history (ADR-038): every copy of the
+file from before still opens the tenant with it, so destroying the tenant means
+destroying that lock too.
+
 Flags:
 `)
 		fs.PrintDefaults()
@@ -53,7 +60,9 @@ Flags:
 
 	var (
 		keyring = fs.String("keyring", "", "keyring file to reseal (required)")
-		conf    = fs.String("config", "",
+		tenant  = fs.String("tenant", "",
+			"reseal this tenant instead of the deployment, under the lock --to-config's keys.tenants names for it")
+		conf = fs.String("config", "",
 			"configuration naming the source the keyring is sealed with now (default: a passphrase)")
 		toConf = fs.String("to-config", "",
 			"configuration naming the source to seal it with (default: a passphrase)")
@@ -80,6 +89,21 @@ Flags:
 	from, err := keysConfig(*conf, &pass)
 	if err != nil {
 		return err
+	}
+	if *tenant != "" {
+		if *toConf == "" {
+			fs.Usage()
+			return fmt.Errorf("--tenant needs --to-config, whose keys.tenants.%s names the new lock", *tenant)
+		}
+		if newPass.file != "" {
+			return fmt.Errorf("--new-passphrase-file is the deployment's new passphrase; with --tenant, "+
+				"the tenant's comes from --to-config's keys.tenants.%s.passphrase_file", *tenant)
+		}
+		to, err := keysConfig(*toConf, &passphraseFlags{})
+		if err != nil {
+			return err
+		}
+		return resealTenant(ctx, *keyring, *tenant, from, to, &pass, *dryRun)
 	}
 	to, err := keysConfig(*toConf, &newPass)
 	if err != nil {
@@ -145,6 +169,86 @@ Flags:
 	return nil
 }
 
+// resealTenant moves one tenant to the lock to's keys.tenants entry names, as
+// the deployment's reseal does for the deployment (ADR-038). The deployment
+// stays sealed as it is, and so does every other tenant.
+func resealTenant(
+	ctx context.Context, path, name string, from, to config.Keys, pass *passphraseFlags, dryRun bool,
+) error {
+	fromRoots := openTenant(ctx, from, name)
+	defer fromRoots.wipe()
+	toRoots := openTenant(ctx, to, name)
+	defer toRoots.wipe()
+
+	f, opened, err := openFile(ctx, path, from, pass, fromRoots)
+	if err != nil {
+		return err
+	}
+	t := f.Tenant(name)
+	if t == nil {
+		return fmt.Errorf("%s has no tenant %q (see `blindbucket tenants list`)", path, name)
+	}
+	if t.Ring == nil {
+		return fmt.Errorf("tenant %q did not open with its current lock (%w); a reseal needs it", name, t.Err)
+	}
+	before := t.Lock()
+
+	lock, err := toRoots.newLock(name)
+	if err != nil {
+		return err
+	}
+	defer lock.Wipe()
+	if before.Source == keys.SourcePassphrase && to.Tenants[name].Provider == "file" &&
+		subtle.ConstantTimeCompare(fromRoots.phrases[name].resolved, toRoots.phrases[name].resolved) == 1 {
+		return errSamePassphrase
+	}
+	if err := f.Reseal(name, lock); err != nil {
+		return err
+	}
+	after := f.Tenant(name).Lock()
+
+	sealed, err := sealKeyring(ctx, f, from, pass, false)
+	if err != nil {
+		return err
+	}
+	// Opened again with the new lock before anything is replaced, for the
+	// reason the deployment's reseal does it: a key service that encrypts for
+	// these credentials may not decrypt for them.
+	reopened, err := unlockFile(ctx, path, sealed, from, pass, toRoots)
+	if err != nil {
+		return err
+	}
+	if r := reopened.Tenant(name); r == nil || r.Ring == nil {
+		var why error
+		if r != nil {
+			why = r.Err
+		}
+		return fmt.Errorf("tenant %q was sealed under %s but does not open with it (%w); "+
+			"nothing was written -- check that the credentials in keys.tenants.%s may decrypt "+
+			"as well as encrypt", name, describeLock(after), why, name)
+	}
+	if !f.Equal(reopened) {
+		return fmt.Errorf("tenant %q sealed under %s opened with different keys; nothing was written",
+			name, describeLock(after))
+	}
+
+	if dryRun {
+		fmt.Fprintf(os.Stderr, "would reseal tenant %s from %s to %s: sealed and opened again, "+
+			"%s unchanged; nothing written\n", name, describeLock(before), describeLock(after), countKeys(t.Ring))
+		return nil
+	}
+	if err := replaceKeyring(path, opened, sealed); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "resealed tenant %s in %s from %s to %s: %s unchanged, generation %d\n"+
+		"  Every instance's keys.tenants.%s must name the new lock before it restarts.\n"+
+		"  Any other copy of the previous file still opens %s with %s. It stays in %s's\n"+
+		"  lock history, and destroying %s means destroying it as well.\n",
+		name, path, describeLock(before), describeLock(after), countKeys(t.Ring), f.Generation+1,
+		name, name, describeLock(before), name, name)
+	return nil
+}
+
 // countKeys says how many KEKs a keyring holds, for the summary.
 func countKeys(ring *keys.Keyring) string {
 	if n := len(ring.KIDs()); n != 1 {
@@ -155,6 +259,17 @@ func countKeys(ring *keys.Keyring) string {
 
 func isPassphrase(cfg config.Keys) bool {
 	return cfg.Provider == "" || cfg.Provider == "file"
+}
+
+// describeLock names a tenant's lock, from the directory's record of it.
+func describeLock(l keys.Lock) string {
+	switch l.Source {
+	case keys.LockDeployment:
+		return "the deployment's lock"
+	case keys.SourcePassphrase:
+		return "a passphrase"
+	}
+	return describeRootKey(keys.RootKeyRef{Source: l.Source, KeyName: l.KeyName})
 }
 
 // describeRootKey names what seals a keyring, from the file's own record of it.

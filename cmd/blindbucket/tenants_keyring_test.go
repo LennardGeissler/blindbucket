@@ -2,8 +2,10 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -158,5 +160,121 @@ func TestResealMovesTenantsUnderTheDeploymentsLock(t *testing.T) {
 	}
 	if _, err := keys.OpenFileWithPassphrase(data, []byte(testPassphrase), nil); err == nil {
 		t.Error("the old passphrase still opens the resealed keyring")
+	}
+}
+
+// addPassphraseTenant gives a keyring a tenant sealed by a passphrase of its
+// own.
+func addPassphraseTenant(t *testing.T, path, name, kid, phrase string, buckets ...string) {
+	t.Helper()
+	f := openWhole(t, path)
+	ring := keys.NewKeyring()
+	if err := ring.Generate(kid); err != nil {
+		t.Fatal(err)
+	}
+	nk, err := keys.NewNameKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ring.SetNameKey(nk)
+	lock, err := keys.PassphraseLock([]byte(phrase), keys.DefaultKDFParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.AddTenant(name, buckets, ring, lock); err != nil {
+		t.Fatal(err)
+	}
+	data, err := f.Marshal([]byte(testPassphrase), keys.DefaultKDFParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// tenantPassphraseConfig is a configuration whose keys.tenants opens name
+// with the passphrase in phraseFile.
+func tenantPassphraseConfig(t *testing.T, name, phraseFile string) string {
+	t.Helper()
+	return keysConfigFile(t, fmt.Sprintf("  tenants:\n    %s: { provider: file, passphrase_file: %q }", name, phraseFile))
+}
+
+func openWithTenantPassphrase(t *testing.T, path, phrase string) *keys.File {
+	t.Helper()
+	data, err := os.ReadFile(path) //nolint:gosec // a test's own file.
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := keys.OpenFileWithPassphrase(data, []byte(testPassphrase),
+		func(_ string, _ keys.RootKeyRef, kdf *keys.KDFParams) ([]byte, error) {
+			return kdf.DeriveRootKey([]byte(phrase))
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+// reseal --tenant moves one tenant's lock and keeps the old one in its
+// history, which is what a destruction will have to name
+// (MCTenantsResealedLock).
+func TestResealATenant(t *testing.T) {
+	path := setupKeyring(t, "2026-09")
+	addPassphraseTenant(t, path, "acme", "acme-1", "acme's old passphrase", "acme-*")
+	addTenantDirectly(t, path, "beta", "beta-1", "beta-*")
+	before := openWithTenantPassphrase(t, path, "acme's old passphrase")
+
+	from := tenantPassphraseConfig(t, "acme", writePassphraseFile(t, "acme's old passphrase"))
+	to := tenantPassphraseConfig(t, "acme", writePassphraseFile(t, "acme's new passphrase"))
+	if _, _, err := runCLI(t, "reseal", "--keyring", path, "--config", from, "--to-config", to,
+		"--tenant", "acme"); err != nil {
+		t.Fatalf("reseal --tenant: %v", err)
+	}
+
+	after := openWithTenantPassphrase(t, path, "acme's new passphrase")
+	acme := after.Tenant("acme")
+	if acme.Ring == nil || !acme.Ring.Equal(before.Tenant("acme").Ring) {
+		t.Fatalf("acme does not open with its new passphrase to the same keys: %v", acme.Err)
+	}
+	if len(acme.Locks) != 2 || acme.Locks[0].Source != keys.SourcePassphrase || acme.Locks[0] == acme.Locks[1] {
+		t.Errorf("acme's lock history is %+v, want the old passphrase and the new", acme.Locks)
+	}
+	if beta := after.Tenant("beta"); beta.Ring == nil || !beta.Ring.Equal(before.Tenant("beta").Ring) {
+		t.Errorf("beta changed in acme's reseal: %v", beta.Err)
+	}
+	if openWithTenantPassphrase(t, path, "acme's old passphrase").Tenant("acme").Ring != nil {
+		t.Error("acme's old passphrase still opens the new file")
+	}
+}
+
+func TestResealATenantMistakes(t *testing.T) {
+	path := setupKeyring(t, "2026-09")
+	addPassphraseTenant(t, path, "acme", "acme-1", "acme's passphrase", "acme-*")
+	same := writePassphraseFile(t, "acme's passphrase")
+	from := tenantPassphraseConfig(t, "acme", same)
+
+	for name, c := range map[string]struct {
+		args []string
+		want string
+	}{
+		"no --to-config": {[]string{"--config", from}, "--to-config"},
+		"the deployment's new passphrase": {[]string{"--config", from, "--to-config", from,
+			"--new-passphrase-file", same}, "deployment's new passphrase"},
+		"the same passphrase": {[]string{"--config", from, "--to-config", from}, "already has"},
+		"a tenant that does not exist": {[]string{"--config", from, "--to-config", from, "--tenant", "zeta"},
+			"no tenant"},
+		"no lock configured to open it": {[]string{"--to-config", from}, "keys.tenants.acme is not configured"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			args := append([]string{"reseal", "--keyring", path}, c.args...)
+			if !slices.Contains(args, "--tenant") {
+				args = append(args, "--tenant", "acme")
+			}
+			_, _, err := runCLI(t, args...)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("got %v, want an error saying %q", err, c.want)
+			}
+		})
 	}
 }

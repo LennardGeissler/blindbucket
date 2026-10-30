@@ -20,7 +20,7 @@ _blindbucket_flags() {
 	keygen)
 		echo --activate --add --add-audit-key --add-freshness-key --add-name-key --config --kid \
 			--out --passphrase-file ;;
-	reseal) echo --config --dry-run --keyring --new-passphrase-file --passphrase-file --to-config ;;
+	reseal) echo --config --dry-run --keyring --new-passphrase-file --passphrase-file --tenant --to-config ;;
 	gc) echo --config --dry-run --json --min-age --passphrase-file -v ;;
 	rotate) echo --allow-unconditional --concurrency --config --dry-run --json --passphrase-file --to-kid -v ;;
 	migrate-names) echo --allow-unconditional --concurrency --config --dry-run --json --passphrase-file -v ;;

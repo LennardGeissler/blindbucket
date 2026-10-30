@@ -121,6 +121,7 @@ _blindbucket() {
         '--keyring[keyring file to reseal]:file:_files' \
         '--new-passphrase-file[read the new passphrase from this file]:file:_files' \
         '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        '--tenant[reseal this tenant instead of the deployment]:tenant:' \
         '--to-config[configuration naming the source to seal it with]:file:_files'
       ;;
     gc)

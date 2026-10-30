@@ -115,6 +115,7 @@ complete -c blindbucket -n $c -l dry-run -d 'seal and unseal with the new source
 complete -c blindbucket -n $c -l keyring -r -F -d 'keyring file to reseal'
 complete -c blindbucket -n $c -l new-passphrase-file -r -F -d 'read the new passphrase from this file'
 complete -c blindbucket -n $c -l passphrase-file -r -F -d 'read the keyring passphrase from this file'
+complete -c blindbucket -n $c -l tenant -r -f -d 'reseal this tenant instead of the deployment'
 complete -c blindbucket -n $c -l to-config -r -F -d 'configuration naming the source to seal it with'
 
 # gc
