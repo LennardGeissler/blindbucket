@@ -332,7 +332,6 @@ func TestBucketCommandsAndTenants(t *testing.T) {
 	}{
 		{"a destroyed tenant's bucket", withAcme, "globex-data", "destroyed"},
 		{"a tenant whose lock does not open", withoutAcme, "acme-data", "whose lock did not open"},
-		{"a tenant's bucket", withAcme, "acme-data", "does not serve a tenant's buckets yet"},
 	} {
 		for _, command := range commands {
 			t.Run(c.name+"/"+command[0], func(t *testing.T) {
@@ -342,6 +341,30 @@ func TestBucketCommandsAndTenants(t *testing.T) {
 					t.Fatalf("got %v, want an error saying %q", err, c.want)
 				}
 			})
+		}
+	}
+
+	// Commands not yet taught a tenant's keys refuse its buckets.
+	for _, command := range commands[1:] {
+		args := append(append([]string{}, command...), "--config", withAcme, "s3://acme-data")
+		if _, _, err := runCLI(t, args...); err == nil || !strings.Contains(err.Error(), "does not serve a tenant's buckets yet") {
+			t.Errorf("%s on a tenant's bucket: %v", command[0], err)
+		}
+	}
+
+	// rotate onto anything but the bucket's tenant's keys is refused before
+	// the provider is reached; acme is not active, so a target has to be named.
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "not active yet"},
+		{[]string{"--to-kid", "2026-09"}, "tenant default's"},
+		{[]string{"--to-kid", "no-such-key"}, "holds no key"},
+	} {
+		args := append(append([]string{"rotate", "--dry-run", "--config", withAcme}, c.args...), "s3://acme-data")
+		if _, _, err := runCLI(t, args...); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("rotate %v: %v, want an error saying %q", c.args, err, c.want)
 		}
 	}
 }

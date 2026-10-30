@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -51,6 +52,12 @@ type Config struct {
 	// TargetKID is the KEK to wrap under. Objects already on it are skipped,
 	// which is what makes a run idempotent and resumable after an interruption.
 	TargetKID string
+	// TenantKIDs, when set, are the key ids of the bucket's tenant (ADR-038).
+	// TargetKID has to be one of them: a key of another tenant would wrap this
+	// bucket's objects under keys a destruction of that tenant takes with it
+	// (MCTenantsForeignRotate). An object found under any other key is counted
+	// in Result.OffTenant, the number a destruction's census is about.
+	TenantKIDs []string
 	// Log2ChunkSize is the fallback for objects whose metadata records none.
 	Log2ChunkSize uint8
 
@@ -139,7 +146,11 @@ type Result struct {
 	Conflicted int64
 	// Foreign counts objects this gateway did not write.
 	Foreign int64
-	Failed  int64
+	// OffTenant counts objects found wrapped under a key that is not one of
+	// Config.TenantKIDs. A run rotates them like any other; a dry run reports
+	// how many there are.
+	OffTenant int64
+	Failed    int64
 }
 
 // Run rotates every object under the configured prefix.
@@ -154,6 +165,9 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	}
 	if err := keys.ValidateKID(cfg.TargetKID); err != nil {
 		return nil, fmt.Errorf("rotate: target key id: %w", err)
+	}
+	if cfg.TenantKIDs != nil && !slices.Contains(cfg.TenantKIDs, cfg.TargetKID) {
+		return nil, fmt.Errorf("rotate: %q is not a key of the bucket's tenant", cfg.TargetKID)
 	}
 	if cfg.Concurrency <= 0 {
 		cfg.Concurrency = 8
@@ -298,6 +312,11 @@ func rotateOne(ctx context.Context, cfg Config, key objectKeys, result *Result) 
 		log.Warn("object metadata is unusable", "err", err)
 		atomic.AddInt64(&result.Failed, 1)
 		return
+	}
+
+	if cfg.TenantKIDs != nil && !slices.Contains(cfg.TenantKIDs, meta.KeyID) {
+		log.Info("not on the bucket's tenant's keys", "kid", meta.KeyID)
+		atomic.AddInt64(&result.OffTenant, 1)
 	}
 
 	// Idempotence: a run that is interrupted and started again does the

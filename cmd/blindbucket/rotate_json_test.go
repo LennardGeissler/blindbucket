@@ -14,7 +14,7 @@ import (
 // nothing else.
 var rotateJSONFields = []string{
 	"already_current", "bucket", "conflicted", "dry_run", "duration_seconds",
-	"failed", "foreign", "prefix", "rotated", "scanned", "started", "target_kid",
+	"failed", "foreign", "off_tenant", "prefix", "rotated", "scanned", "started", "target_kid",
 	"unconditional",
 }
 

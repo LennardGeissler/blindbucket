@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"slices"
 
 	"github.com/LennardGeissler/blindbucket/internal/config"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
+	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
 )
 
 // loadBucketKeyring opens the keyring for a command that reads and writes one
@@ -56,4 +59,51 @@ func defaultTenantOnly(command, bucket string, bk keys.BucketKeys) error {
 		return nil
 	}
 	return fmt.Errorf("s3://%s belongs to tenant %s, and %s %w", bucket, bk.Tenant, command, errTenantBucket)
+}
+
+// tenantKIDs returns the key ids of a tenant of served, the default tenant's
+// included.
+func tenantKIDs(served *keys.Served, tenant string) []string {
+	if tenant == keys.DefaultTenant {
+		return served.Default().KIDs()
+	}
+	for _, t := range served.Tenants() {
+		if t.Name == tenant {
+			return t.KIDs
+		}
+	}
+	return nil
+}
+
+// bucketNames builds the encrypter the gateway maps a bucket's object names
+// with, or nil while names.encrypt is off: the default tenant's name key, or
+// once the bucket's tenant is active, the tenant's (ADR-038).
+func bucketNames(
+	cfg *config.Config, served *keys.Served, bk keys.BucketKeys, log *slog.Logger,
+) (*names.Encrypter, error) {
+	if !cfg.Names.Encrypt {
+		return nil, nil
+	}
+	if bk.NameTenant == keys.DefaultTenant {
+		return openNameEncrypter(cfg, served.Default(), log)
+	}
+	if bk.Name == nil {
+		return nil, fmt.Errorf("tenant %s has no name key", bk.NameTenant)
+	}
+	secret := bk.Name.Secret()
+	defer clear(secret)
+	return names.New(secret)
+}
+
+// tenantOfKID names the tenant of served that holds kid.
+func tenantOfKID(served *keys.Served, kid string) (string, bool) {
+	if slices.Contains(served.Default().KIDs(), kid) {
+		return keys.DefaultTenant, true
+	}
+	for _, t := range served.Tenants() {
+		if slices.Contains(t.KIDs, kid) {
+			return t.Name, true
+		}
+	}
+	return "", false
 }

@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -44,6 +46,50 @@ func TestIntegrationRotateSinglePart(t *testing.T) {
 	}
 	if got := h.MustRead(t, key, "after rotation"); !bytes.Equal(got, payload) {
 		t.Error("rotation changed the plaintext")
+	}
+}
+
+// A rotation of a tenant's bucket counts what it finds off the tenant's keys,
+// and is refused a target that is not one of them (ADR-038).
+func TestIntegrationRotateOntoTheBucketsTenant(t *testing.T) {
+	tn := proxytest.NewTenancy(t)
+	before := proxytest.New(t, proxytest.WithKeys(tn.Inactive))
+	key := proxytest.TestKey(t, "tenant.bin")
+	payload := proxytest.RandomBytes(t, 5000)
+	before.Store(t, key, payload)
+
+	cfg := rotate.Config{
+		Upstream: before.Upstream, Keys: tn.Active, Bucket: proxytest.Bucket, Prefix: key,
+		TargetKID: proxytest.TenantKID, TenantKIDs: []string{proxytest.TenantKID},
+		AllowUnconditional: true, DryRun: true, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	result, err := rotate.Run(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OffTenant != 1 || result.Rotated != 1 {
+		t.Fatalf("dry run: %+v, want the object off the tenant and to be rotated", *result)
+	}
+
+	cfg.DryRun = false
+	if _, err := rotate.Run(t.Context(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	after := proxytest.New(t, proxytest.WithKeys(tn.Active))
+	if kid := after.ObjectKID(t, key); kid != proxytest.TenantKID {
+		t.Errorf("the object is under %q, want acme's key", kid)
+	}
+	if got := after.MustRead(t, key, "after rotation"); !bytes.Equal(got, payload) {
+		t.Error("rotation changed the plaintext")
+	}
+	cfg.DryRun = true
+	if result, err = rotate.Run(t.Context(), cfg); err != nil || result.OffTenant != 0 || result.AlreadyCurrent != 1 {
+		t.Errorf("after the rotation: %+v, %v; want nothing off the tenant", result, err)
+	}
+
+	cfg.TargetKID = proxytest.DefaultKID
+	if _, err := rotate.Run(t.Context(), cfg); err == nil {
+		t.Error("rotated a tenant's bucket onto the default tenant's key")
 	}
 }
 

@@ -29,6 +29,11 @@ expiring KEK, not against a compromised data key.
 Objects already wrapped under --to-kid are skipped, so a run is idempotent and an
 interrupted one can simply be started again.
 
+With tenants (ADR-038), a bucket's objects are rotated onto its own tenant's keys
+and no other's, and --to-kid defaults to the key the bucket's writes use. Objects
+found under another key are reported as off the tenant: they are what a
+destruction's census looks for, and this run moves them.
+
 Rotation reads an object and writes it back a moment later. If a client replaces
 it in between, the client wins: the final write carries If-Match with the ETag
 read at the start, and a 412 makes the object a skip rather than a silent
@@ -48,7 +53,8 @@ Flags:
 
 	var (
 		cfgPath = fs.String("config", "blindbucket.yaml", "configuration file")
-		toKID   = fs.String("to-kid", "", "key id to wrap under; defaults to the active key")
+		toKID   = fs.String("to-kid", "", "key id to wrap under, one of the bucket's tenant's; "+
+			"defaults to the key its writes use")
 		workers = fs.Int("concurrency", 8, "objects to rotate at once")
 		dryRun  = fs.Bool("dry-run", false, "report what would be rotated, change nothing")
 		jsonOut = jsonFlag(fs, "the summary")
@@ -89,18 +95,27 @@ Flags:
 	if err != nil {
 		return err
 	}
-	if err := defaultTenantOnly("rotate", bucket, bucketKeys); err != nil {
-		return err
-	}
-	ring := served.Default()
+	// A bucket's objects are rotated onto its tenant's keys and no other's
+	// (ADR-038, MCTenantsForeignRotate); without --to-kid, onto the key its
+	// writes use.
+	allowed := tenantKIDs(served, bucketKeys.Tenant)
 	target := *toKID
 	if target == "" {
-		target = ring.ActiveKID()
+		if !slices.Contains(allowed, bucketKeys.KID) {
+			return fmt.Errorf("s3://%s belongs to tenant %s, which is not active yet: name one of its "+
+				"keys with --to-kid, or activate it first", bucket, bucketKeys.Tenant)
+		}
+		target = bucketKeys.KID
 	}
 	// Checked here rather than per object: a key id with a typo in it would
 	// otherwise fail every object one at a time in a real run, and in a dry run
 	// report every object as rotatable onto a key that does not exist.
-	if !slices.Contains(ring.KIDs(), target) {
+	if !slices.Contains(allowed, target) {
+		if owner, ok := tenantOfKID(served, target); ok {
+			return fmt.Errorf("%q is tenant %s's key, and s3://%s is tenant %s's; a bucket's objects "+
+				"are rotated onto its own tenant's keys (see `blindbucket keys list`)",
+				target, owner, bucket, bucketKeys.Tenant)
+		}
 		return fmt.Errorf("%s holds no key %q (see `blindbucket keys list`)", cfg.Keys.Keyring, target)
 	}
 
@@ -121,14 +136,14 @@ Flags:
 	started := time.Now().UTC()
 	// The same encrypter the gateway serves with. A rotation that did not have
 	// it would see only stored keys and bind every data key to the wrong name.
-	nameEnc, err := openNameEncrypter(cfg, ring, log)
+	nameEnc, err := bucketNames(cfg, served, bucketKeys, log)
 	if err != nil {
 		return err
 	}
 
 	result, err := rotate.Run(ctx, rotate.Config{
-		Upstream: client, Keys: ring, Bucket: bucket, Prefix: prefix, Names: nameEnc,
-		TargetKID: target, Log2ChunkSize: cfg.Crypto.Log2ChunkSize,
+		Upstream: client, Keys: served, Bucket: bucket, Prefix: prefix, Names: nameEnc,
+		TargetKID: target, TenantKIDs: allowed, Log2ChunkSize: cfg.Crypto.Log2ChunkSize,
 		Concurrency: *workers, DryRun: *dryRun, AllowUnconditional: *uncond, Log: log,
 	})
 	if err != nil {
@@ -154,6 +169,10 @@ Flags:
 	fmt.Printf("%d objects scanned in %s\n", result.Scanned, result.Duration(started))
 	fmt.Printf("  %s:          %d  (to %q)\n", verb, result.Rotated, target)
 	fmt.Printf("  already current: %d\n", result.AlreadyCurrent)
+	if result.OffTenant > 0 {
+		fmt.Printf("  off the tenant:  %d  (found under a key that is not tenant %s's)\n",
+			result.OffTenant, bucketKeys.Tenant)
+	}
 	if result.Conflicted > 0 {
 		fmt.Printf("  skipped:         %d  (written by a client during the rotation; run again)\n",
 			result.Conflicted)
@@ -201,6 +220,7 @@ type rotateJSON struct {
 	AlreadyCurrent  int64   `json:"already_current"`
 	Conflicted      int64   `json:"conflicted"`
 	Foreign         int64   `json:"foreign"`
+	OffTenant       int64   `json:"off_tenant"`
 	Failed          int64   `json:"failed"`
 }
 
@@ -217,6 +237,7 @@ func marshalRotateJSON(run rotateRun, result *rotate.Result) ([]byte, error) {
 		AlreadyCurrent:  result.AlreadyCurrent,
 		Conflicted:      result.Conflicted,
 		Foreign:         result.Foreign,
+		OffTenant:       result.OffTenant,
 		Failed:          result.Failed,
 	})
 	if err != nil {
