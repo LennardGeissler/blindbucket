@@ -195,21 +195,21 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	}
 
 	result := &Result{}
-	work := make(chan string)
+	work := make(chan source)
 	var wg sync.WaitGroup
 	for range cfg.Concurrency {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for key := range work {
-				migrateOne(ctx, cfg, key, result)
+			for src := range work {
+				migrateOne(ctx, cfg, src, result)
 			}
 		}()
 	}
 
-	err := eachKeyInClear(ctx, cfg, func(key string) bool {
+	err := eachKeyInClear(ctx, cfg, func(src source) bool {
 		select {
-		case work <- key:
+		case work <- src:
 			return true
 		case <-ctx.Done():
 			return false
@@ -220,6 +220,14 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	return result, err
 }
 
+// source is one object to move: the key a client names it by, which its data
+// key is bound to and its new name is made from, and the key it is stored
+// under now.
+type source struct {
+	identity string
+	stored   string
+}
+
 // eachKeyInClear walks the prefix and hands on every key that is not already
 // encrypted.
 //
@@ -227,7 +235,7 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 // this run publishes appear in it as it goes. A key that decrypts is at its
 // encrypted name already; the synthetic IV it carries (FORMAT §15.4) makes it
 // impossible for a key in clear to pass for one.
-func eachKeyInClear(ctx context.Context, cfg Config, visit func(string) bool) error {
+func eachKeyInClear(ctx context.Context, cfg Config, visit func(source) bool) error {
 	query := url.Values{"list-type": {"2"}, "max-keys": {"1000"}}
 	if cfg.Prefix != "" {
 		query.Set("prefix", cfg.Prefix)
@@ -246,7 +254,7 @@ func eachKeyInClear(ctx context.Context, cfg Config, visit func(string) bool) er
 			if _, err := cfg.Names.DecryptKey(entry.Key); err == nil {
 				continue
 			}
-			if !visit(entry.Key) {
+			if !visit(source{identity: entry.Key, stored: entry.Key}) {
 				return ctx.Err()
 			}
 		}
@@ -274,15 +282,15 @@ const (
 
 // migrateOne moves one object, starting over a bounded number of times when it
 // changes under the run.
-func migrateOne(ctx context.Context, cfg Config, key string, result *Result) {
+func migrateOne(ctx context.Context, cfg Config, src source, result *Result) {
 	atomic.AddInt64(&result.Scanned, 1)
 	// The key in clear in the log: it is the name an operator recognises, and
 	// the host running this is inside the trust boundary that already sees it.
-	log := cfg.Log.With("key", key)
+	log := cfg.Log.With("key", src.identity)
 
 	got := again
 	for attempt := 0; got == again && attempt < maxAttempts; attempt++ {
-		got = attemptOne(ctx, cfg, key, log)
+		got = attemptOne(ctx, cfg, src, log)
 	}
 	if got == again {
 		log.Warn("the object kept changing during the migration; run again")
@@ -300,9 +308,10 @@ func migrateOne(ctx context.Context, cfg Config, key string, result *Result) {
 }
 
 // attemptOne is one pass through the steps of the model's Mig process.
-func attemptOne(ctx context.Context, cfg Config, key string, log *slog.Logger) outcome {
+func attemptOne(ctx context.Context, cfg Config, src source, log *slog.Logger) outcome {
+	key := src.identity
 	// migHeadPlain.
-	plainInfo, err := cfg.Upstream.HeadObject(ctx, cfg.Bucket, key)
+	plainInfo, err := cfg.Upstream.HeadObject(ctx, cfg.Bucket, src.stored)
 	if upstream.NotFound(err) {
 		return gone
 	}
@@ -354,7 +363,7 @@ func attemptOne(ctx context.Context, cfg Config, key string, log *slog.Logger) o
 	}
 
 	if encInfo == nil {
-		switch err := copyToEncrypted(ctx, cfg, key, stored, plainInfo, plainMeta); {
+		switch err := copyToEncrypted(ctx, cfg, src, stored, plainInfo, plainMeta); {
 		case err == nil:
 		case errors.Is(err, objcopy.ErrUploadInProgress):
 			// A client is uploading to the encrypted key: its write is newer
@@ -377,7 +386,7 @@ func attemptOne(ctx context.Context, cfg Config, key string, log *slog.Logger) o
 	}
 
 	// migDelete and migManifestDel.
-	if err := deletePlain(ctx, cfg, key, plainMeta, log); err != nil {
+	if err := deletePlain(ctx, cfg, src, plainMeta, log); err != nil {
 		log.Warn("the object is at its encrypted key, but its key in clear could not be "+
 			"deleted; run again", "err", err)
 		return failed
@@ -454,9 +463,10 @@ func sameDataKey(ctx context.Context, cfg Config, key string, a, b objectmeta.Me
 
 // copyToEncrypted publishes the object at its encrypted key: migCreate to
 // migComplete.
-func copyToEncrypted(ctx context.Context, cfg Config, key, stored string,
+func copyToEncrypted(ctx context.Context, cfg Config, src source, stored string,
 	info *upstream.ObjectInfo, meta objectmeta.Meta,
 ) error {
+	key := src.identity
 	clientMeta := map[string]string{}
 	for name, value := range info.Metadata {
 		if !strings.HasPrefix(strings.ToLower(name), objectmeta.Prefix) {
@@ -471,7 +481,7 @@ func copyToEncrypted(ctx context.Context, cfg Config, key, stored string,
 		Upstream: cfg.Upstream, Keys: cfg.Keys, Log: cfg.Log,
 	}, objcopy.Request{
 		Source: objcopy.Source{
-			Bucket: cfg.Bucket, Key: key, StoredKey: key, Info: info, Meta: meta,
+			Bucket: cfg.Bucket, Key: key, StoredKey: src.stored, Info: info, Meta: meta,
 		},
 		Dest: objcopy.Dest{
 			Bucket: cfg.Bucket, Key: key, StoredKey: stored,
@@ -502,19 +512,19 @@ func copyToEncrypted(ctx context.Context, cfg Config, key, stored string,
 // still on P must not find the object without its manifest. Only the id read
 // at migHeadPlain is deleted, and a failure leaves an orphan for gc rather than
 // a broken object.
-func deletePlain(ctx context.Context, cfg Config, key string, meta objectmeta.Meta,
+func deletePlain(ctx context.Context, cfg Config, src source, meta objectmeta.Meta,
 	log *slog.Logger,
 ) error {
-	if err := cfg.Upstream.DeleteObject(ctx, cfg.Bucket, key); err != nil {
+	if err := cfg.Upstream.DeleteObject(ctx, cfg.Bucket, src.stored); err != nil {
 		return err
 	}
-	cfg.at(HookDelete, key)
+	cfg.at(HookDelete, src.identity)
 	if meta.Multipart {
-		if err := cfg.Upstream.DeleteObject(ctx, cfg.Bucket, meta.ManifestID.ObjectKey(key)); err != nil {
+		if err := cfg.Upstream.DeleteObject(ctx, cfg.Bucket, meta.ManifestID.ObjectKey(src.stored)); err != nil {
 			log.Warn("could not remove the manifest left in clear; gc will collect it", "err", err)
 		}
 	}
-	cfg.at(HookManifestDel, key)
+	cfg.at(HookManifestDel, src.identity)
 	return nil
 }
 
