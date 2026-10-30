@@ -65,6 +65,11 @@ func (p *Proxy) copyObject(
 			"source_bucket", src.Bucket)
 		return s3api.ErrAccessDenied
 	}
+	// The source is read as much as the destination is written: a destroyed
+	// or unopened tenant's bucket is no source either.
+	if apiErr := p.tenantGate(src.Bucket); apiErr != nil {
+		return apiErr
+	}
 	if strings.HasPrefix(src.Key, s3api.ReservedPrefix) {
 		return s3api.ErrInvalidRequest.WithMessage(
 			"the %s prefix is reserved by the gateway", s3api.ReservedPrefix)

@@ -270,6 +270,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.metrics.Request(string(req.Op), recorder.status, time.Since(started))
 		return
 	}
+	if gate := p.tenantGate(req.Bucket); gate != nil {
+		p.fail(w, r, requestID, req, gate)
+		p.metrics.Request(string(req.Op), recorder.status, time.Since(started))
+		return
+	}
 	switch req.Op {
 	case s3api.OpPutObject:
 		err = p.putObject(w, r, req, authResult, log)

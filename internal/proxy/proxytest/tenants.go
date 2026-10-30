@@ -24,6 +24,13 @@ type Tenancy struct {
 // NewTenancy builds the keyrings of Tenancy.
 func NewTenancy(t *testing.T) *Tenancy {
 	t.Helper()
+	return NewTenancyFor(t, Bucket)
+}
+
+// NewTenancyFor builds the keyrings of Tenancy with bucket as acme's, for a
+// test that needs Bucket served and another bucket refused.
+func NewTenancyFor(t *testing.T, bucket string) *Tenancy {
+	t.Helper()
 	root := make([]byte, keys.KeySize)
 	ref := keys.RootKeyRef{Source: keys.SourceVaultTransit, Ciphertext: "vault:v1:test", KeyName: "test"}
 	ring := func(kid string) *keys.Keyring {
@@ -55,7 +62,7 @@ func NewTenancy(t *testing.T) *Tenancy {
 
 	base := write(&keys.File{Default: ring(DefaultKID)})
 	f := open(base)
-	if err := f.AddTenant("acme", []string{Bucket}, ring(TenantKID), keys.DeploymentLock()); err != nil {
+	if err := f.AddTenant("acme", []string{bucket}, ring(TenantKID), keys.DeploymentLock()); err != nil {
 		t.Fatal(err)
 	}
 	inactive := open(write(f))
@@ -72,13 +79,13 @@ func NewTenancy(t *testing.T) *Tenancy {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.AddTenant("acme", []string{Bucket}, ring(TenantKID), lock); err != nil {
+	if err := f.AddTenant("acme", []string{bucket}, ring(TenantKID), lock); err != nil {
 		t.Fatal(err)
 	}
 	out.Unopened = keys.NewServed(open(write(f)))
 
 	f = open(base)
-	f.Tombstones = []keys.Tombstone{{Name: "acme", Buckets: []string{Bucket}, KIDs: []string{TenantKID},
+	f.Tombstones = []keys.Tombstone{{Name: "acme", Buckets: []string{bucket}, KIDs: []string{TenantKID},
 		Locks: []keys.Lock{{Source: keys.LockDeployment}}}}
 	out.Destroyed = keys.NewServed(open(write(f)))
 	return out

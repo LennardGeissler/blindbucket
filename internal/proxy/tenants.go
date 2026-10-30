@@ -17,6 +17,18 @@ func (p *Proxy) bucketKeys(bucket string) (keys.BucketKeys, *s3api.Error) {
 	return bk, nil
 }
 
+// tenantGate refuses every request to a bucket whose tenant was destroyed or
+// did not open, reads and listings as much as writes; nil for the rest, and
+// for requests that name no bucket. It runs after authentication, so that only
+// a client allowed the bucket learns that much about it.
+func (p *Proxy) tenantGate(bucket string) *s3api.Error {
+	if bucket == "" {
+		return nil
+	}
+	_, apiErr := p.bucketKeys(bucket)
+	return apiErr
+}
+
 // tenantRefusal is what a client sees for a bucket whose tenant cannot be
 // served. The tenant is not named: a client reaches only its own buckets, and
 // which tenant holds them is the operator's business.
