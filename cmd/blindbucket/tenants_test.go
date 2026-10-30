@@ -165,3 +165,52 @@ func TestTenantsListWithoutTenants(t *testing.T) {
 		t.Errorf("stdout %q, stderr %q", stdout, stderr)
 	}
 }
+
+// A tenant under a key service: created under Vault, activated, and moved to
+// KMS, each step opening what it sealed before it writes. The deployment stays
+// under its passphrase throughout.
+func TestTenantsWithAServiceLock(t *testing.T) {
+	underVault := keysConfigFile(t, "  tenants:\n    acme: { provider: vault, "+serviceSettings(t, "vault")+" }")
+	underKMS := keysConfigFile(t, "  tenants:\n    acme: { provider: awskms, "+serviceSettings(t, "awskms")+" }")
+	path := setupKeyring(t, "2026-09")
+
+	if _, _, err := runCLI(t, "tenants", "create", "--keyring", path, "--config", underVault, "acme", "acme-*"); err != nil {
+		t.Fatalf("create under Vault: %v", err)
+	}
+	if _, _, err := runCLI(t, "tenants", "activate", "--keyring", path, "--config", underVault, "acme"); err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+	before := openWhole(t, path).Tenant("acme")
+	if before.Ring != nil || before.Lock() != (keys.Lock{Source: keys.SourceVaultTransit, KeyName: "blindbucket"}) {
+		t.Fatalf("acme under Vault: %+v", before)
+	}
+
+	if _, _, err := runCLI(t, "reseal", "--keyring", path, "--config", underVault, "--to-config", underKMS,
+		"--tenant", "acme"); err != nil {
+		t.Fatalf("reseal --tenant to KMS: %v", err)
+	}
+	stdout, _, err := runCLI(t, "tenants", "list", "--keyring", path, "--config", underKMS, "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list struct {
+		Tenants []struct {
+			ActiveKID string      `json:"active_kid"`
+			Locks     []keys.Lock `json:"locks"`
+			Opened    bool        `json:"opened"`
+		} `json:"tenants"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &list); err != nil {
+		t.Fatal(err)
+	}
+	acme := list.Tenants[0]
+	if !acme.Opened || acme.ActiveKID == "" || len(acme.Locks) != 2 ||
+		acme.Locks[0].Source != keys.SourceVaultTransit || acme.Locks[1].Source != keys.SourceAWSKMS {
+		t.Errorf("acme after the move to KMS: %s", stdout)
+	}
+	// The old lock no longer opens the current file.
+	stdout, _, err = runCLI(t, "tenants", "list", "--keyring", path, "--config", underVault, "--json")
+	if err != nil || !strings.Contains(stdout, `"opened":false`) {
+		t.Errorf("Vault still opens acme after the move: %v %s", err, stdout)
+	}
+}

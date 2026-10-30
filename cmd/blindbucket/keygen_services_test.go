@@ -11,28 +11,34 @@ import (
 	"testing"
 )
 
-// serviceConfig writes a configuration whose keys section names a root-key
-// service, skipping when the service is not running.
-func serviceConfig(t *testing.T, provider string) string {
+// serviceSettings returns a provider's settings as one YAML line, its own key
+// first, skipping when the service is not running.
+func serviceSettings(t *testing.T, provider string) string {
 	t.Helper()
-	var keysYAML string
 	switch provider {
 	case "vault":
 		addr, token := os.Getenv("BLINDBUCKET_TEST_VAULT_ADDR"), os.Getenv("BLINDBUCKET_TEST_VAULT_TOKEN")
 		if addr == "" || token == "" {
 			t.Skip("set BLINDBUCKET_TEST_VAULT_ADDR and _TOKEN (docker compose --profile keys up -d)")
 		}
-		keysYAML = fmt.Sprintf(`
-  vault: { address: %q, token: %q, key_name: blindbucket }`, addr, token)
+		return fmt.Sprintf(`vault: { address: %q, token: %q, key_name: blindbucket }`, addr, token)
 	case "awskms":
 		endpoint := os.Getenv("BLINDBUCKET_TEST_KMS_ENDPOINT")
 		if endpoint == "" {
 			t.Skip("set BLINDBUCKET_TEST_KMS_ENDPOINT (docker compose --profile keys up -d)")
 		}
-		keysYAML = fmt.Sprintf(`
-  awskms: { region: us-east-1, key_id: %q, access_key_id: test, secret_access_key: test, endpoint: %q }`,
+		return fmt.Sprintf(`awskms: { region: us-east-1, key_id: %q, access_key_id: test, secret_access_key: test, endpoint: %q }`,
 			emulatorKey(t, endpoint), endpoint)
 	}
+	t.Fatalf("no settings for provider %q", provider)
+	return ""
+}
+
+// serviceConfig writes a configuration whose keys section names a root-key
+// service, skipping when the service is not running.
+func serviceConfig(t *testing.T, provider string) string {
+	t.Helper()
+	keysYAML := "\n  " + serviceSettings(t, provider)
 	path := filepath.Join(t.TempDir(), "blindbucket.yaml")
 	body := fmt.Sprintf(`
 upstream: { endpoint: "http://127.0.0.1:1", region: us-east-1, access_key_id: a, secret_access_key: b }
