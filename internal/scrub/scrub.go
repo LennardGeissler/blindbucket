@@ -45,6 +45,11 @@ type Config struct {
 	// objects by their stored names, and their data keys are bound to the names
 	// clients use.
 	Names *names.Encrypter
+	// TenantKIDs, when set, are the key ids of the bucket's tenant (ADR-038).
+	// An object that verifies under any other key is counted in
+	// Result.OffTenant: it is sound, and a destruction of the tenant would
+	// leave it readable.
+	TenantKIDs []string
 
 	Concurrency int
 	Log         *slog.Logger
@@ -90,6 +95,9 @@ type Result struct {
 	Foreign int64
 	// Vanished counts objects deleted between the listing and the read.
 	Vanished int64
+	// OffTenant counts verified objects wrapped under a key that is not one
+	// of Config.TenantKIDs. They are not failures; rotate moves them.
+	OffTenant int64
 	// Errors counts objects that could not be read at all. Nothing is known
 	// about them, so a run with any is incomplete. Each one is in Unreadable.
 	Errors int64
@@ -221,15 +229,19 @@ func scrubOne(ctx context.Context, cfg Config, t verify.Target, result *Result) 
 		log.Debug("replaced while it was being verified; verifying the new version")
 		res, err = verify.Object(ctx, cfg.Upstream, cfg.Keys, t, cfg.Log2ChunkSize)
 	}
-	record(log, t, res, err, result)
+	record(cfg, log, t, res, err, result)
 }
 
 // record counts one object's outcome.
-func record(log *slog.Logger, t verify.Target, res verify.Result, err error, result *Result) {
+func record(cfg Config, log *slog.Logger, t verify.Target, res verify.Result, err error, result *Result) {
 	if err == nil {
 		atomic.AddInt64(&result.Verified, 1)
 		atomic.AddInt64(&result.CipherBytes, res.CipherBytes)
 		log.Debug("verified", "kid", res.KeyID, "parts", res.Parts, "plaintext_bytes", res.PlainBytes)
+		if cfg.TenantKIDs != nil && !slices.Contains(cfg.TenantKIDs, res.KeyID) {
+			atomic.AddInt64(&result.OffTenant, 1)
+			log.Info("not on the bucket's tenant's keys", "kid", res.KeyID)
+		}
 		return
 	}
 	if f, isFailure := verify.AsFailure(err); isFailure {

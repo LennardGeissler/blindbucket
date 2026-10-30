@@ -86,10 +86,6 @@ Flags:
 	if err != nil {
 		return err
 	}
-	if err := defaultTenantOnly("scrub", bucket, bucketKeys); err != nil {
-		return err
-	}
-	ring := served.Default()
 	client, _, err := upstreamClient(cfg, nil)
 	if err != nil {
 		return err
@@ -97,14 +93,15 @@ Flags:
 	// The same encrypter the gateway serves with: without it every data key
 	// would be checked against the stored name instead of the one it is bound
 	// to, and every object would fail.
-	nameEnc, err := openNameEncrypter(cfg, ring, log)
+	nameEnc, err := bucketNames(cfg, served, bucketKeys, log)
 	if err != nil {
 		return err
 	}
 
 	started := time.Now().UTC()
 	result, runErr := scrub.Run(ctx, scrub.Config{
-		Upstream: client, Keys: ring, Bucket: bucket, Prefix: prefix, Names: nameEnc,
+		Upstream: client, Keys: served, Bucket: bucket, Prefix: prefix, Names: nameEnc,
+		TenantKIDs:    tenantKIDs(served, bucketKeys.Tenant),
 		Log2ChunkSize: cfg.Crypto.Log2ChunkSize, Concurrency: *workers, Log: log,
 	})
 	if result == nil {
@@ -150,6 +147,10 @@ Flags:
 	if result.Vanished > 0 {
 		fmt.Printf("  vanished:   %d  (deleted during the scrub)\n", result.Vanished)
 	}
+	if result.OffTenant > 0 {
+		fmt.Printf("  off tenant: %d  (verified, under a key that is not tenant %s's; rotate moves them)\n",
+			result.OffTenant, bucketKeys.Tenant)
+	}
 	if runErr != nil {
 		return fmt.Errorf("the scrub did not finish, so the counts above cover part of the prefix: %w", runErr)
 	}
@@ -194,6 +195,7 @@ type scrubJSON struct {
 	Unreadable        int64                 `json:"unreadable"`
 	Foreign           int64                 `json:"foreign"`
 	Vanished          int64                 `json:"vanished"`
+	OffTenant         int64                 `json:"off_tenant"`
 	CiphertextBytes   int64                 `json:"ciphertext_bytes"`
 	Findings          []scrubFindingJSON    `json:"findings"`
 	UnreadableObjects []scrubUnreadableJSON `json:"unreadable_objects"`
@@ -234,6 +236,7 @@ func marshalScrubJSON(run scrubRun, result *scrub.Result) ([]byte, error) {
 		Unreadable:        result.Errors,
 		Foreign:           result.Foreign,
 		Vanished:          result.Vanished,
+		OffTenant:         result.OffTenant,
 		CiphertextBytes:   result.CipherBytes,
 		Findings:          findings,
 		UnreadableObjects: unreadable,

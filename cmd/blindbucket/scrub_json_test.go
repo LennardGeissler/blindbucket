@@ -14,7 +14,7 @@ import (
 // always.
 var scrubJSONFields = []string{
 	"bucket", "prefix", "started", "duration_seconds",
-	"scanned", "verified", "failed", "unreadable", "foreign", "vanished",
+	"scanned", "verified", "failed", "unreadable", "foreign", "vanished", "off_tenant",
 	"ciphertext_bytes", "findings", "unreadable_objects",
 }
 

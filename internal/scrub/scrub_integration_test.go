@@ -411,3 +411,23 @@ func TestIntegrationScrubInterruptedAtTheLastObject(t *testing.T) {
 		t.Errorf("scrub.Run = %v, want context.Canceled", err)
 	}
 }
+
+// A scrub of a tenant's bucket verifies what the default tenant's keys wrote
+// before the tenant was active, and counts it as off the tenant (ADR-038).
+func TestIntegrationScrubCountsObjectsOffTheTenant(t *testing.T) {
+	tn := proxytest.NewTenancy(t)
+	before := proxytest.New(t, proxytest.WithKeys(tn.Inactive))
+	after := proxytest.New(t, proxytest.WithKeys(tn.Active))
+	prefix := proxytest.ScrubPrefix(t)
+	before.Store(t, prefix+"old.bin", proxytest.RandomBytes(t, 3000))
+	after.Store(t, prefix+"new.bin", proxytest.RandomBytes(t, 3000))
+
+	cfg := after.ScrubConfig(prefix)
+	cfg.Keys = tn.Active
+	cfg.TenantKIDs = []string{proxytest.TenantKID}
+	result := after.Scrub(t, cfg)
+	if result.Verified != 2 || result.Failed != 0 || result.OffTenant != 1 {
+		t.Errorf("scrub: verified %d, failed %d, off the tenant %d; want 2, 0, 1",
+			result.Verified, result.Failed, result.OffTenant)
+	}
+}
