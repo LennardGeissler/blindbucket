@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
 	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
 )
 
@@ -60,5 +61,51 @@ func TestIntegrationWritesToAnUnservedTenantAreRefused(t *testing.T) {
 				t.Errorf("PUT answered %d: %s; want %d %s", resp.StatusCode, body, c.status, c.code)
 			}
 		})
+	}
+}
+
+// With names encrypted, a bucket's names follow its tenant: the default
+// tenant's name key until the tenant is active, the tenant's after. The two
+// do not see each other's objects; migrate-names moves the first kind across
+// (ADR-038).
+func TestIntegrationNamesFollowTheBucketsTenant(t *testing.T) {
+	tn := proxytest.NewTenancy(t)
+	option, defaultNames := proxytest.WithEncryptedNames(t)
+	before := proxytest.New(t, option, proxytest.WithKeys(tn.Inactive))
+	after := proxytest.New(t, option, proxytest.WithKeys(tn.Active))
+
+	acmeKey, ok := tn.Active.Tenants()[0].Ring.NameKey()
+	if !ok {
+		t.Fatal("acme has no name key")
+	}
+	secret := acmeKey.Secret()
+	acmeNames, err := names.New(secret)
+	clear(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	key := "tenant-names/" + proxytest.TestKey(t, "doc.txt")
+	underDefault, _ := defaultNames.EncryptKey(key)
+	underAcme, _ := acmeNames.EncryptKey(key)
+	before.CleanupStored(t, underDefault)
+	after.CleanupStored(t, underAcme)
+
+	before.Store(t, key, []byte("named under the default tenant's key"))
+	if _, err := before.Upstream.HeadObject(t.Context(), proxytest.Bucket, underDefault); err != nil {
+		t.Fatalf("before activation the object is not under the default name key: %v", err)
+	}
+	resp := after.Do(t, http.MethodHead, key)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("after activation a name under the default key is found (%d); it should not be", resp.StatusCode)
+	}
+
+	after.Store(t, key, []byte("named under acme's key"))
+	if _, err := after.Upstream.HeadObject(t.Context(), proxytest.Bucket, underAcme); err != nil {
+		t.Fatalf("after activation the object is not under acme's name key: %v", err)
+	}
+	if got := getOK(t, after, key); got != "named under acme's key" {
+		t.Errorf("read back %q", got)
 	}
 }

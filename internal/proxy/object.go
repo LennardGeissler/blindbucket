@@ -66,7 +66,7 @@ func (p *Proxy) putObject(
 	// The address the provider sees. The associated data below deliberately does
 	// not use it: the wrapped key stays bound to the key the client named, so
 	// the envelope reads the same whether or not names are encrypted.
-	storedKey, apiErr := p.storedKey(req.Key)
+	storedKey, apiErr := p.storedKey(req.Bucket, req.Key)
 	if apiErr != nil {
 		return apiErr
 	}
@@ -213,7 +213,7 @@ func (p *Proxy) getObject(w http.ResponseWriter, r *http.Request, req s3api.Requ
 		return p.getObjectRange(w, r, req, spec, log)
 	}
 
-	storedKey, apiErr := p.storedKey(req.Key)
+	storedKey, apiErr := p.storedKey(req.Bucket, req.Key)
 	if apiErr != nil {
 		return apiErr
 	}
@@ -287,7 +287,7 @@ func (p *Proxy) getObject(w http.ResponseWriter, r *http.Request, req s3api.Requ
 func (p *Proxy) getObjectRange(
 	w http.ResponseWriter, r *http.Request, req s3api.Request, spec string, log *slog.Logger,
 ) *s3api.Error {
-	storedKey, apiErr := p.storedKey(req.Key)
+	storedKey, apiErr := p.storedKey(req.Bucket, req.Key)
 	if apiErr != nil {
 		return apiErr
 	}
@@ -413,7 +413,7 @@ func (p *Proxy) getObjectRange(
 
 // headObject reports an object's plaintext size without reading it.
 func (p *Proxy) headObject(w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger) *s3api.Error {
-	storedKey, apiErr := p.storedKey(req.Key)
+	storedKey, apiErr := p.storedKey(req.Bucket, req.Key)
 	if apiErr != nil {
 		return apiErr
 	}
@@ -466,7 +466,7 @@ func (p *Proxy) deleteObject(
 ) *s3api.Error {
 	// Step 1: what is visible now. This observation is the only thing step 3 is
 	// allowed to delete.
-	storedKey, apiErr := p.storedKey(req.Key)
+	storedKey, apiErr := p.storedKey(req.Bucket, req.Key)
 	if apiErr != nil {
 		return apiErr
 	}

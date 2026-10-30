@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
 	"github.com/LennardGeissler/blindbucket/internal/s3api"
 	"github.com/LennardGeissler/blindbucket/internal/upstream"
@@ -24,11 +25,18 @@ import (
 // stays over the plaintext key, so the envelope is unchanged by whether names
 // are encrypted, and an object does not have to be rewritten to move between the
 // two. What does have to be rewritten is where it lives.
-func (p *Proxy) storedKey(key string) (string, *s3api.Error) {
-	if p.names == nil || key == "" {
+//
+// The name key is the bucket's tenant's once the tenant is active, the default
+// tenant's otherwise (ADR-038); namesFor says which.
+func (p *Proxy) storedKey(bucket, key string) (string, *s3api.Error) {
+	enc, apiErr := p.namesFor(bucket)
+	if apiErr != nil {
+		return "", apiErr
+	}
+	if enc == nil || key == "" {
 		return key, nil
 	}
-	stored, err := p.names.EncryptKey(key)
+	stored, err := enc.EncryptKey(key)
 	if err != nil {
 		if errors.Is(err, names.ErrTooLong) {
 			return "", s3api.ErrKeyTooLong.WithMessage(
@@ -110,8 +118,12 @@ func (p *Proxy) serveEncryptedListing(
 			delimiter)
 	}
 
+	enc, apiErr := p.namesFor(req.Bucket)
+	if apiErr != nil {
+		return apiErr
+	}
 	prefix := query.Get("prefix")
-	storedPrefix, whole, err := p.names.EncryptPrefix(prefix)
+	storedPrefix, whole, err := enc.EncryptPrefix(prefix)
 	if err != nil {
 		return s3api.ErrInternal
 	}
@@ -225,4 +237,37 @@ func listingCursor(query url.Values, v2 bool) (string, *s3api.Error) {
 		return query.Get("start-after"), nil
 	}
 	return query.Get("marker"), nil
+}
+
+// namesFor returns the encrypter for a bucket's object names, nil while names
+// are in clear. A tenant's is built from its name key the first time one of
+// its buckets is used, and kept: the keyring does not change while the
+// gateway runs.
+func (p *Proxy) namesFor(bucket string) (*names.Encrypter, *s3api.Error) {
+	if p.names == nil {
+		return nil, nil
+	}
+	bk, apiErr := p.bucketKeys(bucket)
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	if bk.NameTenant == keys.DefaultTenant {
+		return p.names, nil
+	}
+	if enc, ok := p.tenantNames.Load(bk.NameTenant); ok {
+		return enc.(*names.Encrypter), nil
+	}
+	if bk.Name == nil {
+		// A tenant's section always carries a name key (FORMAT.md section
+		// 18.6), so this is a keyring the format does not allow.
+		return nil, s3api.ErrInternal
+	}
+	secret := bk.Name.Secret()
+	defer clear(secret)
+	enc, err := names.New(secret)
+	if err != nil {
+		return nil, s3api.ErrInternal
+	}
+	actual, _ := p.tenantNames.LoadOrStore(bk.NameTenant, enc)
+	return actual.(*names.Encrypter), nil
 }

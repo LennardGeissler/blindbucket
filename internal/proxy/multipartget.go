@@ -312,7 +312,7 @@ func (p *Proxy) getMultipartRange(
 	}
 	defer clear(dek)
 
-	storedKey, apiErr := p.storedKey(req.Key)
+	storedKey, apiErr := p.storedKey(req.Bucket, req.Key)
 	if apiErr != nil {
 		return apiErr
 	}
@@ -414,7 +414,7 @@ func (p *Proxy) multipartLayout(
 	// The manifest lives at the hash of the *stored* key and is bound to it,
 	// which is what keeps gc free of the name key. The data key went the other
 	// way, bound to the identity.
-	storedKey, apiErr := p.storedKey(req.Key)
+	storedKey, apiErr := p.storedKey(req.Bucket, req.Key)
 	if apiErr != nil {
 		return nil, apiErr
 	}

@@ -72,7 +72,7 @@ func (p *Proxy) uploadPartCopy(
 	// Resolve the source through storedKey so name encryption stays transparent:
 	// the client names the logical key; the upstream request uses the key the
 	// provider actually stores (see names.go). CopyObject does the same.
-	src.Stored, apiErr = p.storedKey(src.Key)
+	src.Stored, apiErr = p.storedKey(src.Bucket, src.Key)
 	if apiErr != nil {
 		return apiErr
 	}
@@ -316,7 +316,7 @@ func (p *Proxy) openMultipartSourceRange(
 	// srcReq carries the source's identity, because that is what its data key
 	// and its manifest are bound to. The byte ranges below go to the provider
 	// and need the address.
-	srcStored, apiErr := p.storedKey(srcReq.Key)
+	srcStored, apiErr := p.storedKey(srcReq.Bucket, srcReq.Key)
 	if apiErr != nil {
 		return fail(apiErr)
 	}

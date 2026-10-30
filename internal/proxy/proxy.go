@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/LennardGeissler/blindbucket/internal/audit"
@@ -107,7 +108,10 @@ type Proxy struct {
 	// corsOrigins is CORSOrigins; see cors.go.
 	corsOrigins []string
 
-	names          *names.Encrypter
+	names *names.Encrypter
+	// tenantNames holds a names.Encrypter per tenant whose name key maps its
+	// buckets' names, built on first use; see namesFor.
+	tenantNames    sync.Map
 	maxListingKeys int
 	// listings bounds concurrent buffered listings; the memory a listing holds
 	// is per listing in flight, so a per-prefix bound alone does not bound the

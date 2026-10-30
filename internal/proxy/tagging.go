@@ -82,7 +82,7 @@ var errUntaggable = errors.New("not written by the gateway")
 // findTagTarget reads the object's metadata and unwraps its data key. The
 // caller clears the key.
 func (p *Proxy) findTagTarget(r *http.Request, req s3api.Request, log *slog.Logger) (*tagTarget, *s3api.Error, error) {
-	storedKey, apiErr := p.storedKey(req.Key)
+	storedKey, apiErr := p.storedKey(req.Bucket, req.Key)
 	if apiErr != nil {
 		return nil, apiErr, nil
 	}
@@ -283,7 +283,7 @@ func (p *Proxy) writeTagsBeforeObject(
 // providerTagging forwards GetObjectTagging for an object the gateway did not
 // write: its tags, if any, are the provider's, set out of band.
 func (p *Proxy) providerTagging(w http.ResponseWriter, r *http.Request, req s3api.Request, log *slog.Logger) *s3api.Error {
-	storedKey, apiErr := p.storedKey(req.Key)
+	storedKey, apiErr := p.storedKey(req.Bucket, req.Key)
 	if apiErr != nil {
 		return apiErr
 	}

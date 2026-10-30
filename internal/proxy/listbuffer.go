@@ -152,6 +152,10 @@ func (p *Proxy) bufferPrefix(
 		query.Set("delimiter", delimiter)
 	}
 
+	enc, apiErr := p.namesFor(bucket)
+	if apiErr != nil {
+		return nil, apiErr
+	}
 	rows := make([]listingRow, 0, 1024)
 	for {
 		page, err := p.upstream.ListObjects(ctx, bucket, query)
@@ -162,7 +166,7 @@ func (p *Proxy) bufferPrefix(
 			if strings.HasPrefix(entry.Key, s3api.ReservedPrefix) {
 				continue
 			}
-			plain, decErr := p.names.DecryptKey(entry.Key)
+			plain, decErr := enc.DecryptKey(entry.Key)
 			if decErr != nil {
 				log.Warn("a stored key in this listing is not one this keyring produced",
 					"err", decErr)
@@ -172,7 +176,7 @@ func (p *Proxy) bufferPrefix(
 			rows = append(rows, listingRow{key: plain, object: &entry})
 		}
 		for _, cp := range page.CommonPrefixes {
-			plain, decErr := p.names.DecryptKey(strings.TrimSuffix(cp.Prefix, "/"))
+			plain, decErr := enc.DecryptKey(strings.TrimSuffix(cp.Prefix, "/"))
 			if decErr != nil {
 				log.Warn("a common prefix in this listing is not one this keyring produced",
 					"err", decErr)

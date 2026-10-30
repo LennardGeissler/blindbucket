@@ -98,11 +98,11 @@ func (p *Proxy) copyObject(
 	// the client named. Keeping the two apart is what lets this path serve a copy
 	// while names are encrypted: the wrapped key stays bound to the identity, and
 	// only the provider is told the address.
-	srcStored, apiErr := p.storedKey(src.Key)
+	srcStored, apiErr := p.storedKey(src.Bucket, src.Key)
 	if apiErr != nil {
 		return apiErr
 	}
-	destStored, apiErr := p.storedKey(req.Key)
+	destStored, apiErr := p.storedKey(req.Bucket, req.Key)
 	if apiErr != nil {
 		return apiErr
 	}

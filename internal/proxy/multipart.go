@@ -94,7 +94,7 @@ func (p *Proxy) createMultipartUpload(
 	// The address the provider is given. The associated data below, the upload
 	// token and the response all stay on req.Key, the identity: a client names
 	// its own object and must go on seeing that name back.
-	storedKey, apiErr := p.storedKey(req.Key)
+	storedKey, apiErr := p.storedKey(req.Bucket, req.Key)
 	if apiErr != nil {
 		return apiErr
 	}
@@ -550,7 +550,7 @@ func (p *Proxy) openToken(
 	if req.UploadID == "" {
 		return nil, "", s3api.ErrInvalidArgument.WithMessage("the request names no upload id")
 	}
-	storedKey, apiErr := p.storedKey(req.Key)
+	storedKey, apiErr := p.storedKey(req.Bucket, req.Key)
 	if apiErr != nil {
 		return nil, "", apiErr
 	}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
 	"github.com/LennardGeissler/blindbucket/internal/s3api"
 )
@@ -29,7 +30,7 @@ func TestStoredKeyIsTheIdentityWhenOff(t *testing.T) {
 	p := &Proxy{}
 	for _, key := range []string{"", "a", "a/b/c.txt", "photos/2026/03/14/IMG.jpg",
 		"weird//double", "trailing/", strings.Repeat("x", 1024)} {
-		got, apiErr := p.storedKey(key)
+		got, apiErr := p.storedKey("bucket", key)
 		if apiErr != nil {
 			t.Fatalf("storedKey(%q): %v", key, apiErr)
 		}
@@ -41,10 +42,10 @@ func TestStoredKeyIsTheIdentityWhenOff(t *testing.T) {
 
 func TestStoredKeyMapsAndRoundTripsWhenOn(t *testing.T) {
 	enc := testEncrypter(t)
-	p := &Proxy{names: enc}
+	p := &Proxy{names: enc, keys: keys.NewKeyring()}
 
 	for _, key := range []string{"a", "a/b/c.txt", "photos/2026/03/14/IMG.jpg", "weird//double"} {
-		stored, apiErr := p.storedKey(key)
+		stored, apiErr := p.storedKey("bucket", key)
 		if apiErr != nil {
 			t.Fatalf("storedKey(%q): %v", key, apiErr)
 		}
@@ -68,12 +69,12 @@ func TestStoredKeyMapsAndRoundTripsWhenOn(t *testing.T) {
 // '/' between segments survives encryption, so "a/b/" stays a prefix of
 // "a/b/c.txt" upstream.
 func TestStoredKeyPreservesSeparators(t *testing.T) {
-	p := &Proxy{names: testEncrypter(t)}
-	dir, apiErr := p.storedKey("a/b")
+	p := &Proxy{names: testEncrypter(t), keys: keys.NewKeyring()}
+	dir, apiErr := p.storedKey("bucket", "a/b")
 	if apiErr != nil {
 		t.Fatalf("storedKey: %v", apiErr)
 	}
-	child, apiErr := p.storedKey("a/b/c.txt")
+	child, apiErr := p.storedKey("bucket", "a/b/c.txt")
 	if apiErr != nil {
 		t.Fatalf("storedKey: %v", apiErr)
 	}
@@ -89,10 +90,10 @@ func TestStoredKeyPreservesSeparators(t *testing.T) {
 // plaintext key maps to one stored key, every time, with no lookup. Without it
 // a point lookup would become a search.
 func TestStoredKeyIsDeterministic(t *testing.T) {
-	p := &Proxy{names: testEncrypter(t)}
-	first, _ := p.storedKey("photos/2026/holiday.jpg")
+	p := &Proxy{names: testEncrypter(t), keys: keys.NewKeyring()}
+	first, _ := p.storedKey("bucket", "photos/2026/holiday.jpg")
 	for range 8 {
-		again, apiErr := p.storedKey("photos/2026/holiday.jpg")
+		again, apiErr := p.storedKey("bucket", "photos/2026/holiday.jpg")
 		if apiErr != nil {
 			t.Fatalf("storedKey: %v", apiErr)
 		}
@@ -106,14 +107,14 @@ func TestStoredKeyIsDeterministic(t *testing.T) {
 // legal encrypted form, and the client has to be told so rather than have its
 // key truncated into a different object.
 func TestStoredKeyRefusesAKeyTooLongToEncrypt(t *testing.T) {
-	p := &Proxy{names: testEncrypter(t)}
+	p := &Proxy{names: testEncrypter(t), keys: keys.NewKeyring()}
 	// Short segments pay the per-segment IV over and over, so this is well
 	// inside S3's own 1024-byte limit.
 	deep := strings.TrimSuffix(strings.Repeat("abcd/", 200), "/")
 	if len(deep) > 1024 {
 		t.Fatalf("the test key is %d bytes, which S3 would refuse on its own", len(deep))
 	}
-	_, apiErr := p.storedKey(deep)
+	_, apiErr := p.storedKey("bucket", deep)
 	if apiErr == nil {
 		t.Fatal("a key too long to encrypt was accepted")
 	}
@@ -146,7 +147,7 @@ func TestNameEncryptionGateIsAWhitelist(t *testing.T) {
 		}
 	}
 
-	on := &Proxy{names: testEncrypter(t)}
+	on := &Proxy{names: testEncrypter(t), keys: keys.NewKeyring()}
 	for _, op := range allowed {
 		if gate := on.nameEncryptionGate(op); gate != nil {
 			t.Errorf("%s should be wired for encrypted names, got: %v", op, gate)

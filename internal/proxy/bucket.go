@@ -159,7 +159,7 @@ func (p *Proxy) deleteObjects(
 	back := map[string]string{}
 	if p.names != nil {
 		for i, obj := range in.Objects {
-			stored, apiErr := p.storedKey(obj.Key)
+			stored, apiErr := p.storedKey(req.Bucket, obj.Key)
 			if apiErr != nil {
 				return apiErr
 			}
