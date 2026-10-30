@@ -1,0 +1,64 @@
+package integration
+
+import (
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/LennardGeissler/blindbucket/internal/proxy/proxytest"
+)
+
+// Every write to a bucket wraps under its tenant's key once the tenant is
+// active, and under the default tenant's before; a read goes by the key the
+// object names, so what was written before activation stays readable
+// (ADR-038).
+func TestIntegrationWritesUseTheBucketsTenantKey(t *testing.T) {
+	tn := proxytest.NewTenancy(t)
+	before := proxytest.New(t, proxytest.WithKeys(tn.Inactive))
+	after := proxytest.New(t, proxytest.WithKeys(tn.Active))
+
+	old := proxytest.TestKey(t, "before.bin")
+	before.Store(t, old, []byte("written before acme was active"))
+	if kid := storedMeta(t, before, old).KeyID; kid != proxytest.DefaultKID {
+		t.Errorf("an inactive tenant's bucket was written under %q, want the default tenant's", kid)
+	}
+
+	put := proxytest.TestKey(t, "put.bin")
+	after.Store(t, put, []byte("written while acme is active"))
+	mpu := proxytest.TestKey(t, "multipart.bin")
+	after.MpuStore(t, mpu, [][]byte{proxytest.RandomBytes(t, 5<<20), []byte("tail")})
+	copied := proxytest.TestKey(t, "copied.bin")
+	copyOK(t, after, old, copied, nil)
+	for _, key := range []string{put, mpu, copied} {
+		if kid := storedMeta(t, after, key).KeyID; kid != proxytest.TenantKID {
+			t.Errorf("%s was written under %q, want acme's key", key, kid)
+		}
+	}
+
+	if got := getOK(t, after, old); got != "written before acme was active" {
+		t.Errorf("an object from before activation reads back as %q", got)
+	}
+}
+
+// A destroyed tenant's buckets are refused, and an unopened tenant's answer
+// 503: neither falls back to the default tenant's keys.
+func TestIntegrationWritesToAnUnservedTenantAreRefused(t *testing.T) {
+	tn := proxytest.NewTenancy(t)
+	for name, c := range map[string]struct {
+		h      *proxytest.Harness
+		status int
+		code   string
+	}{
+		"destroyed": {proxytest.New(t, proxytest.WithKeys(tn.Destroyed)), http.StatusForbidden, "AccessDenied"},
+		"unopened":  {proxytest.New(t, proxytest.WithKeys(tn.Unopened)), http.StatusServiceUnavailable, "ServiceUnavailable"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := c.h.Put(t, proxytest.TestKey(t, "refused.bin"), []byte("x"), nil)
+			body := proxytest.ReadBody(t, resp)
+			_ = resp.Body.Close()
+			if resp.StatusCode != c.status || !strings.Contains(body, c.code) {
+				t.Errorf("PUT answered %d: %s; want %d %s", resp.StatusCode, body, c.status, c.code)
+			}
+		})
+	}
+}

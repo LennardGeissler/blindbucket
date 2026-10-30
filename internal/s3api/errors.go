@@ -27,7 +27,11 @@ var (
 	ErrNoSuchKey    = &Error{"NoSuchKey", "The specified key does not exist.", http.StatusNotFound}
 	ErrNoSuchBucket = &Error{"NoSuchBucket", "The specified bucket does not exist.",
 		http.StatusNotFound}
-	ErrAccessDenied   = &Error{"AccessDenied", "Access Denied.", http.StatusForbidden}
+	ErrAccessDenied = &Error{"AccessDenied", "Access Denied.", http.StatusForbidden}
+	// ErrServiceUnavailable is a bucket this instance cannot serve for now: its
+	// tenant's keys did not open at startup (ADR-038).
+	ErrServiceUnavailable = &Error{"ServiceUnavailable", "The service is not available.",
+		http.StatusServiceUnavailable}
 	ErrInvalidRequest = &Error{"InvalidRequest", "The request is not valid.",
 		http.StatusBadRequest}
 	ErrInvalidArgument = &Error{"InvalidArgument", "An argument is not valid.",

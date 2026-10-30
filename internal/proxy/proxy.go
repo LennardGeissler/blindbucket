@@ -37,7 +37,10 @@ var errNotEncryptedAPI = &s3api.Error{
 // Config configures a Proxy.
 type Config struct {
 	Upstream *upstream.Client
-	Keys     keys.KeyProvider
+	// Keys wraps and unwraps data keys, and says which key writes to a bucket
+	// use: a *keys.Keyring for a keyring without tenants, a *keys.Served for
+	// one with them (ADR-038).
+	Keys keys.BucketKeyProvider
 	// Verifier authenticates inbound requests. It is required: a gateway that
 	// can be configured to serve unauthenticated requests will eventually be
 	// deployed that way by accident.
@@ -93,7 +96,7 @@ type Config struct {
 // out.
 type Proxy struct {
 	upstream   *upstream.Client
-	keys       keys.KeyProvider
+	keys       keys.BucketKeyProvider
 	verifier   *auth.Verifier
 	baseDomain string
 	log2C      uint8

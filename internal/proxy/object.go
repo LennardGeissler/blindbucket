@@ -71,7 +71,11 @@ func (p *Proxy) putObject(
 		return apiErr
 	}
 
-	kid := p.keys.ActiveKID()
+	bk, apiErr := p.bucketKeys(req.Bucket)
+	if apiErr != nil {
+		return apiErr
+	}
+	kid := bk.KID
 	aad, err := keys.ObjectAAD(kid, req.Bucket, req.Key)
 	if err != nil {
 		return s3api.ErrInvalidArgument.WithMessage("%v", err)

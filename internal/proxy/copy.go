@@ -145,9 +145,15 @@ func (p *Proxy) copyObject(
 		replaced = &id
 	}
 
+	// The copy's data key is rewrapped under the destination bucket's tenant's
+	// key, as any write to that bucket is (ADR-038).
+	destKeys, apiErr := p.bucketKeys(req.Bucket)
+	if apiErr != nil {
+		return apiErr
+	}
 	dest := objcopy.Dest{
 		Bucket: req.Bucket, Key: req.Key, StoredKey: destStored,
-		KeyID:              p.keys.ActiveKID(),
+		KeyID:              destKeys.KID,
 		ContentType:        info.ContentType,
 		CacheControl:       info.CacheControl,
 		ContentDisposition: info.Header.Get("Content-Disposition"),
