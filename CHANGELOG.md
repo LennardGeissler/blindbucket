@@ -80,6 +80,10 @@ version 1 would keep being readable.
   says that orphaned manifests and tag sidecars under `.blindbucket/` count, and that
   `blindbucket gc` removes them.
 
+### Measured
+
+- **The litmus tests, through the gateway.** A gateway in front of a store is a store to its clients, so `test/litmus/` was run through v1.5.1 and v1.6.0, in front of MinIO and of Garage, five times each. Up to 1.5 the gateway ignored a client's `If-None-Match` and `If-Match` in front of either store, as Garage does on its own ([#168](https://github.com/LennardGeissler/blindbucket/issues/168)); since 1.6 it takes the store's semantics, enforced in front of MinIO and ignored in front of Garage. Overlapping writes keep the store's ranking in both ([test/litmus/README.md](test/litmus/README.md#through-the-gateway-2026-10-30)).
+
 ## [1.6.0] — 2026-10-28
 
 **Refusals decided again, and a status page.** Presigned URLs can upload where the
