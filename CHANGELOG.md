@@ -27,8 +27,16 @@ version 1 would keep being readable.
   and gives them buckets; `reseal --tenant` moves a tenant to another lock and keeps the
   old one in its history. `keygen`, `keys remove` and `reseal` keep a keyring's tenants,
   and `keys list` gains a `TENANT` column and `tenant` and `opened` in `--json`. The
-  gateway and the object commands do not serve tenants yet and refuse such a keyring by
-  name ([#133](https://github.com/LennardGeissler/blindbucket/issues/133)).
+  object commands (`rotate`, `scrub`, `encrypt-existing`, `migrate-names`) do not serve
+  tenants yet and refuse such a keyring by name
+  ([#133](https://github.com/LennardGeissler/blindbucket/issues/133)).
+- **The gateway serves tenants.** Writes to an active tenant's buckets wrap under its
+  keys and, with `names.encrypt`, map names under its name key; an inactive tenant's
+  buckets behave as the default tenant's, and reads go by the key each object names. A
+  destroyed tenant's buckets answer `403 AccessDenied` and an unopened tenant's `503
+  ServiceUnavailable`, reads included, while every other bucket is served.
+  `blindbucket_keyring_generation` and `blindbucket_tenant_open{tenant}` show what each
+  instance loaded, which is what a rollout waits for.
 
 ### Fixed
 

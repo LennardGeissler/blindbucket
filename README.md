@@ -634,6 +634,11 @@ a function of streams in flight and not of object size.
 `blindbucket_keyring_key_created_timestamp_seconds` is the input to a rotation
 decision — `time() - min(...)` over it is the age of the oldest key still in the
 keyring, which is the number a rotation policy is actually written against.
+With tenants, `blindbucket_keyring_generation` is the keyring generation an instance
+loaded, and every instance reporting the same one is what a rollout waits for before
+the next step; `blindbucket_tenant_open{tenant}` is 0 for a tenant whose keys did not
+open, whose buckets then answer 503
+([ADR-038](docs/adr/ADR-038-tenants-and-crypto-shredding.md)).
 
 Those alerts are written out in
 [deploy/prometheus/alerts.yaml](deploy/prometheus/alerts.yaml), with the audit
