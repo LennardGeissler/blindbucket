@@ -1,0 +1,40 @@
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-put-inm", "repeat": 1, "error_in_200": [], "time": "2026-10-30T08:39:21.704651+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-put-im", "repeat": 1, "error_in_200": [], "time": "2026-10-30T08:39:21.722097+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-complete-im", "repeat": 1, "error_in_200": [], "time": "2026-10-30T08:39:21.802462+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-complete-inm", "repeat": 1, "error_in_200": [], "time": "2026-10-30T08:39:21.886646+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.6.0-garage", "test": "copy-source-im", "repeat": 1, "error_in_200": [], "time": "2026-10-30T08:39:21.927638+00:00"}
+{"B": "200", "A": "404/NoSuchUpload", "holds": "B", "verdict": "last-created; loser refused (404/NoSuchUpload)", "provider": "gw-v1.6.0-garage", "test": "overlap-mpu-mpu", "repeat": 1, "error_in_200": [], "time": "2026-10-30T08:39:23.116491+00:00"}
+{"PUT": "200", "A": "404/NoSuchUpload", "holds": "PUT", "verdict": "last-begun; loser refused (404/NoSuchUpload)", "provider": "gw-v1.6.0-garage", "test": "overlap-mpu-put", "repeat": 1, "error_in_200": [], "time": "2026-10-30T08:39:24.249118+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "gw-v1.6.0-garage", "test": "read-after-write", "repeat": 1, "error_in_200": [], "time": "2026-10-30T08:39:24.575235+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-put-inm", "repeat": 2, "error_in_200": [], "time": "2026-10-30T08:39:24.603474+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-put-im", "repeat": 2, "error_in_200": [], "time": "2026-10-30T08:39:24.626159+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-complete-im", "repeat": 2, "error_in_200": [], "time": "2026-10-30T08:39:24.712520+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-complete-inm", "repeat": 2, "error_in_200": [], "time": "2026-10-30T08:39:24.808560+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.6.0-garage", "test": "copy-source-im", "repeat": 2, "error_in_200": [], "time": "2026-10-30T08:39:24.849758+00:00"}
+{"B": "200", "A": "404/NoSuchUpload", "holds": "B", "verdict": "last-created; loser refused (404/NoSuchUpload)", "provider": "gw-v1.6.0-garage", "test": "overlap-mpu-mpu", "repeat": 2, "error_in_200": [], "time": "2026-10-30T08:39:26.055660+00:00"}
+{"PUT": "200", "A": "404/NoSuchUpload", "holds": "PUT", "verdict": "last-begun; loser refused (404/NoSuchUpload)", "provider": "gw-v1.6.0-garage", "test": "overlap-mpu-put", "repeat": 2, "error_in_200": [], "time": "2026-10-30T08:39:27.190770+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "gw-v1.6.0-garage", "test": "read-after-write", "repeat": 2, "error_in_200": [], "time": "2026-10-30T08:39:27.509966+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-put-inm", "repeat": 3, "error_in_200": [], "time": "2026-10-30T08:39:27.531323+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-put-im", "repeat": 3, "error_in_200": [], "time": "2026-10-30T08:39:27.553650+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-complete-im", "repeat": 3, "error_in_200": [], "time": "2026-10-30T08:39:27.640452+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-complete-inm", "repeat": 3, "error_in_200": [], "time": "2026-10-30T08:39:27.756572+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.6.0-garage", "test": "copy-source-im", "repeat": 3, "error_in_200": [], "time": "2026-10-30T08:39:27.797318+00:00"}
+{"B": "200", "A": "404/NoSuchUpload", "holds": "B", "verdict": "last-created; loser refused (404/NoSuchUpload)", "provider": "gw-v1.6.0-garage", "test": "overlap-mpu-mpu", "repeat": 3, "error_in_200": [], "time": "2026-10-30T08:39:28.993803+00:00"}
+{"PUT": "200", "A": "404/NoSuchUpload", "holds": "PUT", "verdict": "last-begun; loser refused (404/NoSuchUpload)", "provider": "gw-v1.6.0-garage", "test": "overlap-mpu-put", "repeat": 3, "error_in_200": [], "time": "2026-10-30T08:39:30.137892+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "gw-v1.6.0-garage", "test": "read-after-write", "repeat": 3, "error_in_200": [], "time": "2026-10-30T08:39:30.370208+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-put-inm", "repeat": 4, "error_in_200": [], "time": "2026-10-30T08:39:30.377784+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-put-im", "repeat": 4, "error_in_200": [], "time": "2026-10-30T08:39:30.385865+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-complete-im", "repeat": 4, "error_in_200": [], "time": "2026-10-30T08:39:30.444864+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-complete-inm", "repeat": 4, "error_in_200": [], "time": "2026-10-30T08:39:30.531113+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.6.0-garage", "test": "copy-source-im", "repeat": 4, "error_in_200": [], "time": "2026-10-30T08:39:30.578895+00:00"}
+{"B": "200", "A": "404/NoSuchUpload", "holds": "B", "verdict": "last-created; loser refused (404/NoSuchUpload)", "provider": "gw-v1.6.0-garage", "test": "overlap-mpu-mpu", "repeat": 4, "error_in_200": [], "time": "2026-10-30T08:39:31.776300+00:00"}
+{"PUT": "200", "A": "404/NoSuchUpload", "holds": "PUT", "verdict": "last-begun; loser refused (404/NoSuchUpload)", "provider": "gw-v1.6.0-garage", "test": "overlap-mpu-put", "repeat": 4, "error_in_200": [], "time": "2026-10-30T08:39:32.903151+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "gw-v1.6.0-garage", "test": "read-after-write", "repeat": 4, "error_in_200": [], "time": "2026-10-30T08:39:33.118368+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-put-inm", "repeat": 5, "error_in_200": [], "time": "2026-10-30T08:39:33.125981+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-put-im", "repeat": 5, "error_in_200": [], "time": "2026-10-30T08:39:33.133591+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-complete-im", "repeat": 5, "error_in_200": [], "time": "2026-10-30T08:39:33.187573+00:00"}
+{"response": "200", "verdict": "ignored", "provider": "gw-v1.6.0-garage", "test": "cond-complete-inm", "repeat": 5, "error_in_200": [], "time": "2026-10-30T08:39:33.242982+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.6.0-garage", "test": "copy-source-im", "repeat": 5, "error_in_200": [], "time": "2026-10-30T08:39:33.270601+00:00"}
+{"B": "200", "A": "404/NoSuchUpload", "holds": "B", "verdict": "last-created; loser refused (404/NoSuchUpload)", "provider": "gw-v1.6.0-garage", "test": "overlap-mpu-mpu", "repeat": 5, "error_in_200": [], "time": "2026-10-30T08:39:34.458732+00:00"}
+{"PUT": "200", "A": "404/NoSuchUpload", "holds": "PUT", "verdict": "last-begun; loser refused (404/NoSuchUpload)", "provider": "gw-v1.6.0-garage", "test": "overlap-mpu-put", "repeat": 5, "error_in_200": [], "time": "2026-10-30T08:39:35.583741+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "gw-v1.6.0-garage", "test": "read-after-write", "repeat": 5, "error_in_200": [], "time": "2026-10-30T08:39:35.847387+00:00"}
