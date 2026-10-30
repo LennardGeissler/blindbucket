@@ -65,6 +65,7 @@ complete -c blindbucket -n '__blindbucket_using tenants' -a create -d 'add a ten
 complete -c blindbucket -n '__blindbucket_using tenants' -a assign -d 'give a tenant more buckets, for good'
 complete -c blindbucket -n '__blindbucket_using tenants' -a activate -d "write a tenant's buckets under its own keys from now on"
 complete -c blindbucket -n '__blindbucket_using tenants' -a list -d 'show the tenants, their buckets, keys and locks'
+complete -c blindbucket -n '__blindbucket_using tenants' -a census -d "count what in a tenant's buckets is not under its keys"
 complete -c blindbucket -n '__blindbucket_using audit' -a verify -d "check a log's hash chain and checkpoint signatures"
 complete -c blindbucket -n '__blindbucket_using audit' -a pubkey -d 'print the public key a verifier needs'
 
@@ -220,6 +221,12 @@ complete -c blindbucket -n '__blindbucket_using tenants create' -l deployment-lo
 complete -c blindbucket -n '__blindbucket_using tenants create' -l kid -x -d "id of the tenant's first key"
 complete -c blindbucket -n '__blindbucket_using tenants activate' -l kid -x -d 'the key to activate'
 complete -c blindbucket -n '__blindbucket_using tenants list' -l json -d 'emit the tenant list as JSON'
+set c '__blindbucket_using tenants census'
+complete -c blindbucket -n $c -l concurrency -x -d 'objects to read at once'
+complete -c blindbucket -n $c -l config -r -F -d 'configuration file'
+complete -c blindbucket -n $c -l json -d 'emit the census as JSON'
+complete -c blindbucket -n $c -l passphrase-file -r -F -d 'read the keyring passphrase from this file'
+complete -c blindbucket -n $c -s v -d 'log at debug level'
 
 # audit verify and audit pubkey
 set c '__blindbucket_using audit verify'

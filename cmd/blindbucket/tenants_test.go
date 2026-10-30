@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LennardGeissler/blindbucket/internal/census"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 	"github.com/LennardGeissler/blindbucket/internal/testprovider"
 )
@@ -378,5 +379,48 @@ func TestBucketCommandsServeTheDefaultTenantsBuckets(t *testing.T) {
 		if _, _, err := runCLI(t, args...); err != nil {
 			t.Errorf("%s on the default tenant's bucket: %v", command[0], err)
 		}
+	}
+}
+
+// A census refuses what it cannot count meaningfully before it reaches the
+// provider: a tenant that is not active, one that was destroyed, one that
+// does not exist.
+func TestTenantsCensusRefusals(t *testing.T) {
+	path := setupKeyring(t, "2026-09")
+	addTenantDirectly(t, path, "acme", "acme-1", "acme-*")
+	f := openWhole(t, path)
+	f.Tombstones = []keys.Tombstone{{Name: "globex", Buckets: []string{"globex-*"}, KIDs: []string{"globex-1"},
+		Locks: []keys.Lock{{Source: keys.LockDeployment}}, Destroyed: time.Now().UTC()}}
+	data, err := f.Marshal([]byte(testPassphrase), keys.DefaultKDFParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	conf := bucketCommandConfig(t, path, "")
+	for tenant, want := range map[string]string{
+		"acme": "not active", "globex": "destroyed", "zeta": "no tenant",
+	} {
+		if _, _, err := runCLI(t, "tenants", "census", "--config", conf, tenant); err == nil ||
+			!strings.Contains(err.Error(), want) {
+			t.Errorf("census of %s: %v, want an error saying %q", tenant, err, want)
+		}
+	}
+}
+
+func TestMarshalCensusJSON(t *testing.T) {
+	data, err := marshalCensusJSON("acme", 4, &census.Result{Buckets: []*census.Bucket{
+		{Name: "acme-a", Scanned: 3, OnTenant: 2, OffTenant: 1, OffKIDs: map[string]int64{"2026-10": 1}},
+		{Name: "acme-gone", Missing: true, OffKIDs: map[string]int64{}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"tenant":"acme","generation":4,"off_tenant":1,"failed":0,"buckets":[` +
+		`{"bucket":"acme-a","missing":false,"scanned":3,"on_tenant":2,"off_tenant":1,"foreign":0,"failed":0,"off_kids":{"2026-10":1}},` +
+		`{"bucket":"acme-gone","missing":true,"scanned":0,"on_tenant":0,"off_tenant":0,"foreign":0,"failed":0,"off_kids":{}}]}` + "\n"
+	if string(data) != want {
+		t.Errorf("got\n%s\nwant\n%s", data, want)
 	}
 }

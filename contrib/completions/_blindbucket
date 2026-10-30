@@ -59,7 +59,8 @@ _blindbucket() {
             'create:add a tenant, inactive, with its keys, its lock and its buckets'
             'assign:give a tenant more buckets, for good'
             'activate:write a tenant'"'"'s buckets under its own keys from now on'
-            'list:show the tenants, their buckets, keys and locks') ;;
+            'list:show the tenants, their buckets, keys and locks'
+            'census:count what in a tenant'"'"'s buckets is not under its keys') ;;
           audit) subcommands=(
             "verify:check a log's hash chain and checkpoint signatures"
             'pubkey:print the public key a verifier needs') ;;
@@ -259,6 +260,15 @@ _blindbucket() {
         '--json[emit the tenant list as JSON]' \
         '--keyring[keyring file]:file:_files' \
         '--passphrase-file[read the keyring passphrase from this file]:file:_files'
+      ;;
+    'tenants census')
+      _arguments \
+        '--concurrency[objects to read at once]:count' \
+        '--config[configuration file]:file:_files' \
+        '--json[emit the census as JSON]' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        '-v[log at debug level]' \
+        ':tenant name'
       ;;
     'audit verify')
       _arguments \
