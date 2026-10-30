@@ -102,10 +102,14 @@ Flags:
 	if pass.file == "" {
 		pass.file = cfg.Keys.PassphraseFile
 	}
-	ring, err := loadServerKeyring(ctx, cfg, &pass)
+	served, bucketKeys, err := loadBucketKeyring(ctx, cfg, &pass, bucket)
 	if err != nil {
 		return err
 	}
+	if err := defaultTenantOnly("migrate-names", bucket, bucketKeys); err != nil {
+		return err
+	}
+	ring := served.Default()
 	nameEnc, err := nameEncrypterFrom(cfg, ring, "migrating names needs the name key")
 	if err != nil {
 		return err

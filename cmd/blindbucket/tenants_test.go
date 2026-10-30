@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
+	"github.com/LennardGeissler/blindbucket/internal/testprovider"
 )
 
 // A tenant under the deployment's lock is created, given buckets and
@@ -278,6 +281,87 @@ clients: [{ name: tester, access_key_id: TESTCLIENT, secret_access_key: s, bucke
 	} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("no log line containing %s in:\n%s", want, logs)
+		}
+	}
+}
+
+// bucketCommandConfig is a configuration for the commands that work on a
+// bucket, pointing at keyring, with keysYAML under keys. The provider is not
+// reached by the refusals tested with it.
+func bucketCommandConfig(t *testing.T, keyring, keysYAML string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "blindbucket.yaml")
+	body := fmt.Sprintf(`
+upstream: { endpoint: "http://127.0.0.1:1", region: us-east-1, access_key_id: a, secret_access_key: b }
+clients: [{ name: c, access_key_id: k, secret_access_key: s, buckets: ["*"] }]
+keys:
+  provider: file
+  keyring: %q
+%s
+`, keyring, keysYAML)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// The object commands open a keyring with tenants, and refuse a bucket whose
+// tenant is destroyed or does not open before they reach the provider.
+func TestBucketCommandsAndTenants(t *testing.T) {
+	path := setupKeyring(t, "2026-09")
+	addPassphraseTenant(t, path, "acme", "acme-1", "acme's passphrase", "acme-*")
+	f := openWhole(t, path)
+	f.Tombstones = []keys.Tombstone{{Name: "globex", Buckets: []string{"globex-*"}, KIDs: []string{"globex-1"},
+		Locks: []keys.Lock{{Source: keys.LockDeployment}}, Destroyed: time.Now().UTC()}}
+	data, err := f.Marshal([]byte(testPassphrase), keys.DefaultKDFParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	withAcme := bucketCommandConfig(t, path, fmt.Sprintf("  tenants:\n    acme: { provider: file, passphrase_file: %q }",
+		writePassphraseFile(t, "acme's passphrase")))
+	withoutAcme := bucketCommandConfig(t, path, "")
+
+	commands := [][]string{
+		{"rotate", "--dry-run"}, {"scrub"}, {"encrypt-existing", "--dry-run"}, {"migrate-names", "--dry-run"},
+	}
+	for _, c := range []struct {
+		name, conf, bucket, want string
+	}{
+		{"a destroyed tenant's bucket", withAcme, "globex-data", "destroyed"},
+		{"a tenant whose lock does not open", withoutAcme, "acme-data", "whose lock did not open"},
+		{"a tenant's bucket", withAcme, "acme-data", "does not serve a tenant's buckets yet"},
+	} {
+		for _, command := range commands {
+			t.Run(c.name+"/"+command[0], func(t *testing.T) {
+				args := append(append([]string{}, command...), "--config", c.conf, "s3://"+c.bucket)
+				_, _, err := runCLI(t, args...)
+				if err == nil || !strings.Contains(err.Error(), c.want) {
+					t.Fatalf("got %v, want an error saying %q", err, c.want)
+				}
+			})
+		}
+	}
+}
+
+// A keyring with tenants does not stop the object commands on the default
+// tenant's buckets.
+func TestBucketCommandsServeTheDefaultTenantsBuckets(t *testing.T) {
+	p := testprovider.Require(t)
+	path := setupKeyring(t, "2026-09")
+	addTenantDirectly(t, path, "acme", "acme-1", "acme-*")
+	cfg := providerConfig(t, p, path)
+	target := "s3://" + p.Bucket + "/" + testprovider.RunPrefix() + "default-tenant/"
+
+	for _, command := range [][]string{
+		{"rotate", "--dry-run", "--allow-unconditional"}, {"scrub"},
+		{"encrypt-existing", "--dry-run", "--allow-unconditional"}, {"migrate-names", "--dry-run", "--allow-unconditional"},
+	} {
+		args := append(append([]string{}, command...), "--config", cfg, target)
+		if _, _, err := runCLI(t, args...); err != nil {
+			t.Errorf("%s on the default tenant's bucket: %v", command[0], err)
 		}
 	}
 }

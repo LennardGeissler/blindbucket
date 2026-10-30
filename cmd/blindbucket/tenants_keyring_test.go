@@ -95,9 +95,9 @@ func TestATenantsKeyIDStaysItsOwn(t *testing.T) {
 	}
 }
 
-// Until the object commands route a bucket to its tenant, they must not open
-// a keyring with tenants at all.
-func TestObjectCommandsRefuseAKeyringWithTenants(t *testing.T) {
+// The commands that still open the default tenant alone must not open a
+// keyring with tenants at all.
+func TestDefaultOnlyCommandsRefuseAKeyringWithTenants(t *testing.T) {
 	path := setupKeyring(t, "2026-09")
 	addTenantDirectly(t, path, "acme", "acme-1", "acme-*")
 	in := filepath.Join(t.TempDir(), "plain")

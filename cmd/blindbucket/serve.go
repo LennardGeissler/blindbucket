@@ -660,13 +660,6 @@ func openServedKeyring(
 	return keys.NewServed(f), nil
 }
 
-// loadServerKeyring opens the default tenant for the commands that read and
-// write objects, and refuses a keyring with tenants until they route a bucket
-// to its tenant's keys.
-func loadServerKeyring(ctx context.Context, cfg *config.Config, pass *passphraseFlags) (*keys.Keyring, error) {
-	return openKeyring(ctx, cfg.Keys.Keyring, cfg.Keys, pass)
-}
-
 // probeBucket picks a bucket for the readiness check to look at.
 //
 // There is no "the" bucket in the configuration -- a client names one per

@@ -94,10 +94,14 @@ Flags:
 	if pass.file == "" {
 		pass.file = cfg.Keys.PassphraseFile
 	}
-	ring, err := loadServerKeyring(ctx, cfg, &pass)
+	served, bucketKeys, err := loadBucketKeyring(ctx, cfg, &pass, bucket)
 	if err != nil {
 		return err
 	}
+	if err := defaultTenantOnly("encrypt-existing", bucket, bucketKeys); err != nil {
+		return err
+	}
+	ring := served.Default()
 	var nameEnc *names.Encrypter
 	if cfg.Names.Encrypt {
 		nameEnc, err = nameEncrypterFrom(cfg, ring, "encrypting objects under encrypted names needs the name key")
