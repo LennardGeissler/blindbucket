@@ -301,7 +301,7 @@ func buildKeyringVector(t *testing.T, c keyringCase) keyringVector {
 	if c.refused != "" {
 		return v
 	}
-	opened, err := OpenKeyringV2(data, root, rootsFunc(c.roots))
+	opened, err := OpenFile(data, root, rootsFunc(c.roots))
 	if err != nil {
 		t.Fatalf("%s: %v", c.name, err)
 	}
@@ -309,10 +309,10 @@ func buildKeyringVector(t *testing.T, c keyringCase) keyringVector {
 	return v
 }
 
-func rootsFunc(roots map[string][]byte) func(string, Lock) ([]byte, error) {
-	return func(name string, _ Lock) ([]byte, error) {
+func rootsFunc(roots map[string][]byte) TenantRootFunc {
+	return func(name string, _ RootKeyRef, _ *KDFParams) ([]byte, error) {
 		if r, ok := roots[name]; ok {
-			return r, nil
+			return bytes.Clone(r), nil
 		}
 		return nil, fmt.Errorf("no root key for %q", name)
 	}
@@ -330,19 +330,22 @@ func describeRing(r *Keyring) openedTenant {
 	return out
 }
 
-func describe(k *KeyringV2) *keyringOpened {
+func describe(k *File) *keyringOpened {
 	out := &keyringOpened{
 		Default: describeRing(k.Default), Tenants: map[string]openedTenant{},
-		Unopened: slices.Sorted(maps.Keys(k.Unopened)), Buckets: map[string]bucketOwner{},
+		Unopened: []string{}, Buckets: map[string]bucketOwner{},
 	}
-	if out.Unopened == nil {
-		out.Unopened = []string{}
+	for _, t := range k.Tenants {
+		if t.Ring == nil {
+			out.Unopened = append(out.Unopened, t.Name)
+			continue
+		}
+		out.Tenants[t.Name] = describeRing(t.Ring)
 	}
-	for name, r := range k.Tenants {
-		out.Tenants[name] = describeRing(r)
-	}
+	slices.Sort(out.Unopened)
+	dir := k.Directory()
 	for _, b := range vectorBuckets {
-		name, destroyed := k.Directory.Tenant(b)
+		name, destroyed := dir.Tenant(b)
 		out.Buckets[b] = bucketOwner{Tenant: name, Destroyed: destroyed}
 	}
 	return out
@@ -387,7 +390,7 @@ func TestKeyringV2Vectors(t *testing.T) {
 			for name, h := range v.TenantRoots {
 				roots[name], _ = hex.DecodeString(h)
 			}
-			opened, err := OpenKeyringV2([]byte(v.File), root, rootsFunc(roots))
+			opened, err := OpenFile([]byte(v.File), root, rootsFunc(roots))
 			if v.Refused != "" {
 				if err == nil {
 					t.Fatalf("opened a file that breaks %q", v.Refused)

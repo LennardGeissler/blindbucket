@@ -279,6 +279,13 @@ func (p KDFParams) validate() error {
 	return nil
 }
 
+// DeriveRootKey stretches a passphrase into a root key under these
+// parameters, as read from a keyring file: for a tenant sealed by a passphrase,
+// the parameters its section records (FORMAT.md section 18.4).
+func (p KDFParams) DeriveRootKey(passphrase []byte) ([]byte, error) {
+	return p.deriveRootKey(passphrase)
+}
+
 // deriveRootKey stretches a passphrase into the key that wraps the KEKs.
 func (p KDFParams) deriveRootKey(passphrase []byte) ([]byte, error) {
 	if err := p.validate(); err != nil {
@@ -530,15 +537,16 @@ func sealAudit(rootKey []byte, key *AuditKey) (*auditEntry, error) {
 	}, nil
 }
 
-// parseKeyringFile decodes and version-checks a keyring file.
+// parseKeyringFile decodes and version-checks a keyring file, of either
+// version: the fields of version 1 are the default tenant's in both.
 func parseKeyringFile(data []byte) (keyringFile, error) {
 	var file keyringFile
 	if err := json.Unmarshal(data, &file); err != nil {
 		return keyringFile{}, fmt.Errorf("keys: keyring is not valid JSON: %w", err)
 	}
-	if file.Version != keyringVersion {
-		return keyringFile{}, fmt.Errorf("keys: keyring version %d, this build supports %d",
-			file.Version, keyringVersion)
+	if file.Version != keyringVersion && file.Version != keyringVersion2 {
+		return keyringFile{}, fmt.Errorf("keys: keyring version %d, this build supports %d and %d",
+			file.Version, keyringVersion, keyringVersion2)
 	}
 	if len(file.Keys) == 0 {
 		return keyringFile{}, fmt.Errorf("keys: keyring contains no keys")
@@ -554,6 +562,9 @@ func LoadKeyring(data, passphrase []byte) (*Keyring, error) {
 	file, err := parseKeyringFile(data)
 	if err != nil {
 		return nil, err
+	}
+	if file.Version != keyringVersion {
+		return nil, ErrKeyringHasTenants
 	}
 	if src := file.RootKey.Source; src != "" && src != SourcePassphrase {
 		return nil, fmt.Errorf(
@@ -580,6 +591,9 @@ func LoadKeyringWithRootKey(data, rootKey []byte) (*Keyring, error) {
 	file, err := parseKeyringFile(data)
 	if err != nil {
 		return nil, err
+	}
+	if file.Version != keyringVersion {
+		return nil, ErrKeyringHasTenants
 	}
 	if len(rootKey) != KeySize {
 		return nil, fmt.Errorf("keys: root key is %d bytes, want %d", len(rootKey), KeySize)

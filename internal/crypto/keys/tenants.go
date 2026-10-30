@@ -11,12 +11,8 @@ import (
 )
 
 // Version 2 of the keyring file: tenants (docs/FORMAT.md section 18,
-// docs/adr/ADR-038-tenants-and-crypto-shredding.md).
-//
-// Nothing outside this package uses it yet. LoadKeyring still refuses a version
-// 2 file, and has to until the gateway routes a bucket's writes to its tenant: a
-// reader that opened the default tenant and ignored the rest would wrap the
-// tenants' buckets under the default tenant's keys.
+// docs/adr/ADR-038-tenants-and-crypto-shredding.md). File, in file.go, opens
+// and writes it.
 
 const (
 	keyringVersion2 = 2
@@ -160,14 +156,21 @@ func overlap(a, b string) bool {
 	}
 }
 
-// validTenantName applies the key id's shape (FORMAT.md section 3.1), and
+// ValidateTenantName applies the key id's shape (FORMAT.md section 3.1), and
 // keeps the default tenant's name for the default tenant.
-func validTenantName(name string) error {
+func ValidateTenantName(name string) error {
 	if name == DefaultTenant {
-		return fmt.Errorf("%w: %q names the default tenant", ErrKeyringMalformed, name)
+		return fmt.Errorf("keys: %q names the default tenant, which every bucket no tenant claims belongs to", name)
 	}
 	if err := ValidateKID(name); err != nil {
-		return fmt.Errorf("%w: tenant name %q: %w", ErrKeyringMalformed, name, err)
+		return fmt.Errorf("keys: tenant name %q: %w", name, err)
+	}
+	return nil
+}
+
+func validTenantName(name string) error {
+	if err := ValidateTenantName(name); err != nil {
+		return fmt.Errorf("%w: %w", ErrKeyringMalformed, err)
 	}
 	return nil
 }
@@ -360,182 +363,4 @@ func writeV2(base keyringFile, rootKey []byte, sections []tenantSection, dir Dir
 		return nil, err
 	}
 	return append(out, '\n'), nil
-}
-
-// KeyringV2 is an opened version 2 keyring.
-type KeyringV2 struct {
-	// Default is the default tenant, with the deployment's audit and
-	// freshness keys, exactly as a version 1 file would open.
-	Default   *Keyring
-	Directory Directory
-	// Tenants holds each opened tenant's KEKs, active key and name key.
-	Tenants map[string]*Keyring
-	// Unopened holds, for each tenant that did not open, why. Its keys are
-	// never used and its buckets are refused.
-	Unopened map[string]error
-}
-
-// OpenKeyringV2 opens a version 2 file with the deployment's root key, and
-// each tenant with the root key tenantRoot returns for it. A tenant under the
-// deployment's lock uses the deployment's root key; one for which tenantRoot
-// returns an error, or whose section does not open, is unopened rather than
-// fatal (FORMAT.md section 18.6).
-func OpenKeyringV2(data, rootKey []byte, tenantRoot func(name string, l Lock) ([]byte, error)) (*KeyringV2, error) {
-	var file keyringFileV2
-	if err := json.Unmarshal(data, &file); err != nil {
-		return nil, fmt.Errorf("keys: keyring is not valid JSON: %w", err)
-	}
-	if file.Version != keyringVersion2 {
-		return nil, fmt.Errorf("keys: keyring version %d, want %d", file.Version, keyringVersion2)
-	}
-	if len(file.Keys) == 0 {
-		return nil, fmt.Errorf("keys: keyring contains no keys")
-	}
-	if len(rootKey) != KeySize {
-		return nil, fmt.Errorf("keys: root key is %d bytes, want %d", len(rootKey), KeySize)
-	}
-	def, err := openKeyring(file.keyringFile, rootKey, "the root key does not open this keyring")
-	if err != nil {
-		return nil, err
-	}
-
-	if file.Directory == "" {
-		return nil, fmt.Errorf("%w: no directory", ErrKeyringMalformed)
-	}
-	wrapped, err := base64.StdEncoding.DecodeString(file.Directory)
-	if err != nil {
-		return nil, fmt.Errorf("%w: the directory is not valid base64", ErrKeyringMalformed)
-	}
-	plain, err := openKey(rootKey, wrapped, []byte(aadDirectory))
-	if err != nil {
-		return nil, fmt.Errorf("%w: the directory does not open: %w", ErrKeyringMalformed, err)
-	}
-	var dir Directory
-	if err := json.Unmarshal(plain, &dir); err != nil {
-		return nil, fmt.Errorf("%w: the directory is not valid JSON: %w", ErrKeyringMalformed, err)
-	}
-	if dir.Generation != file.Generation {
-		return nil, fmt.Errorf("%w: generation %d in the directory, %d in the file",
-			ErrKeyringMalformed, dir.Generation, file.Generation)
-	}
-	if err := dir.validate(def.KIDs()); err != nil {
-		return nil, err
-	}
-
-	sections := map[string]tenantSection{}
-	for _, s := range file.Tenants {
-		if _, dup := sections[s.Name]; dup {
-			return nil, fmt.Errorf("%w: two sections for tenant %q", ErrKeyringMalformed, s.Name)
-		}
-		sections[s.Name] = s
-	}
-	if len(sections) != len(dir.Tenants) {
-		return nil, fmt.Errorf("%w: %d tenants in the directory, %d sections",
-			ErrKeyringMalformed, len(dir.Tenants), len(sections))
-	}
-	for _, t := range dir.Tenants {
-		s, ok := sections[t.Name]
-		if !ok {
-			return nil, fmt.Errorf("%w: no section for tenant %q", ErrKeyringMalformed, t.Name)
-		}
-		var have []string
-		for _, e := range s.Keys {
-			have = append(have, e.KID)
-		}
-		slices.Sort(have)
-		want := slices.Sorted(slices.Values(t.KIDs))
-		if !slices.Equal(have, want) {
-			return nil, fmt.Errorf("%w: tenant %q's section holds keys %v, the directory lists %v",
-				ErrKeyringMalformed, t.Name, have, want)
-		}
-		if s.NameKey == nil {
-			return nil, fmt.Errorf("%w: tenant %q's section has no name key", ErrKeyringMalformed, t.Name)
-		}
-		if !s.matchesLock(t.Locks[len(t.Locks)-1]) {
-			return nil, fmt.Errorf("%w: tenant %q's section is not sealed by its recorded lock",
-				ErrKeyringMalformed, t.Name)
-		}
-	}
-
-	out := &KeyringV2{Default: def, Directory: dir, Tenants: map[string]*Keyring{}, Unopened: map[string]error{}}
-	for _, t := range dir.Tenants {
-		lock := t.Locks[len(t.Locks)-1]
-		var (
-			troot []byte
-			err   error
-		)
-		switch {
-		case lock.Source == LockDeployment:
-			troot = rootKey
-		case tenantRoot == nil:
-			out.Unopened[t.Name] = fmt.Errorf("keys: tenant %q: no root key for its lock", t.Name)
-			continue
-		default:
-			troot, err = tenantRoot(t.Name, lock)
-		}
-		if err != nil {
-			out.Unopened[t.Name] = err
-			continue
-		}
-		ring, err := openSection(sections[t.Name], t.ActiveKID, troot)
-		if err != nil {
-			out.Unopened[t.Name] = err
-			continue
-		}
-		out.Tenants[t.Name] = ring
-	}
-	return out, nil
-}
-
-func openSection(s tenantSection, active string, rootKey []byte) (*Keyring, error) {
-	if len(rootKey) != KeySize {
-		return nil, fmt.Errorf("keys: tenant %q: root key is %d bytes, want %d", s.Name, len(rootKey), KeySize)
-	}
-	ring := NewKeyring()
-	for _, e := range s.Keys {
-		aad, err := tenantKEKAAD(s.Name, e.KID)
-		if err != nil {
-			return nil, err
-		}
-		wrapped, err := base64.StdEncoding.DecodeString(e.Wrapped)
-		if err != nil {
-			return nil, fmt.Errorf("keys: tenant %q: key %q is not valid base64", s.Name, e.KID)
-		}
-		kek, err := openKey(rootKey, wrapped, aad)
-		if err != nil {
-			return nil, fmt.Errorf("keys: tenant %q: %w", s.Name, err)
-		}
-		err = ring.Add(e.KID, kek)
-		clear(kek)
-		if err != nil {
-			return nil, err
-		}
-		if e.Created.IsZero() {
-			delete(ring.created, e.KID)
-		} else {
-			ring.created[e.KID] = e.Created
-		}
-	}
-	// Add made the first key active; a tenant is active only as the
-	// directory says.
-	ring.active = active
-	aad, err := tenantNameAAD(s.Name)
-	if err != nil {
-		return nil, err
-	}
-	wrapped, err := base64.StdEncoding.DecodeString(s.NameKey.Wrapped)
-	if err != nil {
-		return nil, fmt.Errorf("keys: tenant %q: the name key is not valid base64", s.Name)
-	}
-	secret, err := openKey(rootKey, wrapped, aad)
-	if err != nil {
-		return nil, fmt.Errorf("keys: tenant %q: the name key: %w", s.Name, err)
-	}
-	defer clear(secret)
-	name, err := NameKeyFromSecret(secret)
-	if err != nil {
-		return nil, err
-	}
-	ring.name = name
-	return ring, nil
 }

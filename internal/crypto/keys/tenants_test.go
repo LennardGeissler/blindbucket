@@ -72,17 +72,17 @@ func TestAnUnopenedTenantLeavesTheOthersOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opened, err := OpenKeyringV2(data, root, func(string, Lock) ([]byte, error) {
+	opened, err := OpenFile(data, root, func(string, RootKeyRef, *KDFParams) ([]byte, error) {
 		return nil, errors.New("the key service is down")
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := opened.Unopened["a-locked"]; !ok {
+	if opened.Tenant("a-locked").Ring != nil {
 		t.Error("a-locked opened without its root key")
 	}
-	if _, ok := opened.Tenants["b-shared"]; !ok {
-		t.Errorf("b-shared, under the deployment's lock, did not open: %v", opened.Unopened["b-shared"])
+	if b := opened.Tenant("b-shared"); b.Ring == nil {
+		t.Errorf("b-shared, under the deployment's lock, did not open: %v", b.Err)
 	}
 }
 
@@ -96,8 +96,8 @@ func TestLoadKeyringRefusesVersion2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadKeyringWithRootKey(data, root); err == nil {
-		t.Fatal("LoadKeyringWithRootKey opened a version 2 keyring")
+	if _, err := LoadKeyringWithRootKey(data, root); !errors.Is(err, ErrKeyringHasTenants) {
+		t.Fatalf("LoadKeyringWithRootKey on a version 2 keyring: %v, want ErrKeyringHasTenants", err)
 	}
 }
 
