@@ -26,10 +26,9 @@ version 1 would keep being readable.
   tenants with keys of their own under a lock of their own, configured in `keys.tenants`,
   and gives them buckets; `reseal --tenant` moves a tenant to another lock and keeps the
   old one in its history. `keygen`, `keys remove` and `reseal` keep a keyring's tenants,
-  and `keys list` gains a `TENANT` column and `tenant` and `opened` in `--json`. The
-  object commands (`rotate`, `scrub`, `encrypt-existing`, `migrate-names`) do not serve
-  tenants yet and refuse such a keyring by name
-  ([#133](https://github.com/LennardGeissler/blindbucket/issues/133)).
+  and `keys list` gains a `TENANT` column and `tenant` and `opened` in `--json`.
+  `encrypt`, `decrypt`, `doctor` and `audit` do not open such a keyring yet and refuse it
+  by name ([#133](https://github.com/LennardGeissler/blindbucket/issues/133)).
 - **The gateway serves tenants.** Writes to an active tenant's buckets wrap under its
   keys and, with `names.encrypt`, map names under its name key; an inactive tenant's
   buckets behave as the default tenant's, and reads go by the key each object names. A
@@ -37,6 +36,13 @@ version 1 would keep being readable.
   ServiceUnavailable`, reads included, while every other bucket is served.
   `blindbucket_keyring_generation` and `blindbucket_tenant_open{tenant}` show what each
   instance loaded, which is what a rollout waits for.
+- **The bucket commands serve tenants, and `tenants census` counts what a destruction
+  would miss.** `rotate`, `scrub`, `encrypt-existing` and `migrate-names` open only the
+  target bucket's tenant and use its keys and name key; `rotate` refuses a key of
+  another tenant, and it and `scrub` report objects off the bucket's tenant's keys as
+  `off_tenant`. `migrate-names` moves an active tenant's bucket from the default name
+  key to the tenant's. `tenants census` counts, per bucket of a tenant, the objects not
+  under its keys, which is the first step of a destruction.
 
 ### Fixed
 
