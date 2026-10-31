@@ -13,6 +13,21 @@ keys:
     keyId: alias/blindbucket
     credentialsSecret: blindbucket-kms
     encryptionContext: { deployment: prod-eu }
+  tenants:
+    acme:
+      provider: awskms
+      awskms:
+        region: eu-central-1
+        keyId: alias/bb-acme
+        credentialsSecret: bb-acme-kms
+        sessionToken: true
+        encryptionContext: { tenant: acme }
+    beta:
+      provider: vault
+      vault: { address: "https://vault:8200", keyName: bb-beta, tokenSecret: bb-beta-vault }
+    gamma:
+      provider: file
+      passphraseSecret: bb-gamma-passphrase
 clients:
   - { name: backup-job, existingSecret: backup-job-s3, buckets: [backups] }
   - { name: reports, existingSecret: reports-s3, buckets: ["*"] }

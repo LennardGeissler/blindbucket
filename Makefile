@@ -184,6 +184,19 @@ chart: ## Lint, render and validate the Helm chart.
 		--set server.presign.uploads.maxSize=100MiB >/dev/null 2>&1 \
 		|| { echo "the chart rendered presigned uploads with requireSignedPayload"; exit 1; }
 	@echo "renders the dashboard, CORS and uploads, and refuses uploads with signed bodies only: ok"
+	@# Each tenant's lock, with its secret from the Secret the values name.
+	@grep -q 'passphrase_file: /etc/blindbucket/tenants/gamma/passphrase' bin/chart.yaml \
+		&& grep -q 'token: $${TENANT_1_VAULT_TOKEN}' bin/chart.yaml \
+		&& grep -q 'name: TENANT_0_KMS_SESSION_TOKEN' bin/chart.yaml \
+		&& grep -q 'secretName: "bb-gamma-passphrase"' bin/chart.yaml \
+		|| { echo "the tenants' locks did not render"; exit 1; }
+	@! $(HELM) template bb blindbucket -f blindbucket/ci/full-values.yaml \
+		--set keys.tenants.gamma.passphraseSecret= >/dev/null 2>&1 \
+		|| { echo "the chart rendered a tenant without its Secret"; exit 1; }
+	@! $(HELM) template bb blindbucket -f blindbucket/ci/full-values.yaml \
+		--set keys.tenants.default.provider=file --set keys.tenants.default.passphraseSecret=x >/dev/null 2>&1 \
+		|| { echo "the chart rendered an entry for the default tenant"; exit 1; }
+	@echo "renders each tenant's lock, and refuses one without its Secret or named default: ok"
 
 .PHONY: app-nextcloud
 app-nextcloud: ## Run Nextcloud through the gateway (test/apps/nextcloud, M12).

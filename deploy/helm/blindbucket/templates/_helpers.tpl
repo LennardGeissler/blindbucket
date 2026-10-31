@@ -69,6 +69,35 @@ the cluster network, which is the one outcome this chart exists to prevent.
 {{- else -}}
 {{- fail (printf "keys.provider must be file, vault or awskms, not %q" $p) -}}
 {{- end -}}
+{{- range $name, $t := .Values.keys.tenants -}}
+{{- if eq $name "default" -}}
+{{- fail "keys.tenants.default: the default tenant is sealed by keys itself and takes no entry" -}}
+{{- end -}}
+{{- $v := $t.vault | default dict -}}
+{{- $k := $t.awskms | default dict -}}
+{{- if eq $t.provider "file" -}}
+{{- if not $t.passphraseSecret -}}
+{{- fail (printf "keys.tenants.%s.passphraseSecret is required with provider file" $name) -}}
+{{- end -}}
+{{- else if eq $t.provider "vault" -}}
+{{- if or (not $v.address) (not $v.keyName) (not $v.tokenSecret) -}}
+{{- fail (printf "keys.tenants.%s.vault needs address, keyName and tokenSecret" $name) -}}
+{{- end -}}
+{{- else if eq $t.provider "awskms" -}}
+{{- if or (not $k.region) (not $k.keyId) -}}
+{{- fail (printf "keys.tenants.%s.awskms needs region and keyId" $name) -}}
+{{- end -}}
+{{- $src := $k.credentialSource | default "static" -}}
+{{- if not (has $src $sources) -}}
+{{- fail (printf "keys.tenants.%s.awskms.credentialSource must be one of %s, not %q" $name (join ", " $sources) $src) -}}
+{{- end -}}
+{{- if and (eq $src "static") (not $k.credentialsSecret) -}}
+{{- fail (printf "keys.tenants.%s.awskms.credentialsSecret is required with credentialSource static" $name) -}}
+{{- end -}}
+{{- else -}}
+{{- fail (printf "keys.tenants.%s.provider must be file, vault or awskms, not %q" $name $t.provider) -}}
+{{- end -}}
+{{- end -}}
 {{- if not .Values.clients -}}
 {{- fail "clients must name at least one client: without one, every request is refused" -}}
 {{- end -}}

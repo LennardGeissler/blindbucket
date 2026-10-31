@@ -91,6 +91,42 @@ data:
           {{- toYaml . | nindent 10 }}
         {{- end }}
       {{- end }}
+      {{- if .Values.keys.tenants }}
+      tenants:
+        {{- range $i, $name := keys .Values.keys.tenants | sortAlpha }}
+        {{- $t := index $.Values.keys.tenants $name }}
+        {{ $name }}:
+          provider: {{ $t.provider }}
+          {{- if eq $t.provider "file" }}
+          passphrase_file: /etc/blindbucket/tenants/{{ $name }}/passphrase
+          {{- else if eq $t.provider "vault" }}
+          vault:
+            address: {{ $t.vault.address | quote }}
+            token: ${TENANT_{{ $i }}_VAULT_TOKEN}
+            mount: {{ $t.vault.mount | default "transit" | quote }}
+            key_name: {{ $t.vault.keyName | quote }}
+            namespace: {{ $t.vault.namespace | default "" | quote }}
+          {{- else if eq $t.provider "awskms" }}
+          awskms:
+            region: {{ $t.awskms.region | quote }}
+            key_id: {{ $t.awskms.keyId | quote }}
+            {{- if eq ($t.awskms.credentialSource | default "static") "static" }}
+            access_key_id: ${TENANT_{{ $i }}_KMS_ACCESS_KEY_ID}
+            secret_access_key: ${TENANT_{{ $i }}_KMS_SECRET_ACCESS_KEY}
+            {{- if $t.awskms.sessionToken }}
+            session_token: ${TENANT_{{ $i }}_KMS_SESSION_TOKEN}
+            {{- end }}
+            {{- else }}
+            credential_source: {{ $t.awskms.credentialSource }}
+            {{- end }}
+            endpoint: {{ $t.awskms.endpoint | default "" | quote }}
+            {{- with $t.awskms.encryptionContext }}
+            encryption_context:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
 
     crypto:
       log2_chunk_size: {{ .Values.crypto.log2ChunkSize }}
