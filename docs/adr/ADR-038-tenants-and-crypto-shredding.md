@@ -124,7 +124,12 @@ default tenant.
   chain and the checkpoints still verify: they cover what is stored, not the
   plaintext. The audit secret stays deployment-wide. *Amended while writing FORMAT
   §14.5: a `tenant` field in clear, as first planned, would have changed the
-  entry's hash and every verifier with it.*
+  entry's hash and every verifier with it. Amended again while writing the audit
+  side: a tenant's entries use its key from when an instance opens it, active or
+  not, since a reader tries every key and nothing needs instances to agree. An
+  entry about a bucket whose tenant the instance does not hold, destroyed or not
+  opened, records its names as digests under the audit secret: encrypted under it,
+  they would outlive the destruction.*
 - **A destroyed tenant's buckets are refused**, reads and writes, with
   `403 AccessDenied` and a message naming the destruction. They do not fall back to
   the default tenant. Without that, the first write after a destruction would store
