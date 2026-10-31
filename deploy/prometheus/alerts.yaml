@@ -115,3 +115,39 @@ groups:
             The oldest key in the keyring was created {{ $value | humanizeDuration }}
             ago. Add a new key, run `blindbucket rotate`, then
             `blindbucket keys remove` the old one.
+
+      # A tenant's keys did not open on this instance (ADR-038): it answers 503
+      # for the tenant's buckets, reads included, until a restart opens them.
+      # The instance's log says why, and `blindbucket doctor` checks the same
+      # before a restart.
+      - alert: BlindbucketTenantNotOpen
+        expr: blindbucket_tenant_open == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }}: tenant {{ $labels.tenant }} did not open"
+          description: >-
+            Tenant {{ $labels.tenant }}'s keys did not open on this instance, so
+            it answers 503 for every one of the tenant's buckets. Check
+            keys.tenants.{{ $labels.tenant }} and its credentials; the tenant
+            opens at the next restart.
+
+      # The instances of a job serve different keyring generations: a rollout
+      # that has not ended. A tenant's activation, its census and the
+      # destruction of its locks each wait until every instance serves the
+      # generation before (ADR-038), so one left unfinished blocks them.
+      - alert: BlindbucketKeyringGenerationSkew
+        expr: |
+          max by (job) (blindbucket_keyring_generation)
+            != min by (job) (blindbucket_keyring_generation)
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }}: instances serve different keyring generations"
+          description: >-
+            The instances of {{ $labels.job }} have not served one keyring
+            generation for 30 minutes; the newest is {{ $value }}. Restart those
+            behind. Until they are, do not activate a tenant, take its census or
+            destroy its locks.
