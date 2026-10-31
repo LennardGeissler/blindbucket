@@ -36,7 +36,7 @@ func (c *cryptFlags) register(fs *flag.FlagSet) {
 
 // loadKeyring opens the keyring these commands were pointed at.
 //
-// It goes through openKeyring, as keys list, rotate and serve do, so a keyring
+// It goes through openFile, as keys list and rotate do, so a keyring
 // sealed by Vault Transit or AWS KMS opens here too. Until #46 this called
 // keys.LoadKeyring directly with a passphrase, which made the offline commands
 // unusable for an operator who had moved their root key to a service: there was
@@ -45,7 +45,12 @@ func (c *cryptFlags) register(fs *flag.FlagSet) {
 // The passphrase path is unchanged and still the default. Without --config,
 // keysConfig yields the file provider, which is exactly what a passphrase
 // keyring needs.
-func (c *cryptFlags) loadKeyring(ctx context.Context) (*keys.Keyring, error) {
+//
+// With tenants (ADR-038) the file opens whole, with every tenant --config's
+// keys.tenants can open without a prompt. encrypt wraps under the default
+// tenant's active key, as there is no bucket to choose another by; decrypt
+// finds the key a file names in whichever tenant holds it.
+func (c *cryptFlags) loadKeyring(ctx context.Context) (keys.KeyProvider, error) {
 	defer c.pass.wipe()
 	if c.keyring == "" {
 		return nil, errors.New("--keyring is required")
@@ -58,9 +63,9 @@ func (c *cryptFlags) loadKeyring(ctx context.Context) (*keys.Keyring, error) {
 	if err != nil {
 		return nil, err
 	}
-	// warnIfExposed is openKeyringFile's job now; calling it here as well would
-	// warn twice about the same file.
-	ring, err := openKeyring(ctx, c.keyring, cfg, &c.pass)
+	// warnIfExposed is openFile's job; calling it here as well would warn
+	// twice about the same file.
+	f, _, err := openFile(ctx, c.keyring, cfg, &c.pass, openTenants(ctx, cfg))
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +78,29 @@ func (c *cryptFlags) loadKeyring(ctx context.Context) (*keys.Keyring, error) {
 	// it happens once, before any data moves.
 	debug.FreeOSMemory()
 
-	return ring, nil
+	return fileKeys{Served: keys.NewServed(f), file: f}, nil
+}
+
+// fileKeys serves a whole keyring file to encrypt and decrypt, and says whose
+// a key is when a file names one this process does not hold.
+type fileKeys struct {
+	*keys.Served
+	file *keys.File
+}
+
+// Unwrap implements keys.KeyProvider.
+func (k fileKeys) Unwrap(ctx context.Context, kid string, wrapped, aad []byte) ([]byte, error) {
+	dek, err := k.Served.Unwrap(ctx, kid, wrapped, aad)
+	if errors.Is(err, keys.ErrUnknownKID) {
+		if owner, ok := k.file.KIDOwner(kid); ok {
+			if t := k.file.Tenant(owner); t != nil {
+				return nil, fmt.Errorf("%w: %q is tenant %s's, which did not open here (%v); "+
+					"--config's keys.tenants.%s names its lock", err, kid, owner, t.Err, owner)
+			}
+			return nil, fmt.Errorf("%w: %q was tenant %s's, which is destroyed", err, kid, owner)
+		}
+	}
+	return dek, err
 }
 
 // requireConfigForAService refuses a service-sealed keyring with no --config,
@@ -82,13 +109,13 @@ func (c *cryptFlags) loadKeyring(ctx context.Context) (*keys.Keyring, error) {
 // Without it the operator in #46 is told `keys.provider is "file"`, which is
 // true -- that is the default keysConfig returns -- and names neither the
 // provider the keyring actually needs nor the flag that would supply it. These
-// two commands are the only ones that can reach openKeyring with no
+// two commands are the only ones that can reach openFile with no
 // configuration behind them, which is why the check sits here rather than in
-// unlockKeyring, where it would be dead code for every other caller.
+// unlock, where it would be dead code for every other caller.
 //
 // The file is read a second time to do this. That is one small read once per
 // invocation, before any data moves, and it buys an error the operator can act
-// on; anything cheaper would mean threading the bytes through openKeyring's
+// on; anything cheaper would mean threading the bytes through openFile's
 // signature for this one caller.
 func (c *cryptFlags) requireConfigForAService() error {
 	if c.conf != "" {
@@ -100,7 +127,7 @@ func (c *cryptFlags) requireConfigForAService() error {
 	}
 	ref, err := keys.ReadRootKeyRef(data)
 	if err != nil {
-		// Not a keyring this build can read. openKeyring says so in the words
+		// Not a keyring this build can read. openFile says so in the words
 		// every other command uses, so let it.
 		return nil //nolint:nilerr // deliberate: the better message is downstream.
 	}

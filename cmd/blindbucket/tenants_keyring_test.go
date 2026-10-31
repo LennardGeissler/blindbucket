@@ -1,14 +1,16 @@
 package main
 
 import (
-	"errors"
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/LennardGeissler/blindbucket/internal/crypto/envelope"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 )
 
@@ -95,18 +97,69 @@ func TestATenantsKeyIDStaysItsOwn(t *testing.T) {
 	}
 }
 
-// The commands that still open the default tenant alone must not open a
-// keyring with tenants at all.
-func TestDefaultOnlyCommandsRefuseAKeyringWithTenants(t *testing.T) {
+// encrypt and decrypt open a keyring with tenants: encrypt under the default
+// tenant's key, decrypt under whichever tenant holds the key a file names,
+// and say whose a key is that did not open or was destroyed.
+func TestCryptWithTenants(t *testing.T) {
 	path := setupKeyring(t, "2026-09")
-	addTenantDirectly(t, path, "acme", "acme-1", "acme-*")
-	in := filepath.Join(t.TempDir(), "plain")
-	if err := os.WriteFile(in, []byte("x"), 0o600); err != nil {
+	addPassphraseTenant(t, path, "acme", "acme-1", "acme's passphrase", "acme-*")
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "plain")
+	if err := os.WriteFile(plain, []byte("a ledger"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := runCLI(t, "encrypt", "--keyring", path, "-i", in, "-o", in+".bb")
-	if !errors.Is(err, keys.ErrKeyringHasTenants) {
-		t.Errorf("encrypt with a keyring with tenants: %v, want ErrKeyringHasTenants", err)
+
+	if _, _, err := runCLI(t, "encrypt", "--keyring", path, "-i", plain, "-o", plain+".bb"); err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	if _, _, err := runCLI(t, "decrypt", "--keyring", path, "-i", plain+".bb", "-o", plain+".out"); err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	if got, _ := os.ReadFile(plain + ".out"); string(got) != "a ledger" { //nolint:gosec // a test's own file.
+		t.Errorf("round trip: %q", got)
+	}
+
+	// A file under acme's key, as an object in acme's bucket would be.
+	f := openWithTenantPassphrase(t, path, "acme's passphrase")
+	if err := f.Activate("acme", ""); err != nil {
+		t.Fatal(err)
+	}
+	var sealed bytes.Buffer
+	if err := envelope.Encrypt(t.Context(), &sealed, strings.NewReader("acme's ledger"),
+		f.Tenant("acme").Ring, 16); err != nil {
+		t.Fatal(err)
+	}
+	acmeFile := filepath.Join(dir, "acme.bb")
+	if err := os.WriteFile(acmeFile, sealed.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := runCLI(t, "decrypt", "--keyring", path, "-i", acmeFile, "-o", acmeFile+".out")
+	if err == nil || !strings.Contains(err.Error(), "tenant acme's, which did not open here") {
+		t.Errorf("decrypt without acme's lock: %v", err)
+	}
+	conf := tenantPassphraseConfig(t, "acme", writePassphraseFile(t, "acme's passphrase"))
+	if _, _, err := runCLI(t, "decrypt", "--keyring", path, "--config", conf,
+		"-i", acmeFile, "-o", acmeFile+".out"); err != nil {
+		t.Fatalf("decrypt with acme's lock: %v", err)
+	}
+	if got, _ := os.ReadFile(acmeFile + ".out"); string(got) != "acme's ledger" { //nolint:gosec // a test's own file.
+		t.Errorf("acme's file decrypted to %q", got)
+	}
+
+	if _, err := f.Destroy("acme", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := f.Marshal([]byte(testPassphrase), keys.DefaultKDFParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = runCLI(t, "decrypt", "--keyring", path, "-i", acmeFile, "-o", acmeFile+".gone")
+	if err == nil || !strings.Contains(err.Error(), "tenant acme's, which is destroyed") {
+		t.Errorf("decrypt after acme's destruction: %v", err)
 	}
 }
 

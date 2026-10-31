@@ -51,52 +51,15 @@ func newRootKeySource(cfg config.Keys) (rootkey.Source, error) {
 	}
 }
 
-// openKeyring reads a keyring file and unlocks it by whatever sealed it.
+// unlock opens keyring bytes with the deployment's root key, from a passphrase
+// or from the service the file names, by withPassphrase or withRootKey.
 //
 // The file says which source that was, and the configuration says how to reach
 // it. Disagreement between the two is an error: falling back to a passphrase
 // prompt for a Vault-sealed keyring would ask the operator for something that
 // cannot work, and silently using a configured service on a passphrase keyring
-// would fail with no explanation. This is the single place all three commands
-// open a keyring, so the rule is stated once.
-func openKeyring(ctx context.Context, path string, cfg config.Keys, pass *passphraseFlags) (*keys.Keyring, error) {
-	ring, _, err := openKeyringFile(ctx, path, cfg, pass)
-	return ring, err
-}
-
-// openKeyringFile is openKeyring for a command that will write the keyring
-// back: it also returns the bytes it opened, which replaceKeyring compares the
-// file against before replacing it.
-func openKeyringFile(
-	ctx context.Context, path string, cfg config.Keys, pass *passphraseFlags,
-) (*keys.Keyring, []byte, error) {
-	warnIfExposed("keyring", path)
-	//nolint:gosec // the path comes from the operator's own configuration.
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, nil, keyringReadError(path, err)
-	}
-	ring, err := unlockKeyring(ctx, path, data, cfg, pass)
-	if err != nil {
-		return nil, nil, err
-	}
-	return ring, data, nil
-}
-
-// unlockKeyring opens keyring bytes by whatever sealed them.
-//
-// It opens the default tenant only, and refuses a keyring with tenants
-// (keys.ErrKeyringHasTenants). Only encrypt and decrypt still open the
-// keyring this way; the gateway and every other command open it whole, with
-// openFile or openServedKeyring.
-func unlockKeyring(
-	ctx context.Context, path string, data []byte, cfg config.Keys, pass *passphraseFlags,
-) (*keys.Keyring, error) {
-	return unlock(ctx, path, data, cfg, pass, keys.LoadKeyring, keys.LoadKeyringWithRootKey)
-}
-
-// unlock opens keyring bytes with the deployment's root key, from a passphrase
-// or from the service the file names, by withPassphrase or withRootKey.
+// would fail with no explanation. Every command opens a keyring through here,
+// so the rule is stated once.
 func unlock[T any](
 	ctx context.Context, path string, data []byte, cfg config.Keys, pass *passphraseFlags,
 	withPassphrase func(data, passphrase []byte) (T, error), withRootKey func(data, rootKey []byte) (T, error),
