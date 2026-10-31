@@ -61,9 +61,10 @@ func rejectedRequests(t *testing.T, addr string, paths ...string) {
 	}
 }
 
-// serveAuditTenants serves keyring with an audit log, sends the requests, and
-// returns the log's path once the gateway has stopped.
-func serveAuditTenants(t *testing.T, keyring string, paths ...string) string {
+// serveAuditTenants serves keyring with an audit log and tenantsYAML under
+// keys, sends the requests, and returns the log's path once the gateway has
+// stopped.
+func serveAuditTenants(t *testing.T, keyring, tenantsYAML string, paths ...string) string {
 	t.Helper()
 	provider, _ := stubProvider(t)
 	s3Addr, adminAddr := freeAddr(t), freeAddr(t)
@@ -72,10 +73,13 @@ func serveAuditTenants(t *testing.T, keyring string, paths ...string) string {
 server: { listen: %q }
 admin: { listen: %q }
 upstream: { endpoint: %q, region: us-east-1, path_style: true, access_key_id: a, secret_access_key: b }
-keys: { provider: file, keyring: %q }
+keys:
+  provider: file
+  keyring: %q
+%s
 audit: { log: %q }
 clients: [{ name: tester, access_key_id: TESTCLIENT, secret_access_key: s, buckets: ["*"] }]
-`, s3Addr, adminAddr, provider.URL, keyring, auditLog))
+`, s3Addr, adminAddr, provider.URL, keyring, tenantsYAML, auditLog))
 	_ = waitFor(t, &http.Client{Timeout: time.Second}, "http://"+adminAddr+"/healthz", http.StatusOK).Body.Close()
 	rejectedRequests(t, s3Addr, paths...)
 	if err := stop(); err != nil {
@@ -89,7 +93,7 @@ clients: [{ name: tester, access_key_id: TESTCLIENT, secret_access_key: s, bucke
 // about a destroyed tenant's buckets as digests.
 func TestServeAuditNamesPerTenant(t *testing.T) {
 	keyring := auditTenantsKeyring(t)
-	auditLog := serveAuditTenants(t, keyring,
+	auditLog := serveAuditTenants(t, keyring, "",
 		"other/notes.txt", "acme-data/q3/report.pdf", "globex-data/plan.txt")
 
 	f := openWhole(t, keyring)
@@ -156,4 +160,61 @@ func keysOf(m map[string]*audit.Entry) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// audit verify --print reads every name a key it holds opens: the
+// deployment's, and each tenant's that opens with --config. A tenant that
+// does not open is named, and a destroyed one's names stay opaque.
+func TestAuditVerifyWithTenants(t *testing.T) {
+	keyring := auditTenantsKeyring(t)
+	addPassphraseTenant(t, keyring, "zed", "zed-1", "zed's passphrase", "zed-*")
+	phrase := writePassphraseFile(t, "zed's passphrase")
+	auditLog := serveAuditTenants(t, keyring,
+		fmt.Sprintf("  tenants:\n    zed: { provider: file, passphrase_file: %q }", phrase),
+		"other/notes.txt", "acme-data/q3/report.pdf", "globex-data/plan.txt", "zed-data/ledger.csv")
+
+	stdout, stderr, err := runCLI(t, "audit", "verify", "--keyring", keyring, "--print", auditLog)
+	if err != nil {
+		t.Fatalf("audit verify: %v\n%s", err, stderr)
+	}
+	for _, want := range []string{"chain and signatures verified", "other/notes.txt", "acme-data/q3/report.pdf"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("audit verify --print lacks %q:\n%s", want, stdout)
+		}
+	}
+	for _, never := range []string{"globex-data", "plan.txt", "zed-data", "ledger"} {
+		if strings.Contains(stdout, never) {
+			t.Errorf("audit verify --print shows %q without its tenant's key:\n%s", never, stdout)
+		}
+	}
+	if !strings.Contains(stderr, "tenant zed did not open") {
+		t.Errorf("audit verify does not say zed did not open:\n%s", stderr)
+	}
+
+	// With zed's lock in the configuration, zed's names open too.
+	conf := tenantPassphraseConfig(t, "zed", phrase)
+	stdout, _, err = runCLI(t, "audit", "verify", "--keyring", keyring, "--config", conf, "--print", auditLog)
+	if err != nil {
+		t.Fatalf("audit verify --config: %v", err)
+	}
+	if !strings.Contains(stdout, "zed-data/ledger.csv") || strings.Contains(stdout, "globex-data") {
+		t.Errorf("audit verify --config --print:\n%s", stdout)
+	}
+}
+
+// audit pubkey reads and derives the deployment's key from a keyring with
+// tenants alike.
+func TestAuditPubkeyWithTenants(t *testing.T) {
+	keyring := auditTenantsKeyring(t)
+	recorded, _, err := runCLI(t, "audit", "pubkey", "--keyring", keyring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	derived, _, err := runCLI(t, "audit", "pubkey", "--keyring", keyring, "--open")
+	if err != nil {
+		t.Fatalf("audit pubkey --open: %v", err)
+	}
+	if recorded == "" || recorded != derived {
+		t.Errorf("recorded %q, derived %q", recorded, derived)
+	}
 }

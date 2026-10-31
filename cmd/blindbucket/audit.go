@@ -88,11 +88,12 @@ Flags:
 		if err != nil {
 			return err
 		}
-		ring, err := openKeyring(ctx, *keyring, keysCfg, &pass)
+		// The audit key is the deployment's: no tenant is opened for it.
+		f, _, err := openFile(ctx, *keyring, keysCfg, &pass, openTenant(ctx, keysCfg))
 		if err != nil {
 			return err
 		}
-		key, ok := ring.AuditKey()
+		key, ok := f.Default.AuditKey()
 		if !ok {
 			return noAuditKey(*keyring)
 		}
@@ -138,6 +139,12 @@ A log verifies against a public key alone -- no keyring, no passphrase, nothing
 that could also write one. Pass --keyring instead to additionally decrypt the
 object names, which does need the keyring.
 
+With tenants (ADR-038), the names of entries about a tenant's buckets are
+encrypted under that tenant's key, and are decrypted only if the tenant opens
+with the lock --config's keys.tenants names for it. A destroyed tenant's names,
+and those of requests refused because its tenant was destroyed or not open,
+stay opaque for good.
+
 With neither, the chain is still checked but the signatures are not, and the
 output says so. That answers "has this file been edited", not "did this gateway
 write it".
@@ -171,9 +178,15 @@ Flags:
 		return errors.New("name at least one log file")
 	}
 
-	pub, coder, err := auditVerifyKeys(ctx, *pubFlag, *keyring, *conf, &pass)
+	pub, coders, unopened, err := auditVerifyKeys(ctx, *pubFlag, *keyring, *conf, &pass)
 	if err != nil {
 		return err
+	}
+	if *list {
+		for _, t := range unopened {
+			fmt.Fprintf(os.Stderr, "tenant %s did not open (%v): the names in its entries are not decrypted\n",
+				t.Name, t.Err)
+		}
 	}
 
 	ordered, err := orderLogs(paths)
@@ -195,7 +208,7 @@ Flags:
 	var seen []seenCheckpoint
 	results, err := audit.VerifyChain(files, audit.VerifyOptions{
 		PublicKey: pub,
-		OnEntry:   entryPrinter(*list, coder),
+		OnEntry:   entryPrinter(*list, coders),
 		OnCheckpoint: func(chain string, point *audit.Checkpoint) error {
 			seen = append(seen, seenCheckpoint{chain: chain, seq: point.Seq, hash: point.Hash})
 			return nil
@@ -226,53 +239,83 @@ type seenCheckpoint struct {
 }
 
 // auditVerifyKeys resolves what was asked for into a public key and, if the
-// keyring was given, a decrypter for the names.
+// keyring was given, decrypters for the names: the deployment's first, then
+// one per tenant that opened (FORMAT.md section 14.5). It also returns the
+// tenants that did not open, whose entries' names stay encrypted.
 func auditVerifyKeys(
 	ctx context.Context, pubFlag, keyring, conf string, pass *passphraseFlags,
-) (ed25519.PublicKey, *names.Encrypter, error) {
+) (ed25519.PublicKey, []*names.Encrypter, []*keys.Tenant, error) {
 	switch {
 	case pubFlag != "" && keyring != "":
-		return nil, nil, errors.New("pass either --public-key or --keyring, not both")
+		return nil, nil, nil, errors.New("pass either --public-key or --keyring, not both")
 
 	case pubFlag != "":
 		pub, err := parsePublicKey(pubFlag)
-		return pub, nil, err
+		return pub, nil, nil, err
 
 	case keyring != "":
 		keysCfg := config.Keys{Provider: "file"}
 		if conf != "" {
 			cfg, err := config.Load(conf)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			keysCfg = cfg.Keys
 			if pass.file == "" {
 				pass.file = keysCfg.PassphraseFile
 			}
 		}
-		ring, err := openKeyring(ctx, keyring, keysCfg, pass)
+		f, _, err := openFile(ctx, keyring, keysCfg, pass, openTenants(ctx, keysCfg))
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		key, ok := ring.AuditKey()
+		key, ok := f.Default.AuditKey()
 		if !ok {
-			return nil, nil, noAuditKey(keyring)
+			return nil, nil, nil, noAuditKey(keyring)
 		}
 		pub, err := key.Public()
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		nameKey, err := key.NameKey()
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
+		defer clear(nameKey)
 		coder, err := names.New(nameKey)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		return pub, coder, nil
+		coders := []*names.Encrypter{coder}
+		var unopened []*keys.Tenant
+		for _, t := range f.Tenants {
+			if c, ok := tenantAuditCoder(t); ok {
+				coders = append(coders, c)
+			} else {
+				unopened = append(unopened, t)
+			}
+		}
+		return pub, coders, unopened, nil
 	}
-	return nil, nil, nil
+	return nil, nil, nil, nil
+}
+
+// tenantAuditCoder is the decrypter for a tenant's entries, if it opened.
+func tenantAuditCoder(t *keys.Tenant) (*names.Encrypter, bool) {
+	if t.Ring == nil {
+		return nil, false
+	}
+	nk, ok := t.Ring.NameKey()
+	if !ok {
+		return nil, false
+	}
+	key, err := nk.AuditNameKey()
+	if err != nil {
+		return nil, false
+	}
+	defer clear(key)
+	coder, err := names.New(key)
+	return coder, err == nil
 }
 
 // parsePublicKey accepts the key itself or the path to a file holding it.
@@ -361,15 +404,12 @@ func orderLogs(paths []string) ([]string, error) {
 }
 
 // entryPrinter renders entries as they verify, decrypting names when it can.
-func entryPrinter(enabled bool, coder *names.Encrypter) func(*audit.Entry) error {
+func entryPrinter(enabled bool, coders []*names.Encrypter) func(*audit.Entry) error {
 	if !enabled {
 		return nil
 	}
 	return func(e *audit.Entry) error {
-		bucket, key := e.Bucket, e.Key
-		if coder != nil {
-			bucket, key = decodeName(coder, bucket), decodeName(coder, key)
-		}
+		bucket, key := decodeNames(coders, e.Bucket, e.Key)
 		who := e.Client
 		if who == "" && e.Principal != "" {
 			who = e.Principal + " (rejected)"
@@ -387,17 +427,28 @@ func entryPrinter(enabled bool, coder *names.Encrypter) func(*audit.Entry) error
 	}
 }
 
-// decodeName reverses one encrypted name, leaving anything it cannot read as it
-// stands rather than pretending to have read it.
-func decodeName(coder *names.Encrypter, value string) string {
-	if value == "" {
-		return ""
+// decodeNames reverses an entry's encrypted names with the first key that
+// opens its bucket, leaving what no key opens as it stands rather than
+// pretending to have read it. A wrong key fails the name encryption's own
+// check (FORMAT.md section 15.4), so at most one key opens a name.
+func decodeNames(coders []*names.Encrypter, bucket, key string) (string, string) {
+	if bucket == "" {
+		return bucket, key
 	}
-	plain, err := coder.DecryptKey(value)
-	if err != nil {
-		return value
+	for _, coder := range coders {
+		plainBucket, err := coder.DecryptKey(bucket)
+		if err != nil {
+			continue
+		}
+		plainKey := key
+		if key != "" {
+			if k, err := coder.DecryptKey(key); err == nil {
+				plainKey = k
+			}
+		}
+		return plainBucket, plainKey
 	}
-	return plain
+	return bucket, key
 }
 
 // reportAudit prints what each file verified to, and the verdict.
