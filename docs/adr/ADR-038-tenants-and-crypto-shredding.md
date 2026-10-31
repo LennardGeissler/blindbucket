@@ -166,7 +166,11 @@ shows it. Two rules follow, and they apply to a new KEK today as much as to a te
    and says how many and where: those objects would survive. `--force` proceeds and
    repeats the count in its output. The tenant's buckets are listed in the
    directory, so unlike `keys remove`, this command can see what it is about to
-   strand.
+   strand. *Amended while writing the command: an object the census could not read
+   stops it too, since nothing is known about its key. A tenant that was never
+   active is counted as well: with its buckets empty, as after a mistaken `create`,
+   it goes without `--force`, and with objects in them, all on the default tenant's
+   keys, only with it.*
 2. **Tombstone.** The keyring is rewritten without the tenant's section. The
    directory keeps a tombstone instead: the name, the bucket patterns, the key ids,
    every lock that ever sealed the tenant, and the date. The generation increases.
@@ -181,7 +185,11 @@ shows it. Two rules follow, and they apply to a new KEK today as much as to a te
    after the rollout, because it is the one step that cannot be undone. Destroyed
    before the tombstone has reached every process, it makes the tenant's objects
    unreadable while the destruction could still be called off, for instance because
-   the census found objects to rotate first (`MCTenantsLockFirst`).
+   the census found objects to rotate first (`MCTenantsLockFirst`). *Amended while
+   writing the command: a service key that also seals the deployment, or a live
+   tenant now or before, is named as one not to destroy, since destroying it would
+   destroy them too. Only the recorded key names are compared, so an alias and the
+   key id it stands for are not recognised as one key.*
 
 **Every lock the tenant ever had.** `reseal --tenant` moves a tenant to a new lock
 as [ADR-023](ADR-023-resealing-a-keyring.md) moves the deployment, and the copies of

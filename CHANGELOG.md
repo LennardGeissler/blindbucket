@@ -43,6 +43,13 @@ version 1 would keep being readable.
   `off_tenant`. `migrate-names` moves an active tenant's bucket from the default name
   key to the tenant's. `tenants census` counts, per bucket of a tenant, the objects not
   under its keys, which is the first step of a destruction.
+- **`tenants destroy` tombstones a tenant.** It takes the tenant's census and stops on
+  any object not under its keys, or not readable, unless `--force`. It then writes the
+  keyring with a tombstone in the tenant's place, which keeps its buckets refused and
+  its name and key ids from being issued again. It neither needs nor destroys the
+  tenant's lock: it says how to roll the keyring out, then how to destroy each lock the
+  tenant ever had, and warns about a key that also seals the deployment or another
+  tenant.
 
 ### Fixed
 
