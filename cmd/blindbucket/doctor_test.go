@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -82,7 +83,7 @@ func TestDoctorJSONDocument(t *testing.T) {
 	}
 	want := []string{
 		doctor.NameConfig, doctor.NameListener, doctor.NameTLS, doctor.NameKeyring,
-		doctor.NameFeatureKeys, doctor.NameAuditLog, doctor.NameFreshnessIndex,
+		doctor.NameFeatureKeys, doctor.NameTenants, doctor.NameAuditLog, doctor.NameFreshnessIndex,
 		doctor.NameUpstreamCreds, doctor.NameBucket, doctor.NameConditionalWrites, doctor.NameClock,
 	}
 	if !slices.Equal(names, want) {
@@ -284,5 +285,48 @@ func TestIntegrationDoctor(t *testing.T) {
 	}
 	if c := find(t, doc, doctor.NameConditionalWrites, tp.Bucket); c.Outcome != "skipped" {
 		t.Errorf("conditional_writes with --no-write = %+v", c)
+	}
+}
+
+// TestDoctorTenants covers what serve would make of a keyring's tenants: one
+// that does not open fails, one under the deployment's lock and a
+// keys.tenants entry the keyring does not have warn.
+func TestDoctorTenants(t *testing.T) {
+	conf := doctorSetup(t, unreachable, "b")
+	keyring := filepath.Join(filepath.Dir(conf), initKeyringName)
+	tenants := func() doctorCheckJSON {
+		t.Helper()
+		doc, _ := runDoctorJSON(t, "--config", conf)
+		return find(t, doc, doctor.NameTenants, "")
+	}
+
+	if c := tenants(); c.Outcome != "skipped" {
+		t.Errorf("without tenants: %+v", c)
+	}
+
+	if _, _, err := runCLI(t, "tenants", "create", "--keyring", keyring, "--deployment-lock", "beta", "beta-*"); err != nil {
+		t.Fatal(err)
+	}
+	if c := tenants(); c.Outcome != "warning" || !strings.Contains(c.Detail, "deployment's lock: beta") ||
+		!strings.Contains(c.Detail, "not active yet: beta") || !strings.Contains(c.Fix, "reseal --tenant") {
+		t.Errorf("a tenant under the deployment's lock: %+v", c)
+	}
+
+	phrase := writePassphraseFile(t, "acme's passphrase")
+	acmeConf := tenantPassphraseConfig(t, "acme", phrase)
+	if _, _, err := runCLI(t, "tenants", "create", "--keyring", keyring, "--config", acmeConf, "acme", "acme-*"); err != nil {
+		t.Fatal(err)
+	}
+	c := tenants()
+	if c.Outcome != "failed" || !strings.Contains(c.Detail, "did not open: acme") || !strings.Contains(c.Fix, "503") {
+		t.Errorf("a tenant that does not open: %+v", c)
+	}
+
+	editConfig(t, conf, "\nkeys:\n", fmt.Sprintf(
+		"\nkeys:\n  tenants:\n    acme: { provider: file, passphrase_file: %q }\n    zed: { provider: file, passphrase_file: %q }\n",
+		phrase, phrase))
+	c = tenants()
+	if c.Outcome != "warning" || !strings.Contains(c.Detail, "2 tenants, 2 open") || !strings.Contains(c.Detail, "zed") {
+		t.Errorf("an entry for a tenant the keyring does not have: %+v", c)
 	}
 }

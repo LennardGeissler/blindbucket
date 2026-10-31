@@ -101,7 +101,7 @@ func diagnose(
 		why := "the configuration did not load"
 		for _, name := range []string{
 			doctor.NameListener, doctor.NameTLS, doctor.NameKeyring, doctor.NameFeatureKeys,
-			doctor.NameAuditLog, doctor.NameFreshnessIndex, doctor.NameUpstreamCreds,
+			doctor.NameTenants, doctor.NameAuditLog, doctor.NameFreshnessIndex, doctor.NameUpstreamCreds,
 		} {
 			add(doctor.Skip(name, why))
 		}
@@ -117,12 +117,14 @@ func diagnose(
 		add(doctor.Skip(doctor.NameTLS, "server.tls is not configured"))
 	}
 
-	ring, keyringCheck := checkKeyring(ctx, cfg, pass)
+	file, keyringCheck := checkKeyring(ctx, cfg, pass)
 	add(keyringCheck)
-	if ring != nil {
-		add(featureKeysCheck(cfg, ring))
+	if file != nil {
+		add(featureKeysCheck(cfg, file.Default))
+		add(tenantsCheck(cfg, file))
 	} else {
 		add(doctor.Skip(doctor.NameFeatureKeys, "the keyring did not open"))
+		add(doctor.Skip(doctor.NameTenants, "the keyring did not open"))
 	}
 	if cfg.Audit.Enabled() {
 		add(doctor.Writable(doctor.NameAuditLog, "audit.log", cfg.Audit.Log))
@@ -252,9 +254,10 @@ func listenerCheck(cfg *config.Config) doctor.Check {
 	return doctor.Ok(doctor.NameListener, fmt.Sprintf("server.listen %s, %s", cfg.Server.Listen, how))
 }
 
-// checkKeyring opens the keyring by the route serve takes, and returns it for
-// the checks that need what is inside.
-func checkKeyring(ctx context.Context, cfg *config.Config, pass *passphraseFlags) (*keys.Keyring, doctor.Check) {
+// checkKeyring opens the keyring by the route serve takes, every tenant
+// keys.tenants can open included, and returns it for the checks that need
+// what is inside.
+func checkKeyring(ctx context.Context, cfg *config.Config, pass *passphraseFlags) (*keys.File, doctor.Check) {
 	path := cfg.Keys.Keyring
 	info, err := os.Stat(path)
 	if err != nil {
@@ -271,19 +274,80 @@ func checkKeyring(ctx context.Context, cfg *config.Config, pass *passphraseFlags
 		return nil, doctor.Fail(doctor.NameKeyring, err.Error(),
 			"the user doctor and serve run as must be able to read "+path)
 	}
-	// unlockKeyring rather than openKeyring: openKeyring also warns about the
-	// file's mode on stderr, which this check reports itself.
-	ring, err := unlockKeyring(ctx, path, data, cfg.Keys, pass)
+	// unlockFile rather than openFile: openFile also warns about the file's
+	// mode on stderr, which this check reports itself.
+	f, err := unlockFile(ctx, path, data, cfg.Keys, pass, openTenants(ctx, cfg.Keys))
 	if err != nil {
 		return nil, doctor.Fail(doctor.NameKeyring, err.Error(), keyringFix(cfg.Keys))
 	}
 
+	ring := f.Default
 	detail := fmt.Sprintf("sealed by %s; %s, %s active", sealedBy(cfg.Keys), pluralize(len(ring.KIDs()), "key"), ring.ActiveKID())
+	if f.Generation > 0 {
+		detail += fmt.Sprintf("; generation %d", f.Generation)
+	}
 	if mode := info.Mode().Perm(); mode&0o077 != 0 {
-		return ring, doctor.Warn(doctor.NameKeyring, fmt.Sprintf("%s; mode %04o", detail, mode),
+		return f, doctor.Warn(doctor.NameKeyring, fmt.Sprintf("%s; mode %04o", detail, mode),
 			fmt.Sprintf("chmod 600 %s: it is readable beyond its owner", path))
 	}
-	return ring, doctor.Ok(doctor.NameKeyring, detail)
+	return f, doctor.Ok(doctor.NameKeyring, detail)
+}
+
+// tenantsCheck reports what serve would make of the keyring's tenants
+// (ADR-038). A tenant that does not open fails it: serve starts, but answers
+// 503 for every one of its buckets. A tenant under the deployment's lock, and
+// a keys.tenants entry for a tenant the keyring does not have, warn.
+func tenantsCheck(cfg *config.Config, f *keys.File) doctor.Check {
+	var unknown []string
+	for name := range cfg.Keys.Tenants {
+		if f.Tenant(name) == nil {
+			unknown = append(unknown, name)
+		}
+	}
+	slices.Sort(unknown)
+	if len(f.Tenants) == 0 && len(unknown) == 0 {
+		return doctor.Skip(doctor.NameTenants, "the keyring has no tenants")
+	}
+
+	var unopened, deployment, inactive, why []string
+	for _, t := range f.Tenants {
+		switch {
+		case t.Ring == nil:
+			unopened = append(unopened, t.Name)
+			why = append(why, fmt.Sprintf("%s: %v", t.Name, t.Err))
+		case t.Lock().Source == keys.LockDeployment:
+			deployment = append(deployment, t.Name)
+		}
+		if t.ActiveKID == "" {
+			inactive = append(inactive, t.Name)
+		}
+	}
+	detail := fmt.Sprintf("%s, %d open", pluralize(len(f.Tenants), "tenant"), len(f.Tenants)-len(unopened))
+	if len(f.Tombstones) > 0 {
+		detail += fmt.Sprintf(", %d destroyed", len(f.Tombstones))
+	}
+	if len(inactive) > 0 {
+		detail += "; not active yet: " + strings.Join(inactive, ", ")
+	}
+
+	switch {
+	case len(unopened) > 0:
+		return doctor.Fail(doctor.NameTenants,
+			fmt.Sprintf("%s; did not open: %s", detail, strings.Join(why, "; ")),
+			fmt.Sprintf("each tenant needs keys.tenants.<name> naming its lock, with credentials that may "+
+				"decrypt with it; until then serve answers 503 for the buckets of %s",
+				strings.Join(unopened, ", ")))
+	case len(unknown) > 0:
+		return doctor.Warn(doctor.NameTenants,
+			fmt.Sprintf("%s; keys.tenants names %s, which the keyring does not have", detail, strings.Join(unknown, ", ")),
+			"remove the entry, or check its spelling against `blindbucket tenants list`")
+	case len(deployment) > 0:
+		return doctor.Warn(doctor.NameTenants,
+			fmt.Sprintf("%s; under the deployment's lock: %s", detail, strings.Join(deployment, ", ")),
+			"every copy of the keyring opens their keys with the deployment's root key, so destroying "+
+				"them rests on those copies; `blindbucket reseal --tenant <name>` gives each a lock of its own")
+	}
+	return doctor.Ok(doctor.NameTenants, detail)
 }
 
 func keyringFix(cfg config.Keys) string {
