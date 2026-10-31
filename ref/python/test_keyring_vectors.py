@@ -15,7 +15,7 @@ import json
 import pathlib
 import sys
 
-from keyring_ref import Malformed, Tenant, open_keyring
+from keyring_ref import Malformed, Tenant, open_keyring, tenant_audit_name_key
 
 VECTORS = pathlib.Path(__file__).resolve().parents[2] / "testdata" / "vectors" / "keyring_v2.json"
 
@@ -26,6 +26,13 @@ def describe(t: Tenant) -> dict:
         "keks": {kid: k.hex() for kid, k in t.keks.items()},
         "name_key": t.name_key.hex() if t.name_key else "",
     }
+
+
+def describe_tenant(t: Tenant) -> dict:
+    out = describe(t)
+    if t.name_key:
+        out["audit_name_key"] = tenant_audit_name_key(t.name_key).hex()
+    return out
 
 
 def main() -> int:
@@ -53,7 +60,7 @@ def main() -> int:
         want = v["expect"]
         got = {
             "default": describe(opened.default),
-            "tenants": {name: describe(t) for name, t in opened.tenants.items()},
+            "tenants": {name: describe_tenant(t) for name, t in opened.tenants.items()},
             "unopened": opened.unopened,
             "buckets": {b: dict(zip(("tenant", "destroyed"), opened.tenant_of(b))) for b in want["buckets"]},
         }

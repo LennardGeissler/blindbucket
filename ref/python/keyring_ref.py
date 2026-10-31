@@ -27,7 +27,9 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 DEFAULT = "default"
 NONCE = 12
@@ -48,6 +50,12 @@ def lp(s: str) -> bytes:
     if len(b) > 0xFFFF:
         raise ValueError("field too long for its length prefix")
     return struct.pack(">H", len(b)) + b
+
+
+def tenant_audit_name_key(name_key: bytes) -> bytes:
+    """§14.5: the key a tenant's audit entries encrypt their names under."""
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None,
+                info=b"blindbucket/v1/tenant-audit-name").derive(name_key)
 
 
 def unwrap(root: bytes, wrapped_b64: str, aad: bytes) -> bytes:

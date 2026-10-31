@@ -54,6 +54,10 @@ type openedTenant struct {
 	ActiveKID string            `json:"active_kid"`
 	KEKs      map[string]string `json:"keks"`
 	NameKey   string            `json:"name_key"`
+	// AuditNameKey is the key a tenant's audit entries encrypt names under
+	// (FORMAT.md section 14.5); the default tenant's comes from the audit
+	// secret instead, and is not given.
+	AuditNameKey string `json:"audit_name_key,omitempty"`
 }
 
 type bucketOwner struct {
@@ -340,7 +344,15 @@ func describe(k *File) *keyringOpened {
 			out.Unopened = append(out.Unopened, t.Name)
 			continue
 		}
-		out.Tenants[t.Name] = describeRing(t.Ring)
+		d := describeRing(t.Ring)
+		if nk, ok := t.Ring.NameKey(); ok {
+			ak, err := nk.AuditNameKey()
+			if err != nil {
+				panic(err)
+			}
+			d.AuditNameKey = hex.EncodeToString(ak)
+		}
+		out.Tenants[t.Name] = d
 	}
 	slices.Sort(out.Unopened)
 	dir := k.Directory()
