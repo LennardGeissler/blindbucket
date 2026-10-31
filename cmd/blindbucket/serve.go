@@ -272,7 +272,7 @@ Flags:
 
 	// The status page, on a listener of its own and only on loopback
 	// (ADR-035). Off unless admin.dashboard.listen is set.
-	dash, err := startDashboard(cfg, ring, client, auditLog, started, log)
+	dash, err := startDashboard(cfg, served, client, auditLog, started, log)
 	if err != nil {
 		return err
 	}
