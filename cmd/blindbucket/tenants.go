@@ -477,38 +477,20 @@ Flags:
 	if pass.file == "" {
 		pass.file = cfg.Keys.PassphraseFile
 	}
-	level := slog.LevelInfo
-	if *verbose {
-		level = slog.LevelDebug
-	}
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
-
 	f, _, err := openFile(ctx, cfg.Keys.Keyring, cfg.Keys, &pass, openTenant(ctx, cfg.Keys))
 	if err != nil {
 		return err
 	}
-	tn := f.Tenant(name)
-	if tn == nil {
-		for _, tb := range f.Tombstones {
-			if tb.Name == name {
-				return fmt.Errorf("tenant %s was destroyed on %s", name, tb.Destroyed.Format("2006-01-02"))
-			}
-		}
-		return fmt.Errorf("%s has no tenant %q (see `blindbucket tenants list`)", cfg.Keys.Keyring, name)
+	tn, err := liveTenant(f, cfg.Keys.Keyring, name)
+	if err != nil {
+		return err
 	}
 	if tn.ActiveKID == "" {
 		return fmt.Errorf("tenant %s is not active: its buckets are still written under the default "+
 			"tenant's keys, so a census cannot come out clean. Activate it and roll that out first", name)
 	}
 
-	client, _, err := upstreamClient(cfg, nil)
-	if err != nil {
-		return err
-	}
-	result, err := census.Run(ctx, census.Config{
-		Upstream: client, Entries: tn.Buckets, KIDs: tn.KIDs, Log2ChunkSize: cfg.Crypto.Log2ChunkSize,
-		Concurrency: *workers, Log: log,
-	})
+	result, err := takeCensus(ctx, cfg, tn, *workers, *verbose)
 	if err != nil {
 		return err
 	}
@@ -522,6 +504,45 @@ Flags:
 		return censusErrors(name, result)
 	}
 
+	if err := printCensus(f, *cfgPath, result); err != nil {
+		return err
+	}
+	return censusErrors(name, result)
+}
+
+// liveTenant returns the live tenant called name, or says why there is none.
+func liveTenant(f *keys.File, keyring, name string) (*keys.Tenant, error) {
+	if tn := f.Tenant(name); tn != nil {
+		return tn, nil
+	}
+	for _, tb := range f.Tombstones {
+		if tb.Name == name {
+			return nil, fmt.Errorf("tenant %s was destroyed on %s", name, tb.Destroyed.Format("2006-01-02"))
+		}
+	}
+	return nil, fmt.Errorf("%s has no tenant %q (see `blindbucket tenants list`)", keyring, name)
+}
+
+// takeCensus counts, in every bucket of tn, the objects not under its keys.
+func takeCensus(ctx context.Context, cfg *config.Config, tn *keys.Tenant, workers int, verbose bool) (*census.Result, error) {
+	level := slog.LevelInfo
+	if verbose {
+		level = slog.LevelDebug
+	}
+	client, _, err := upstreamClient(cfg, nil)
+	if err != nil {
+		return nil, err
+	}
+	return census.Run(ctx, census.Config{
+		Upstream: client, Entries: tn.Buckets, KIDs: tn.KIDs, Log2ChunkSize: cfg.Crypto.Log2ChunkSize,
+		Concurrency: workers,
+		Log:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})),
+	})
+}
+
+// printCensus writes a census as a table, says what moves the objects off the
+// tenant, and which keyring generation the count holds for.
+func printCensus(f *keys.File, cfgPath string, result *census.Result) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(w, "BUCKET\tSCANNED\tON TENANT\tOFF TENANT\tNOT OURS\tFAILED\t")
 	for _, b := range result.Buckets {
@@ -538,13 +559,13 @@ Flags:
 	for _, b := range result.Buckets {
 		for _, kid := range slices.Sorted(maps.Keys(b.OffKIDs)) {
 			fmt.Fprintf(os.Stderr, "%s: %d under %q (%s); `blindbucket rotate --config %s s3://%s` "+
-				"moves them\n", b.Name, b.OffKIDs[kid], kid, keyOwner(f, kid), *cfgPath, b.Name)
+				"moves them\n", b.Name, b.OffKIDs[kid], kid, keyOwner(f, kid), cfgPath, b.Name)
 		}
 	}
 	fmt.Fprintf(os.Stderr, "\nCounted against keyring generation %d. The count holds only if every instance\n"+
 		"served it, or a later one, throughout (blindbucket_keyring_generation), and no rotate\n"+
 		"or encrypt-existing started on an earlier keyring was still running.\n", f.Generation)
-	return censusErrors(name, result)
+	return nil
 }
 
 // keyOwner says who holds kid in an opened file.
