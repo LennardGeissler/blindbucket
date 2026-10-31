@@ -1,6 +1,6 @@
 # ADR-038 — Tenants: keys per set of buckets, each under its own lock, and a tenant deleted by destroying them
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-29
 **Milestone:** M15
 **Implements:** [#133](https://github.com/LennardGeissler/blindbucket/issues/133)
