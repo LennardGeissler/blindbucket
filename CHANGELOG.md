@@ -27,8 +27,8 @@ version 1 would keep being readable.
   and gives them buckets; `reseal --tenant` moves a tenant to another lock and keeps the
   old one in its history. `keygen`, `keys remove` and `reseal` keep a keyring's tenants,
   and `keys list` gains a `TENANT` column and `tenant` and `opened` in `--json`.
-  `encrypt`, `decrypt`, `doctor` and `audit` do not open such a keyring yet and refuse it
-  by name ([#133](https://github.com/LennardGeissler/blindbucket/issues/133)).
+  `encrypt`, `decrypt` and `doctor` do not open such a keyring yet and refuse it by
+  name ([#133](https://github.com/LennardGeissler/blindbucket/issues/133)).
 - **The gateway serves tenants.** Writes to an active tenant's buckets wrap under its
   keys and, with `names.encrypt`, map names under its name key; an inactive tenant's
   buckets behave as the default tenant's, and reads go by the key each object names. A
@@ -50,6 +50,12 @@ version 1 would keep being readable.
   tenant's lock: it says how to roll the keyring out, then how to destroy each lock the
   tenant ever had, and warns about a key that also seals the deployment or another
   tenant.
+- **The audit log encrypts a tenant's names under the tenant's key.** Entries about a
+  tenant's buckets encrypt bucket and object names under a key derived from its name
+  key, active or not, so they become opaque when the tenant is destroyed; the chain and
+  signatures verify as before. Entries about a bucket whose tenant is destroyed or not
+  open on the instance record the names as digests. `audit verify --print` opens a
+  keyring with tenants and decrypts each entry with whichever key it holds opens it.
 
 ### Fixed
 

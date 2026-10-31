@@ -792,6 +792,15 @@ the entries still verify. A `kid` in clear may name its tenant all the same, if 
 operator's key ids do. Each opened tenant's `nameKey_T` is among the keyring vectors
 of §18.8.
 
+A writer uses `nameKey_T` for every entry about a bucket of a tenant whose keys it
+holds, whether or not the tenant is active: readers try every key, so nothing
+requires writers to agree on when a tenant's entries start. A writer that does not
+hold the tenant's keys, because the tenant is destroyed or did not open, records
+both names as digests, the `"h:"` form above under the audit secret's `nameKey`,
+whatever their length. Encrypted under that key they would stay readable after the
+tenant is destroyed. The digest reveals nothing without the keyring, but whoever
+holds the audit secret can test a guessed name against it.
+
 ### 14.6 Keys
 
 The audit secret is 32 bytes, stored in the keyring wrapped under the root key

@@ -86,8 +86,9 @@ func openKeyringFile(
 // unlockKeyring opens keyring bytes by whatever sealed them.
 //
 // It opens the default tenant only, and refuses a keyring with tenants
-// (keys.ErrKeyringHasTenants): it is how the gateway and every command that
-// reads or writes objects open the keyring.
+// (keys.ErrKeyringHasTenants). Only encrypt, decrypt and doctor still open the
+// keyring this way; the gateway and every other command open it whole, with
+// openFile or openServedKeyring.
 func unlockKeyring(
 	ctx context.Context, path string, data []byte, cfg config.Keys, pass *passphraseFlags,
 ) (*keys.Keyring, error) {

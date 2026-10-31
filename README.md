@@ -688,7 +688,9 @@ chain and signatures verified
 Object names in the log are **encrypted**, so a log can be shipped off the host
 without giving away what the encrypted bucket does not. Reading them back is a
 separate privilege: `--keyring` decrypts, `--public-key` does not and does not
-need to.
+need to. With tenants, an entry about a tenant's bucket opens only with that
+tenant's key, and stays opaque once the tenant is destroyed
+([ADR-038](docs/adr/ADR-038-tenants-and-crypto-shredding.md)).
 
 ```
 $ blindbucket audit verify --keyring keyring.json --print audit.log
