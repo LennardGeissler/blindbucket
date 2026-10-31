@@ -3,9 +3,11 @@ package keys
 import (
 	"bytes"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 var (
@@ -362,5 +364,100 @@ func TestOpenTenantLater(t *testing.T) {
 	}
 	if err := f.OpenTenant("zeta", rootsFunc(acmeRoots)); err == nil {
 		t.Error("opened a tenant the file does not have")
+	}
+}
+
+// A destroyed tenant leaves the file and stays in its tombstone: its buckets
+// are refused rather than falling back to the default tenant, its name and key
+// ids are never issued again, and every lock it had is recorded for the
+// operator to destroy.
+func TestDestroyTenant(t *testing.T) {
+	f := openV(t, withTenants(t), fileRoot, acmeRoots)
+	if err := f.Reseal("acme", serviceLock(t, vkey("file/acme-2"),
+		RootKeyRef{Source: SourceAWSKMS, Ciphertext: "AQICAHacme2", KeyName: "alias/bb-acme-2"})); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 2, 10, 0, 0, 123, time.FixedZone("CET", 3600))
+	tomb, err := f.Destroy("acme", at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Tombstone{
+		Name: "acme", Buckets: []string{"acme-*"}, KIDs: []string{"acme-2026-10"},
+		Locks: []Lock{
+			{Source: SourceAWSKMS, KeyName: "alias/bb-acme"},
+			{Source: SourceAWSKMS, KeyName: "alias/bb-acme-2"},
+		},
+		Destroyed: time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC),
+	}
+	if !reflect.DeepEqual(tomb, want) {
+		t.Errorf("tombstone\n got %+v\nwant %+v", tomb, want)
+	}
+
+	data, err := f.MarshalWithRootKey(fileRoot, fileRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Nothing of acme's is needed any more: the file opens without its root.
+	back := openV(t, data, fileRoot, nil)
+	if back.Generation != 2 || back.Tenant("acme") != nil || len(back.Tenants) != 1 {
+		t.Fatalf("after the destruction: generation %d, tenants %v", back.Generation, back.Directory().Tenants)
+	}
+	if len(back.Tombstones) != 1 || !reflect.DeepEqual(back.Tombstones[0], want) {
+		t.Errorf("tombstone read back: %+v", back.Tombstones)
+	}
+	if bytes.Contains(data, []byte("AQICAHacme")) {
+		t.Error("the destroyed tenant's section is still in the file")
+	}
+	if name, destroyed := back.Directory().Tenant("acme-photos"); name != "acme" || !destroyed {
+		t.Errorf("acme-photos resolves to %q, destroyed %v", name, destroyed)
+	}
+	if owner, ok := back.KIDOwner("acme-2026-10"); !ok || owner != "acme" {
+		t.Errorf("acme's key id is owned by %q, %v", owner, ok)
+	}
+	if _, err := back.Destroy("acme", at); err == nil || !strings.Contains(err.Error(), "destroyed on 2026-11-02") {
+		t.Errorf("destroying acme twice: %v", err)
+	}
+}
+
+func TestDestroyIsChecked(t *testing.T) {
+	f := openV(t, withTenants(t), fileRoot, nil)
+	for name, want := range map[string]string{"default": "default tenant", "zeta": "no tenant"} {
+		if _, err := f.Destroy(name, time.Now()); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("destroying %s: %v, want an error saying %q", name, err, want)
+		}
+	}
+	if len(f.Tenants) != 2 || len(f.Tombstones) != 0 {
+		t.Error("a refused destruction changed the file")
+	}
+	// A tenant that did not open here is destroyed all the same: nothing of
+	// its section is read.
+	if acme := f.Tenant("acme"); acme.Ring != nil {
+		t.Fatal("acme opened without its root")
+	}
+	if _, err := f.Destroy("acme", time.Now()); err != nil {
+		t.Errorf("destroying an unopened tenant: %v", err)
+	}
+}
+
+// The last tenant destroyed leaves a version 2 file with no tenants: the
+// tombstone keeps the buckets refused, which a version 1 file cannot say.
+func TestDestroyTheLastTenantKeepsVersion2(t *testing.T) {
+	f := openV(t, withTenants(t), fileRoot, acmeRoots)
+	for _, name := range []string{"acme", "beta"} {
+		if _, err := f.Destroy(name, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := f.MarshalWithRootKey(fileRoot, fileRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadKeyringWithRootKey(data, fileRoot); !errors.Is(err, ErrKeyringHasTenants) {
+		t.Errorf("the file read as version 1: %v", err)
+	}
+	back := openV(t, data, fileRoot, nil)
+	if len(back.Tenants) != 0 || len(back.Tombstones) != 2 {
+		t.Errorf("tenants %d, tombstones %d", len(back.Tenants), len(back.Tombstones))
 	}
 }

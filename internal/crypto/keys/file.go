@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 )
 
 // ErrKeyringHasTenants is what LoadKeyring returns for a version 2 file.
@@ -542,6 +543,29 @@ func (f *File) Reseal(name string, lock TenantLock) error {
 		t.seal = &lock
 	}
 	return nil
+}
+
+// Destroy moves a live tenant into a tombstone, destroyed at at: its section
+// leaves the file, and its name, bucket entries, key ids and every lock it was
+// ever sealed under stay in the directory for good (FORMAT.md section 18.7).
+// The tenant need not have opened; nothing of its section is read.
+//
+// The written file no longer holds the tenant's keys, but every older copy
+// does, sealed under the locks the tombstone lists. The keys are gone only
+// once each of those is destroyed, after every instance serves the new
+// generation (ADR-038).
+func (f *File) Destroy(name string, at time.Time) (Tombstone, error) {
+	t, err := f.live(name)
+	if err != nil {
+		return Tombstone{}, err
+	}
+	tomb := Tombstone{
+		Name: t.Name, Buckets: slices.Clone(t.Buckets), KIDs: slices.Clone(t.KIDs),
+		Locks: slices.Clone(t.Locks), Destroyed: at.UTC().Truncate(time.Second),
+	}
+	f.Tenants = slices.DeleteFunc(slices.Clone(f.Tenants), func(x *Tenant) bool { return x == t })
+	f.Tombstones = append(slices.Clone(f.Tombstones), tomb)
+	return tomb, nil
 }
 
 func (f *File) live(name string) (*Tenant, error) {
