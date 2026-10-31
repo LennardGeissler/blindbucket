@@ -60,7 +60,8 @@ _blindbucket() {
             'assign:give a tenant more buckets, for good'
             'activate:write a tenant'"'"'s buckets under its own keys from now on'
             'list:show the tenants, their buckets, keys and locks'
-            'census:count what in a tenant'"'"'s buckets is not under its keys') ;;
+            'census:count what in a tenant'"'"'s buckets is not under its keys'
+            'destroy:take a census, then tombstone a tenant for good') ;;
           audit) subcommands=(
             "verify:check a log's hash chain and checkpoint signatures"
             'pubkey:print the public key a verifier needs') ;;
@@ -266,6 +267,16 @@ _blindbucket() {
         '--concurrency[objects to read at once]:count' \
         '--config[configuration file]:file:_files' \
         '--json[emit the census as JSON]' \
+        '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
+        '-v[log at debug level]' \
+        ':tenant name'
+      ;;
+    'tenants destroy')
+      _arguments \
+        '--concurrency[objects to read at once]:count' \
+        '--config[configuration file]:file:_files' \
+        '--dry-run[take the census and say what would happen, write nothing]' \
+        '--force[destroy even if the census finds objects not under the tenant'"'"'s keys]' \
         '--passphrase-file[read the keyring passphrase from this file]:file:_files' \
         '-v[log at debug level]' \
         ':tenant name'

@@ -36,6 +36,7 @@ _blindbucket_flags() {
 	"tenants activate") echo --config --keyring --kid --passphrase-file ;;
 	"tenants list") echo --config --json --keyring --passphrase-file ;;
 	"tenants census") echo --concurrency --config --json --passphrase-file -v ;;
+	"tenants destroy") echo --concurrency --config --dry-run --force --passphrase-file -v ;;
 	"keys remove") echo --config --force --keyring --passphrase-file ;;
 	"audit verify") echo --config --expect --keyring --passphrase-file --print --public-key ;;
 	"audit pubkey") echo --config --keyring --open --passphrase-file ;;
@@ -60,7 +61,7 @@ _blindbucket() {
 		if [ "$COMP_CWORD" -eq 2 ]; then
 			case $cmd in
 			keys) COMPREPLY=($(compgen -W "list remove" -- "$cur")) ;;
-			tenants) COMPREPLY=($(compgen -W "create assign activate list census" -- "$cur")) ;;
+			tenants) COMPREPLY=($(compgen -W "create assign activate list census destroy" -- "$cur")) ;;
 			audit) COMPREPLY=($(compgen -W "verify pubkey" -- "$cur")) ;;
 			esac
 			return

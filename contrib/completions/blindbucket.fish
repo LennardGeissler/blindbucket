@@ -66,6 +66,7 @@ complete -c blindbucket -n '__blindbucket_using tenants' -a assign -d 'give a te
 complete -c blindbucket -n '__blindbucket_using tenants' -a activate -d "write a tenant's buckets under its own keys from now on"
 complete -c blindbucket -n '__blindbucket_using tenants' -a list -d 'show the tenants, their buckets, keys and locks'
 complete -c blindbucket -n '__blindbucket_using tenants' -a census -d "count what in a tenant's buckets is not under its keys"
+complete -c blindbucket -n '__blindbucket_using tenants' -a destroy -d 'take a census, then tombstone a tenant for good'
 complete -c blindbucket -n '__blindbucket_using audit' -a verify -d "check a log's hash chain and checkpoint signatures"
 complete -c blindbucket -n '__blindbucket_using audit' -a pubkey -d 'print the public key a verifier needs'
 
@@ -225,6 +226,13 @@ set c '__blindbucket_using tenants census'
 complete -c blindbucket -n $c -l concurrency -x -d 'objects to read at once'
 complete -c blindbucket -n $c -l config -r -F -d 'configuration file'
 complete -c blindbucket -n $c -l json -d 'emit the census as JSON'
+complete -c blindbucket -n $c -l passphrase-file -r -F -d 'read the keyring passphrase from this file'
+complete -c blindbucket -n $c -s v -d 'log at debug level'
+set c '__blindbucket_using tenants destroy'
+complete -c blindbucket -n $c -l concurrency -x -d 'objects to read at once'
+complete -c blindbucket -n $c -l config -r -F -d 'configuration file'
+complete -c blindbucket -n $c -l dry-run -d 'take the census and say what would happen, write nothing'
+complete -c blindbucket -n $c -l force -d "destroy even if the census finds objects not under the tenant's keys"
 complete -c blindbucket -n $c -l passphrase-file -r -F -d 'read the keyring passphrase from this file'
 complete -c blindbucket -n $c -s v -d 'log at debug level'
 

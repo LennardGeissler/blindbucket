@@ -424,3 +424,91 @@ func TestMarshalCensusJSON(t *testing.T) {
 		t.Errorf("got\n%s\nwant\n%s", data, want)
 	}
 }
+
+// A tenant is destroyed after a clean census, without its lock: what is left
+// is a tombstone that keeps its buckets refused. The tenant here was never
+// active and its only bucket does not exist, so the census is clean.
+func TestTenantsDestroy(t *testing.T) {
+	p := testprovider.Require(t)
+	path := setupKeyring(t, "2026-09")
+	bucket := fmt.Sprintf("bb-destroy-%d", time.Now().UnixNano())
+	addPassphraseTenant(t, path, "acme", "acme-1", "acme's passphrase", bucket)
+	conf := providerConfig(t, p, path)
+
+	_, stderr, err := runCLI(t, "tenants", "destroy", "--dry-run", "--config", conf, "acme")
+	if err != nil {
+		t.Fatalf("destroy --dry-run: %v\n%s", err, stderr)
+	}
+	if !strings.Contains(stderr, "would destroy tenant acme") || !strings.Contains(stderr, "never active") {
+		t.Errorf("destroy --dry-run says:\n%s", stderr)
+	}
+	if f := openWhole(t, path); f.Generation != 1 || f.Tenant("acme") == nil {
+		t.Fatalf("a dry run changed the keyring: generation %d", f.Generation)
+	}
+
+	// No keys.tenants in the configuration: acme's passphrase is not needed.
+	stdout, stderr, err := runCLI(t, "tenants", "destroy", "--config", conf, "acme")
+	if err != nil {
+		t.Fatalf("destroy: %v\n%s", err, stderr)
+	}
+	if !strings.Contains(stdout, bucket) || !strings.Contains(stdout, "(does not exist)") {
+		t.Errorf("destroy does not show its census:\n%s", stdout)
+	}
+	for _, want := range []string{"destroyed tenant acme", "generation 2", "a passphrase"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("destroy does not say %q:\n%s", want, stderr)
+		}
+	}
+	f := openWhole(t, path)
+	if f.Generation != 2 || f.Tenant("acme") != nil || len(f.Tombstones) != 1 {
+		t.Fatalf("after destroy: generation %d, tenants %d, tombstones %d",
+			f.Generation, len(f.Tenants), len(f.Tombstones))
+	}
+	if name, destroyed := f.Directory().Tenant(bucket); name != "acme" || !destroyed {
+		t.Errorf("%s resolves to %q, destroyed %v", bucket, name, destroyed)
+	}
+
+	if _, _, err := runCLI(t, "tenants", "destroy", "--config", conf, "acme"); err == nil ||
+		!strings.Contains(err.Error(), "destroyed on") {
+		t.Errorf("destroying acme twice: %v", err)
+	}
+}
+
+// What cannot be destroyed is refused, and a census that does not complete
+// destroys nothing.
+func TestTenantsDestroyRefusals(t *testing.T) {
+	path := setupKeyring(t, "2026-09")
+	addTenantDirectly(t, path, "acme", "acme-1", "acme-*")
+	conf := bucketCommandConfig(t, path, "")
+	for tenant, want := range map[string]string{
+		"default": "cannot be destroyed", "zeta": "no tenant",
+		// The provider in conf cannot be reached.
+		"acme": "listing buckets",
+	} {
+		if _, _, err := runCLI(t, "tenants", "destroy", "--config", conf, tenant); err == nil ||
+			!strings.Contains(err.Error(), want) {
+			t.Errorf("destroying %s: %v, want an error saying %q", tenant, err, want)
+		}
+	}
+	if f := openWhole(t, path); f.Tenant("acme") == nil || len(f.Tombstones) != 0 {
+		t.Error("a refused destruction changed the keyring")
+	}
+}
+
+func TestDestroyVerdict(t *testing.T) {
+	result := func(off, failed int64) *census.Result {
+		return &census.Result{Buckets: []*census.Bucket{{Name: "acme-a", OffTenant: off, Failed: failed}}}
+	}
+	if err := destroyVerdict("acme", result(0, 0), false); err != nil {
+		t.Errorf("a clean census: %v", err)
+	}
+	for _, r := range []*census.Result{result(2, 0), result(0, 1)} {
+		err := destroyVerdict("acme", r, false)
+		if err == nil || !strings.Contains(err.Error(), "not destroying") || !strings.Contains(err.Error(), "--force") {
+			t.Errorf("off %d, failed %d: %v", r.OffTenant(), r.Failed(), err)
+		}
+		if err := destroyVerdict("acme", r, true); err != nil {
+			t.Errorf("off %d, failed %d with --force: %v", r.OffTenant(), r.Failed(), err)
+		}
+	}
+}

@@ -34,6 +34,8 @@ func runTenants(ctx context.Context, args []string) error {
 		return runTenantsList(ctx, args[1:])
 	case "census":
 		return runTenantsCensus(ctx, args[1:])
+	case "destroy":
+		return runTenantsDestroy(ctx, args[1:])
 	case "-h", "--help", "help":
 		return tenantsUsage()
 	}
@@ -54,6 +56,7 @@ Subcommands:
   activate  write a tenant's buckets under its own keys from now on
   list      show the tenants, their buckets, keys and locks
   census    count what in a tenant's buckets is not under its keys
+  destroy   take a census, then tombstone a tenant for good
 
 Every change writes the keyring as its next generation. It reaches an instance
 when the instance restarts, so roll each change out before the next one:
@@ -623,4 +626,139 @@ func marshalCensusJSON(name string, generation uint64, result *census.Result) ([
 		return nil, err
 	}
 	return append(data, '\n'), nil
+}
+
+func runTenantsDestroy(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("tenants destroy", flag.ContinueOnError)
+	fs.Usage = func() {
+		_, _ = fmt.Fprint(fs.Output(), `Usage: blindbucket tenants destroy --config <file> [flags] <name>
+
+Destroys a tenant (ADR-038). This cannot be undone.
+
+First it takes the tenant's census, as "blindbucket tenants census" does: an
+object in its buckets that is not under its keys would stay readable after the
+destruction, so any such object, or any object it could not read, stops it.
+--force destroys the tenant all the same.
+
+Then it writes the keyring as its next generation with the tenant's keys left
+out and a tombstone in their place: the tenant's buckets stay its own and are
+refused, its name and key ids are never issued again. The tenant's lock is not
+needed for this.
+
+That alone deletes nothing. Every earlier copy of the keyring still holds the
+tenant's keys, sealed under its locks. Roll the new keyring out to every
+instance, let every command started on an earlier one end, and then destroy
+each lock the tenant was ever sealed under, at its key service. The command
+names them; it does not destroy them itself, so that the gateway's credentials
+need no right to delete keys.
+
+Flags:
+`)
+		fs.PrintDefaults()
+	}
+	var (
+		cfgPath = fs.String("config", "blindbucket.yaml", "configuration file")
+		workers = fs.Int("concurrency", 8, "objects to read at once")
+		force   = fs.Bool("force", false, "destroy even if the census finds objects not under the tenant's keys")
+		dryRun  = fs.Bool("dry-run", false, "take the census and say what would happen, write nothing")
+		verbose = fs.Bool("v", false, "log at debug level")
+		pass    passphraseFlags
+	)
+	pass.register(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	defer pass.wipe()
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return errUsage
+	}
+	name := fs.Arg(0)
+	if name == keys.DefaultTenant {
+		return errors.New("the default tenant holds every bucket no tenant claims; it cannot be destroyed")
+	}
+
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if pass.file == "" {
+		pass.file = cfg.Keys.PassphraseFile
+	}
+	path := cfg.Keys.Keyring
+	// No tenant's lock is opened: a tenant whose key service is already gone
+	// can still be destroyed.
+	f, opened, err := openFile(ctx, path, cfg.Keys, &pass, openTenant(ctx, cfg.Keys))
+	if err != nil {
+		return err
+	}
+	tn, err := liveTenant(f, path, name)
+	if err != nil {
+		return err
+	}
+
+	result, err := takeCensus(ctx, cfg, tn, *workers, *verbose)
+	if err != nil {
+		return err
+	}
+	if err := printCensus(f, *cfgPath, result); err != nil {
+		return err
+	}
+	if tn.ActiveKID == "" {
+		fmt.Fprintf(os.Stderr, "\nwarning: %s was never active, so its buckets are written under the default\n"+
+			"  tenant's keys until every instance serves the tombstone. What is written to\n"+
+			"  them until then stays readable with those keys.\n", name)
+	}
+	if err := destroyVerdict(name, result, *force); err != nil {
+		return err
+	}
+
+	if *dryRun {
+		fmt.Fprintf(os.Stderr, "\nwould destroy tenant %s in %s as generation %d; nothing was written\n",
+			name, path, f.Generation+1)
+		return nil
+	}
+	tomb, err := f.Destroy(name, time.Now())
+	if err != nil {
+		return err
+	}
+	sealed, err := sealKeyring(ctx, f, cfg.Keys, &pass, false)
+	if err != nil {
+		return err
+	}
+	if err := replaceKeyring(path, opened, sealed); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "\ndestroyed tenant %s in %s; generation %d\n"+
+		"  Its buckets stay its own and are refused on every instance that serves this\n"+
+		"  keyring: %s.\n"+
+		"  Its keys are gone from this file, and from no earlier copy yet.\n"+
+		"  1. Roll this keyring out until blindbucket_keyring_generation is %d on every\n"+
+		"     instance, and let every command started on an earlier keyring end.\n"+
+		"  2. Then destroy each lock %s was ever sealed under:\n",
+		name, path, f.Generation+1, strings.Join(tomb.Buckets, ", "), f.Generation+1, name)
+	for _, l := range tomb.Locks {
+		fmt.Fprintf(os.Stderr, "     - %s\n", describeLock(l))
+	}
+	return nil
+}
+
+// destroyVerdict decides whether a census lets a tenant be destroyed: only a
+// clean one does, unless force says otherwise, and then it says what is left
+// readable.
+func destroyVerdict(name string, result *census.Result, force bool) error {
+	off, failed := result.OffTenant(), result.Failed()
+	if off == 0 && failed == 0 {
+		return nil
+	}
+	if !force {
+		return fmt.Errorf("not destroying tenant %s: %w\n"+
+			"Rotate those objects onto its keys, or delete them, and run this again; "+
+			"--force destroys it with them left as they are", name, censusErrors(name, result))
+	}
+	fmt.Fprintf(os.Stderr, "\nwarning: --force: destroying tenant %s with %d objects in its buckets not under its\n"+
+		"  keys, which stay readable with the keys they are under, and %d whose keys are not known.\n",
+		name, off, failed)
+	return nil
 }
