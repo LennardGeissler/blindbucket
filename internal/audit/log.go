@@ -74,6 +74,10 @@ type Config struct {
 	Signer ed25519.PrivateKey
 	// NameKey encrypts bucket and object names. Required.
 	NameKey []byte
+	// Tenants, if set, says which entries are about a tenant's buckets and
+	// encrypt their names under that tenant's key instead (FORMAT.md section
+	// 14.5, ADR-038).
+	Tenants Tenants
 
 	CheckpointEvery    int
 	CheckpointInterval time.Duration
@@ -87,6 +91,19 @@ type Config struct {
 	// Now is the clock, overridable so that checkpoint intervals and rotation
 	// can be tested without sleeping.
 	Now func() time.Time
+}
+
+// Tenants is what a Writer needs to know about tenants.
+type Tenants interface {
+	// AuditTenant names the tenant whose key encrypts the names of an entry
+	// about bucket: "" for the deployment's own. held is false when the
+	// bucket is a tenant's whose key this process does not hold, because the
+	// tenant was destroyed or did not open; such an entry records its names as
+	// digests under the deployment's key, which nothing reverses.
+	AuditTenant(bucket string) (tenant string, held bool)
+	// AuditNameKey returns the key a tenant's entries encrypt names under. A
+	// Writer asks once per tenant and wipes what it is given.
+	AuditNameKey(tenant string) ([]byte, error)
 }
 
 // Writer appends to one hash-chained, periodically signed log file.
@@ -120,6 +137,9 @@ type Writer struct {
 	signer      ed25519.PrivateKey
 	pub         string
 	coder       *nameCoder
+	tenants     Tenants
+	tenantMu    sync.Mutex
+	tenantCoder map[string]*nameCoder
 	every       int
 	interval    time.Duration
 	rotateBytes int64
@@ -161,6 +181,8 @@ func Open(cfg Config) (*Writer, error) {
 		signer:      cfg.Signer,
 		pub:         base64.StdEncoding.EncodeToString(pub),
 		coder:       coder,
+		tenants:     cfg.Tenants,
+		tenantCoder: map[string]*nameCoder{},
 		every:       orDefaultInt(cfg.CheckpointEvery, DefaultCheckpointEvery),
 		interval:    orDefaultDuration(cfg.CheckpointInterval, DefaultCheckpointInterval),
 		rotateBytes: orDefaultInt64(cfg.RotateBytes, DefaultRotateBytes),
@@ -323,7 +345,7 @@ func (w *Writer) Err() error {
 
 // Append records one served request.
 func (w *Writer) Append(ev Event) error {
-	bucket, key, err := w.coder.encode(ev.Bucket, ev.Key)
+	bucket, key, err := w.encode(ev.Bucket, ev.Key)
 	if err != nil {
 		return err
 	}
@@ -597,6 +619,51 @@ func ReadHead(r io.Reader) (*Head, error) {
 	return record.Head, nil
 }
 
+// encode encrypts an entry's names under the key its bucket's tenant calls
+// for: the deployment's, a tenant's, or, for a tenant whose key is not held
+// here, the deployment's digest.
+func (w *Writer) encode(bucket, key string) (string, string, error) {
+	if w.tenants == nil || bucket == "" {
+		return w.coder.encode(bucket, key)
+	}
+	tenant, held := w.tenants.AuditTenant(bucket)
+	switch {
+	case !held:
+		// Encrypted under the deployment's key, a destroyed tenant's names
+		// would be readable for good, and an unopened one's would outlive
+		// its destruction.
+		return w.coder.digestOne(bucket), w.coder.digestOne(key), nil
+	case tenant == "":
+		return w.coder.encode(bucket, key)
+	}
+	coder, err := w.tenantCoderFor(tenant)
+	if err != nil {
+		return "", "", err
+	}
+	return coder.encode(bucket, key)
+}
+
+// tenantCoderFor returns the coder for a tenant's entries, deriving it on
+// first use.
+func (w *Writer) tenantCoderFor(tenant string) (*nameCoder, error) {
+	w.tenantMu.Lock()
+	defer w.tenantMu.Unlock()
+	if c, ok := w.tenantCoder[tenant]; ok {
+		return c, nil
+	}
+	nameKey, err := w.tenants.AuditNameKey(tenant)
+	if err != nil {
+		return nil, fmt.Errorf("audit: tenant %q's name key: %w", tenant, err)
+	}
+	defer clear(nameKey)
+	c, err := newNameCoder(nameKey)
+	if err != nil {
+		return nil, err
+	}
+	w.tenantCoder[tenant] = c
+	return c, nil
+}
+
 // nameCoder maps bucket and object names into and out of a log entry.
 type nameCoder struct {
 	enc *names.Encrypter
@@ -663,6 +730,15 @@ func (n *nameCoder) encodeOne(name string) (string, error) {
 	default:
 		return "", err
 	}
+}
+
+// digestOne records a name as its digest whatever its length, for a name whose
+// tenant's key is not held. An empty name stays empty.
+func (n *nameCoder) digestOne(name string) string {
+	if name == "" {
+		return ""
+	}
+	return n.digest(name)
 }
 
 // digest is the irreversible fallback: keyed, so it reveals nothing without the
