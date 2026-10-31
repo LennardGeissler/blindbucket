@@ -17,7 +17,7 @@ import (
 // the commands that work on a bucket open the file whole; what still uses
 // LoadKeyring refuses such a keyring until it is taught otherwise.
 var ErrKeyringHasTenants = errors.New("keys: this keyring has tenants (version 2), which encrypt, " +
-	"decrypt and doctor do not open yet; serve, audit, the bucket commands and the keyring " +
+	"decrypt do not open yet; serve, doctor, audit, the bucket commands and the keyring " +
 	"commands do")
 
 // File is a keyring file opened whole, version 1 or 2: the default tenant and,

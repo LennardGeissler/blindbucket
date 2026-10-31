@@ -63,6 +63,7 @@ const (
 	NameTLS               = "tls"
 	NameKeyring           = "keyring"
 	NameFeatureKeys       = "feature_keys"
+	NameTenants           = "tenants"
 	NameAuditLog          = "audit_log"
 	NameFreshnessIndex    = "freshness_index"
 	NameUpstreamCreds     = "upstream_credentials" //nolint:gosec // a check's name, not a credential.

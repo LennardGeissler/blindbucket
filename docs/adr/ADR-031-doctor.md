@@ -29,8 +29,8 @@ and, for a warning or a failure, what to change.**
 1. **Nothing stops the run.** A check that depends on one that failed is
    reported as skipped, with why, rather than left out. The list is the same on
    every run, which is what makes `--json` something to look a check up in by
-   name: config, listener, tls, keyring, feature_keys, audit_log,
-   freshness_index, upstream_credentials, then bucket and conditional_writes
+   name: config, listener, tls, keyring, feature_keys, tenants (from ADR-038),
+   audit_log, freshness_index, upstream_credentials, then bucket and conditional_writes
    for each bucket, then clock.
 
 2. **The keyring is opened the way `serve` opens it.** For a passphrase keyring
