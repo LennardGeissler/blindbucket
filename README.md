@@ -639,6 +639,7 @@ loaded, and every instance reporting the same one is what a rollout waits for be
 the next step; `blindbucket_tenant_open{tenant}` is 0 for a tenant whose keys did not
 open, whose buckets then answer 503
 ([ADR-038](docs/adr/ADR-038-tenants-and-crypto-shredding.md)).
+`BlindbucketKeyringGenerationSkew` and `BlindbucketTenantNotOpen` alert on the two.
 
 Those alerts are written out in
 [deploy/prometheus/alerts.yaml](deploy/prometheus/alerts.yaml), with the audit

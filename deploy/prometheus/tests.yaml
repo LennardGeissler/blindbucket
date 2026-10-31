@@ -168,3 +168,55 @@ tests:
                 The oldest key in the keyring was created 400d 0h 0m 0s ago. Add a
                 new key, run `blindbucket rotate`, then `blindbucket keys remove`
                 the old one.
+
+  # A tenant that did not open fires after five minutes; one that did, never.
+  - interval: 1m
+    input_series:
+      - series: 'blindbucket_tenant_open{instance="gw1",job="blindbucket",tenant="acme"}'
+        values: '0x10'
+      - series: 'blindbucket_tenant_open{instance="gw1",job="blindbucket",tenant="beta"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: BlindbucketTenantNotOpen
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: BlindbucketTenantNotOpen
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: gw1
+              job: blindbucket
+              tenant: acme
+            exp_annotations:
+              summary: "gw1: tenant acme did not open"
+              description: >-
+                Tenant acme's keys did not open on this instance, so it answers
+                503 for every one of the tenant's buckets. Check keys.tenants.acme
+                and its credentials; the tenant opens at the next restart.
+
+  # gw2 restarts onto generation 3 after 10 minutes and gw1 never does: a
+  # rollout in progress is quiet, one left unfinished for 30 minutes fires.
+  - interval: 1m
+    input_series:
+      - series: 'blindbucket_keyring_generation{instance="gw1",job="blindbucket"}'
+        values: '2x60'
+      - series: 'blindbucket_keyring_generation{instance="gw2",job="blindbucket"}'
+        values: '2x10 3x50'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: BlindbucketKeyringGenerationSkew
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: BlindbucketKeyringGenerationSkew
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: blindbucket
+            exp_annotations:
+              summary: "blindbucket: instances serve different keyring generations"
+              description: >-
+                The instances of blindbucket have not served one keyring
+                generation for 30 minutes; the newest is 3. Restart those behind.
+                Until they are, do not activate a tenant, take its census or
+                destroy its locks.
