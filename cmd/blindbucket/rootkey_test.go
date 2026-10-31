@@ -94,3 +94,13 @@ func TestUnsealFixNamesTheSettings(t *testing.T) {
 		}
 	}
 }
+
+// openKeyring opens a keyring file whole and returns its default tenant: what
+// the tests of a keyring without tenants look at.
+func openKeyring(ctx context.Context, path string, cfg config.Keys, pass *passphraseFlags) (*keys.Keyring, error) {
+	f, _, err := openFile(ctx, path, cfg, pass, openTenant(ctx, cfg))
+	if err != nil {
+		return nil, err
+	}
+	return f.Default, nil
+}

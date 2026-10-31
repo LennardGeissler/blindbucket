@@ -13,12 +13,10 @@ import (
 // ErrKeyringHasTenants is what LoadKeyring returns for a version 2 file.
 // LoadKeyring opens the default tenant alone, which is wrong for any keyring
 // with tenants: a caller would wrap tenants' buckets under the default
-// tenant's keys, or miss the tenants' keys on a read (ADR-038). The gateway and
-// the commands that work on a bucket open the file whole; what still uses
-// LoadKeyring refuses such a keyring until it is taught otherwise.
-var ErrKeyringHasTenants = errors.New("keys: this keyring has tenants (version 2), which encrypt, " +
-	"decrypt do not open yet; serve, doctor, audit, the bucket commands and the keyring " +
-	"commands do")
+// tenant's keys, or miss the tenants' keys on a read (ADR-038). Every command
+// opens the file whole, with OpenFile.
+var ErrKeyringHasTenants = errors.New("keys: this keyring has tenants (version 2); " +
+	"it is opened whole, with OpenFile, not with LoadKeyring")
 
 // File is a keyring file opened whole, version 1 or 2: the default tenant and,
 // with tenants, the directory and every tenant's keys.
