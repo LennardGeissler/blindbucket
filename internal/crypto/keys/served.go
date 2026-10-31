@@ -136,6 +136,37 @@ func (s *Served) For(bucket string) (BucketKeys, error) {
 	return BucketKeys{Tenant: name, KID: t.ActiveKID, NameTenant: name, Name: nk}, nil
 }
 
+// AuditTenant says whose key encrypts the names of an audit entry about bucket
+// (FORMAT.md section 14.5): "" for the deployment's, or the bucket's tenant's
+// whenever it opened here, active or not. Unlike a bucket's object names,
+// nothing needs every instance to agree on it, since a reader tries every key
+// it holds; so a tenant's entries are its own from the start, and shredded with
+// it. held is false for a tenant destroyed or not opened here.
+func (s *Served) AuditTenant(bucket string) (tenant string, held bool) {
+	name, destroyed := s.dir.Tenant(bucket)
+	switch {
+	case destroyed:
+		return name, false
+	case name == DefaultTenant:
+		return "", true
+	}
+	return name, s.tenants[name].Ring != nil
+}
+
+// AuditNameKey returns the key a tenant's audit entries encrypt names under,
+// derived from its name key. The caller owns it and should wipe it.
+func (s *Served) AuditNameKey(tenant string) ([]byte, error) {
+	t := s.tenants[tenant]
+	if t == nil || t.Ring == nil {
+		return nil, fmt.Errorf("keys: tenant %q is not open here", tenant)
+	}
+	nk, ok := t.Ring.NameKey()
+	if !ok {
+		return nil, fmt.Errorf("keys: tenant %q has no name key", tenant)
+	}
+	return nk.AuditNameKey()
+}
+
 // ActiveKID implements KeyProvider with the default tenant's active key. Writes
 // to a bucket use For's.
 func (s *Served) ActiveKID() string { return s.def.ActiveKID() }

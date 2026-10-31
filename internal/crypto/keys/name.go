@@ -1,9 +1,15 @@
 package keys
 
 import (
+	"crypto/hkdf"
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 )
+
+// tenantAuditNameInfo is the HKDF info of a tenant's audit name key (FORMAT.md
+// section 14.5).
+const tenantAuditNameInfo = "blindbucket/v1/tenant-audit-name"
 
 // NameKeySize is the length of the key that encrypts object names.
 //
@@ -55,6 +61,15 @@ func (k *NameKey) Secret() []byte {
 	out := make([]byte, NameKeySize)
 	copy(out, k.secret[:])
 	return out
+}
+
+// AuditNameKey derives the key that encrypts the names in audit entries about
+// a tenant's buckets (FORMAT.md section 14.5), from that tenant's name key. It
+// is derived rather than kept so that a tenant's entries are shredded with its
+// name key: once the tenant is destroyed, no key reads their names. The caller
+// owns the result and should wipe it.
+func (k *NameKey) AuditNameKey() ([]byte, error) {
+	return hkdf.Key(sha256.New, k.secret[:], nil, tenantAuditNameInfo, KeySize)
 }
 
 // Wipe zeroes the key.

@@ -156,7 +156,7 @@ Flags:
 		return err
 	}
 
-	auditLog, err := openAuditLog(cfg, ring, log, metrics)
+	auditLog, err := openAuditLog(cfg, ring, served, log, metrics)
 	if err != nil {
 		return err
 	}
@@ -370,7 +370,7 @@ func listenError(setting, addr string, err error) error {
 // and a log nobody can verify -- so a keyring without one is a startup error
 // naming the command that fixes it (ADR-016).
 func openAuditLog(
-	cfg *config.Config, ring *keys.Keyring, log *slog.Logger, metrics *obs.Metrics,
+	cfg *config.Config, ring *keys.Keyring, tenants audit.Tenants, log *slog.Logger, metrics *obs.Metrics,
 ) (*audit.Writer, error) {
 	if !cfg.Audit.Enabled() {
 		return nil, nil
@@ -404,6 +404,7 @@ func openAuditLog(
 		Chain:              cfg.Audit.Chain,
 		Signer:             signer,
 		NameKey:            nameKey,
+		Tenants:            tenants,
 		CheckpointEvery:    cfg.Audit.CheckpointEvery,
 		CheckpointInterval: interval,
 		RotateBytes:        cfg.Audit.RotateBytes,
