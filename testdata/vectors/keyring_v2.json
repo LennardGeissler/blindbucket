@@ -23,7 +23,8 @@
             "keks": {
               "acme-2026-10": "f80b4e732e19838f6dd43741a0913b10a4c12f1b09bb1c6df8d59eace260e159"
             },
-            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba"
+            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba",
+            "audit_name_key": "cd9c68d3cc867f5ed331449d5b403a9deb0117d3fd3ba52f71ae0897ecf9816f"
           }
         },
         "unopened": [],
@@ -81,14 +82,16 @@
             "keks": {
               "acme-2026-10": "f80b4e732e19838f6dd43741a0913b10a4c12f1b09bb1c6df8d59eace260e159"
             },
-            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba"
+            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba",
+            "audit_name_key": "cd9c68d3cc867f5ed331449d5b403a9deb0117d3fd3ba52f71ae0897ecf9816f"
           },
           "beta": {
             "active_kid": "",
             "keks": {
               "beta-1": "a9488b0aa7199912d75486308bfcf2a15b7b311ed3e3b4e8eb71851fd9a457dd"
             },
-            "name_key": "cff2acdc78936d311c7007251d901281c69928f224619a8cffa9c517ddbb42b8"
+            "name_key": "cff2acdc78936d311c7007251d901281c69928f224619a8cffa9c517ddbb42b8",
+            "audit_name_key": "186975544cc7a3fed75152bf694475a4f79aa163295bc8a13456a959e8ae65e9"
           }
         },
         "unopened": [],
@@ -144,7 +147,8 @@
             "keks": {
               "beta-1": "a9488b0aa7199912d75486308bfcf2a15b7b311ed3e3b4e8eb71851fd9a457dd"
             },
-            "name_key": "cff2acdc78936d311c7007251d901281c69928f224619a8cffa9c517ddbb42b8"
+            "name_key": "cff2acdc78936d311c7007251d901281c69928f224619a8cffa9c517ddbb42b8",
+            "audit_name_key": "186975544cc7a3fed75152bf694475a4f79aa163295bc8a13456a959e8ae65e9"
           }
         },
         "unopened": [
@@ -256,7 +260,8 @@
             "keks": {
               "acme-2026-10": "f80b4e732e19838f6dd43741a0913b10a4c12f1b09bb1c6df8d59eace260e159"
             },
-            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba"
+            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba",
+            "audit_name_key": "cd9c68d3cc867f5ed331449d5b403a9deb0117d3fd3ba52f71ae0897ecf9816f"
           }
         },
         "unopened": [],
@@ -362,7 +367,8 @@
             "keks": {
               "acme-2026-10": "f80b4e732e19838f6dd43741a0913b10a4c12f1b09bb1c6df8d59eace260e159"
             },
-            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba"
+            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba",
+            "audit_name_key": "cd9c68d3cc867f5ed331449d5b403a9deb0117d3fd3ba52f71ae0897ecf9816f"
           }
         },
         "unopened": [],
@@ -420,7 +426,8 @@
             "keks": {
               "acme-2026-10": "f80b4e732e19838f6dd43741a0913b10a4c12f1b09bb1c6df8d59eace260e159"
             },
-            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba"
+            "name_key": "913000aa6db63a33592056e8468512cfca53b8d5d2f903b5d73a737e1408c2ba",
+            "audit_name_key": "cd9c68d3cc867f5ed331449d5b403a9deb0117d3fd3ba52f71ae0897ecf9816f"
           }
         },
         "unopened": [],

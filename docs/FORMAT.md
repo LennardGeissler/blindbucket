@@ -789,7 +789,8 @@ that shows names finds the key by trying the ones it holds: the audit secret's
 of them, since a wrong key fails it with probability 1 − 2⁻¹²⁸ per segment. Once a
 tenant is destroyed no key accepts its entries' names, and they stay opaque, while
 the entries still verify. A `kid` in clear may name its tenant all the same, if the
-operator's key ids do.
+operator's key ids do. Each opened tenant's `nameKey_T` is among the keyring vectors
+of §18.8.
 
 ### 14.6 Keys
 
@@ -1310,8 +1311,8 @@ Known-answer vectors live in
 [`testdata/vectors/keyring_v2.json`](../testdata/vectors/keyring_v2.json) and are a
 normative part of this specification, as those of sections 13, 15.6 and 17.5 are.
 Each fixes the root keys, the file, and what opening it must yield: the keys of
-every opened tenant, which tenants are unopened, and which bucket names fall in
-which tenant. Negative vectors fix files a reader must refuse, each for one rule of
+every opened tenant, with the audit name key §14.5 derives from its name key, which
+tenants are unopened, and which bucket names fall in which tenant. Negative vectors fix files a reader must refuse, each for one rule of
 §18.6.
 
 Regenerate them after a deliberate change with:
