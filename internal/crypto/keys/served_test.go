@@ -117,3 +117,45 @@ func TestServedIsASnapshot(t *testing.T) {
 		t.Errorf("assigning beta-2 in the file reached the served keyring: %+v", got)
 	}
 }
+
+// An audit entry's names go under the key of the bucket's tenant whenever it
+// opened here, active or not, and are not held for one destroyed or unopened.
+func TestServedAuditTenant(t *testing.T) {
+	type want struct {
+		tenant string
+		held   bool
+	}
+	for withAcme, cases := range map[bool]map[string]want{
+		true: {
+			"other": {"", true}, "acme-photos": {"acme", true},
+			"beta-1": {"beta", true}, "globex-data": {"globex", false},
+		},
+		false: {"acme-photos": {"acme", false}, "beta-1": {"beta", true}},
+	} {
+		s := servedFile(t, withAcme)
+		for bucket, w := range cases {
+			if tenant, held := s.AuditTenant(bucket); tenant != w.tenant || held != w.held {
+				t.Errorf("acme open %v: AuditTenant(%q) = %q, %v; want %q, %v",
+					withAcme, bucket, tenant, held, w.tenant, w.held)
+			}
+		}
+	}
+
+	s := servedFile(t, true)
+	nk, _ := s.tenants["acme"].Ring.NameKey()
+	acmeKey, err := nk.AuditNameKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.AuditNameKey("acme"); err != nil || !bytes.Equal(got, acmeKey) {
+		t.Errorf("AuditNameKey(acme) = %x, %v", got, err)
+	}
+	for _, tenant := range []string{"zeta", "globex"} {
+		if _, err := s.AuditNameKey(tenant); err == nil {
+			t.Errorf("AuditNameKey(%s) gave a key", tenant)
+		}
+	}
+	if _, err := servedFile(t, false).AuditNameKey("acme"); err == nil {
+		t.Error("AuditNameKey gave an unopened tenant's key")
+	}
+}
