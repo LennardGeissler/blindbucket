@@ -20,9 +20,10 @@ import (
 // startDashboard serves the read-only status page when admin.dashboard.listen
 // is set (ADR-035), and returns nil when it is not.
 func startDashboard(
-	cfg *config.Config, ring *keys.Keyring, client *upstream.Client, auditLog *audit.Writer,
+	cfg *config.Config, served *keys.Served, client *upstream.Client, auditLog *audit.Writer,
 	started time.Time, log *slog.Logger,
 ) (*dashboard.Server, error) {
+	ring := served.Default()
 	if cfg.Admin.Dashboard.Listen == "" {
 		return nil, nil
 	}
@@ -30,6 +31,7 @@ func startDashboard(
 		Listen: cfg.Admin.Dashboard.Listen, Version: version, Started: started,
 		Ready:   readiness(client, ring, probeBucket(cfg)),
 		Keyring: ring, Sealing: sealing(cfg.Keys),
+		Generation: served.Generation(), Tenants: dashboardTenants(served),
 		Logger: log,
 	}
 	// Set only with a writer: a nil *audit.Writer in the interface would read
@@ -50,6 +52,23 @@ func startDashboard(
 		return nil, listenError("admin.dashboard.listen", cfg.Admin.Dashboard.Listen, err)
 	}
 	return d, nil
+}
+
+// dashboardTenants is what the page shows of the tenants: no key, and of
+// each lock only what kind it is and its name.
+func dashboardTenants(served *keys.Served) []dashboard.Tenant {
+	var out []dashboard.Tenant
+	for _, t := range served.Tenants() {
+		d := dashboard.Tenant{
+			Name: t.Name, Buckets: t.Buckets, ActiveKID: t.ActiveKID, Open: t.Ring != nil,
+			Lock: describeLock(t.Lock()),
+		}
+		if t.Err != nil {
+			d.Err = t.Err.Error()
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 // sealing says in words what seals the keyring, naming where and which key

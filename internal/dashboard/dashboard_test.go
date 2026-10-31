@@ -195,3 +195,34 @@ func TestTheAuditLogIsVerifiedInTheBackgroundOnly(t *testing.T) {
 		t.Errorf("ten page loads made %d verifications, want none beyond the one at start", got-1)
 	}
 }
+
+// With tenants the keyring section shows the generation served and each
+// tenant: its buckets, the key its writes use, its lock, and whether it opened.
+func TestThePageShowsTenants(t *testing.T) {
+	s := New(Config{
+		Version: "1.7.0", Keyring: keyring{}, Sealing: "a passphrase", Generation: 4,
+		Tenants: []Tenant{
+			{Name: "acme", Buckets: []string{"acme-*", "shared-reports"}, ActiveKID: "acme-2026-10",
+				Open: true, Lock: "AWS KMS key alias/bb-acme"},
+			{Name: "beta", Buckets: []string{"beta-1"}, Lock: "a passphrase",
+				Err: `keys.tenants.beta is not configured`},
+		},
+		Logger: quiet(),
+	})
+	page := get(t, s.Handler(), http.MethodGet, "localhost", "/").body
+	for _, want := range []string{
+		"generation 4", "acme", "<code>acme-*</code>, <code>shared-reports</code>", "<code>acme-2026-10</code>",
+		"AWS KMS key alias/bb-acme", `<span class="tag">open</span>`,
+		"beta", "not active", `<span class="bad">not open</span>`, "keys.tenants.beta is not configured",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the page does not show %q", want)
+		}
+	}
+
+	without := get(t, New(Config{Version: "1.7.0", Keyring: keyring{}, Logger: quiet()}).Handler(),
+		http.MethodGet, "localhost", "/").body
+	if strings.Contains(without, "Tenants") {
+		t.Error("a keyring without tenants shows a tenants table")
+	}
+}

@@ -37,6 +37,25 @@
     {{end}}
     </tbody>
   </table>
+  {{if .Tenants}}
+  <p>Tenants, at keyring generation {{.Generation}}:</p>
+  <table>
+    <thead><tr><th>Tenant</th><th>Buckets</th><th>Writes under</th><th>Lock</th><th></th></tr></thead>
+    <tbody>
+    {{range .Tenants}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td>{{range $i, $b := .Buckets}}{{if $i}}, {{end}}<code>{{$b}}</code>{{end}}</td>
+        <td>{{if .ActiveKID}}<code>{{.ActiveKID}}</code>{{else}}the default tenant's keys: not active{{end}}</td>
+        <td>{{.Lock}}</td>
+        <td>{{if .Open}}<span class="tag">open</span>{{else}}<span class="bad">not open</span>{{end}}</td>
+      </tr>
+      {{if not .Open}}<tr><td></td><td colspan="4" class="detail">{{.Err}}</td></tr>{{end}}
+    {{end}}
+    </tbody>
+  </table>
+  <p class="note">A tenant that is not open answers 503 for its buckets on this instance.</p>
+  {{end}}
 </section>
 
 <section>

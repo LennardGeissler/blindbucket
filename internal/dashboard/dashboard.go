@@ -96,6 +96,10 @@ type Config struct {
 	// Ready is the readiness check /readyz runs. Nil means ready.
 	Ready   func(context.Context) error
 	Keyring Keyring
+	// Generation is the keyring generation served, 0 for a keyring without
+	// tenants, and Tenants its tenants (ADR-038).
+	Generation uint64
+	Tenants    []Tenant
 	// Sealing says what seals the keyring, in words: "a passphrase", or which
 	// Vault, OpenBao or KMS key. It names no credential.
 	Sealing string
@@ -104,6 +108,21 @@ type Config struct {
 	Verify      func(context.Context) Verification
 	VerifyEvery time.Duration
 	Logger      *slog.Logger
+}
+
+// Tenant is what the page shows of one tenant: no key, and no credential of
+// its lock.
+type Tenant struct {
+	Name    string
+	Buckets []string
+	// ActiveKID is the key its buckets are written under, "" while it is not
+	// active and they use the default tenant's.
+	ActiveKID string
+	// Open says whether its keys opened on this instance; Err why not.
+	Open bool
+	Err  string
+	// Lock says what seals it, in words, as Sealing does for the keyring.
+	Lock string
 }
 
 // Server is the dashboard's listener.
@@ -253,8 +272,10 @@ type view struct {
 	NotReady           string
 	ReadyAt            time.Time
 
-	Keys    []keyView
-	Sealing string
+	Keys       []keyView
+	Sealing    string
+	Generation uint64
+	Tenants    []Tenant
 
 	Audit    *audit.Status
 	Broken   string
@@ -271,7 +292,7 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request) {
 	v := view{
 		Version: s.cfg.Version, GoVersion: runtime.Version(), Started: s.cfg.Started,
 		Uptime:  time.Since(s.cfg.Started).Round(time.Second).String(),
-		Sealing: s.cfg.Sealing,
+		Sealing: s.cfg.Sealing, Generation: s.cfg.Generation, Tenants: s.cfg.Tenants,
 	}
 	readyAt, readyErr := s.ready(r.Context())
 	v.Ready, v.ReadyAt = readyErr == nil, readyAt
