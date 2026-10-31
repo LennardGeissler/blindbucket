@@ -603,8 +603,8 @@ upstream outage is worse than the outage. `/readyz` does, and says which half
 failed.
 
 A read-only status page shows the same at a glance -- whether the gateway is ready,
-which keys it holds and what seals them, and whether the audit log is being signed
-and still verifies:
+which keys it holds and what seals them, which tenants it serves and whether each
+opened, and whether the audit log is being signed and still verifies:
 
 ```yaml
 admin:
@@ -648,6 +648,30 @@ from startup, because a series that first appears at 1 has nothing to rise from:
 `increase()` over it stays 0, and the alert would miss exactly the first failure.
 The rule tests keep that case as one that must stay silent, so the reason is not
 lost.
+
+## Tenants
+
+Groups that share a gateway can have keys of their own. A tenant is a set of buckets
+with its own key-encryption keys and name key, sealed in the keyring under a lock of its
+own: a KMS key, a Vault Transit key or a passphrase. Destroying that lock deletes the
+tenant, wherever the ciphertext and the copies of the keyring are, without the gateway
+deleting an object ([ADR-038](docs/adr/ADR-038-tenants-and-crypto-shredding.md)).
+
+```sh
+blindbucket tenants create --keyring keyring.json --config blindbucket.yaml acme 'acme-*'
+# roll out, then:
+blindbucket tenants activate --keyring keyring.json --config blindbucket.yaml acme
+# and, one day, after a clean census:
+blindbucket tenants destroy --config blindbucket.yaml acme
+```
+
+Every change is a new keyring generation that reaches an instance when it restarts,
+and the next step waits until every instance serves it; `blindbucket_keyring_generation`
+says when. [docs/guides/tenants.md](docs/guides/tenants.md) walks through the order, and
+[THREAT_MODEL §5.12](docs/THREAT_MODEL.md#512-tenants-and-their-destruction) says what a
+destruction promises and what it does not: key services keep a deleted key for a while,
+a passphrase is gone only once everyone forgets it, and the provider still sees what it
+saw before.
 
 ## The audit log
 

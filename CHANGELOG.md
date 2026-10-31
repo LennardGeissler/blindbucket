@@ -26,9 +26,8 @@ version 1 would keep being readable.
   tenants with keys of their own under a lock of their own, configured in `keys.tenants`,
   and gives them buckets; `reseal --tenant` moves a tenant to another lock and keeps the
   old one in its history. `keygen`, `keys remove` and `reseal` keep a keyring's tenants,
-  and `keys list` gains a `TENANT` column and `tenant` and `opened` in `--json`.
-  `encrypt`, `decrypt` and `doctor` do not open such a keyring yet and refuse it by
-  name ([#133](https://github.com/LennardGeissler/blindbucket/issues/133)).
+  and `keys list` gains a `TENANT` column and `tenant` and `opened` in `--json`
+  ([#133](https://github.com/LennardGeissler/blindbucket/issues/133)).
 - **The gateway serves tenants.** Writes to an active tenant's buckets wrap under its
   keys and, with `names.encrypt`, map names under its name key; an inactive tenant's
   buckets behave as the default tenant's, and reads go by the key each object names. A
@@ -56,6 +55,19 @@ version 1 would keep being readable.
   signatures verify as before. Entries about a bucket whose tenant is destroyed or not
   open on the instance record the names as digests. `audit verify --print` opens a
   keyring with tenants and decrypts each entry with whichever key it holds opens it.
+- **`doctor`, `encrypt` and `decrypt` open a keyring with tenants.** `doctor` opens every
+  tenant the configuration can, and a new check, `tenants`, fails for one that does not
+  open, since its buckets would answer 503. It warns about a tenant under the
+  deployment's lock and about a `keys.tenants` entry the keyring does not have.
+  `encrypt` wraps under the default tenant's key, and `decrypt` finds a file's key in
+  whichever tenant holds it, naming a tenant that did not open or was destroyed.
+- **The status page shows the tenants.** With tenants, it shows the keyring generation
+  the instance serves, and per tenant its buckets, the key its writes use, its lock and
+  whether it opened here, with why not.
+- **A guide to running tenants and destroying one.**
+  [docs/guides/tenants.md](docs/guides/tenants.md) gives the order of operations, and
+  THREAT_MODEL §5.12 what a destruction promises and what it does not. That includes one
+  limit: in a versioned bucket, the census and `rotate` see current objects only.
 
 ### Fixed
 
