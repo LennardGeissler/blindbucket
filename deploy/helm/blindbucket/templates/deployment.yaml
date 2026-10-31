@@ -71,6 +71,22 @@ spec:
               valueFrom: { secretKeyRef: { name: {{ .Values.keys.awskms.credentialsSecret | quote }}, key: session_token } }
             {{- end }}
             {{- end }}
+            {{- range $i, $name := keys .Values.keys.tenants | sortAlpha }}
+            {{- $t := index $.Values.keys.tenants $name }}
+            {{- if eq $t.provider "vault" }}
+            - name: TENANT_{{ $i }}_VAULT_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ $t.vault.tokenSecret | quote }}, key: token } }
+            {{- else if and (eq $t.provider "awskms") (eq ($t.awskms.credentialSource | default "static") "static") }}
+            - name: TENANT_{{ $i }}_KMS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: {{ $t.awskms.credentialsSecret | quote }}, key: access_key_id } }
+            - name: TENANT_{{ $i }}_KMS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: {{ $t.awskms.credentialsSecret | quote }}, key: secret_access_key } }
+            {{- if $t.awskms.sessionToken }}
+            - name: TENANT_{{ $i }}_KMS_SESSION_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ $t.awskms.credentialsSecret | quote }}, key: session_token } }
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- range $i, $c := .Values.clients }}
             - name: CLIENT_{{ $i }}_ACCESS_KEY_ID
               valueFrom: { secretKeyRef: { name: {{ $c.existingSecret | quote }}, key: access_key_id } }
@@ -103,6 +119,11 @@ spec:
             {{- if eq .Values.keys.provider "file" }}
             - { name: passphrase, mountPath: /etc/blindbucket/passphrase, readOnly: true }
             {{- end }}
+            {{- range $i, $name := keys .Values.keys.tenants | sortAlpha }}
+            {{- if eq (index $.Values.keys.tenants $name).provider "file" }}
+            - { name: tenant-{{ $i }}-passphrase, mountPath: /etc/blindbucket/tenants/{{ $name }}, readOnly: true }
+            {{- end }}
+            {{- end }}
       # On SIGTERM the process stops accepting connections and lets requests in
       # flight finish within its own 30 seconds; the rest is room for the
       # endpoint to leave the Service. An upload cut off here leaves nothing
@@ -127,6 +148,16 @@ spec:
             secretName: {{ .Values.keys.passphraseSecret | quote }}
             items: [{ key: passphrase, path: passphrase }]
             defaultMode: 0440
+        {{- end }}
+        {{- range $i, $name := keys .Values.keys.tenants | sortAlpha }}
+        {{- $t := index $.Values.keys.tenants $name }}
+        {{- if eq $t.provider "file" }}
+        - name: tenant-{{ $i }}-passphrase
+          secret:
+            secretName: {{ $t.passphraseSecret | quote }}
+            items: [{ key: passphrase, path: passphrase }]
+            defaultMode: 0440
+        {{- end }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

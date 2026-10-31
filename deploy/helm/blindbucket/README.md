@@ -96,6 +96,38 @@ why — rather than running with the node's instance role, which is what the AWS
 SDK's default chain does in that case. `imds` would choose the node's role on
 purpose, and is rarely what a pod should have.
 
+## Tenants
+
+A keyring with tenants ([ADR-038](../../../docs/adr/ADR-038-tenants-and-crypto-shredding.md))
+needs each tenant's lock under `keys.tenants`, by name: `provider` and that
+provider's settings, with its secret in a Secret of its own, as for `keys`. A
+tenant under the deployment's lock needs no entry. One missing here does not open,
+and the gateway answers 503 for its buckets; `BlindbucketTenantNotOpen` fires.
+
+```yaml
+keys:
+  tenants:
+    acme:
+      provider: awskms
+      awskms: { region: eu-central-1, keyId: alias/bb-acme, credentialsSecret: bb-acme-kms }
+```
+
+Every tenant command writes the keyring as a new generation, and the keyring
+Secret is not the chart's, so a change to it reaches the pods only when they
+restart. Replace the Secret, then roll the Deployment and wait until
+`blindbucket_keyring_generation` is the new one on every pod before the next
+step:
+
+```sh
+kubectl create secret generic blindbucket-keyring --from-file=keyring.json \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl rollout restart deployment/<release>-blindbucket
+kubectl rollout status deployment/<release>-blindbucket
+```
+
+`BlindbucketKeyringGenerationSkew` fires when a rollout has not ended within 30
+minutes.
+
 ## The status page
 
 `dashboard.enabled` serves the gateway's read-only status page

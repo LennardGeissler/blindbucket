@@ -102,6 +102,23 @@ keys:
     # true when the credentials are temporary: the Secret then also holds
     # session_token.
     sessionToken: false
+  # Tenants (ADR-038): the lock each tenant is sealed under, by the tenant's
+  # name. Which tenants exist and which buckets are theirs is recorded in the
+  # keyring, not here, and a tenant under the deployment's lock needs no entry.
+  # Each entry takes provider and that provider's settings, as above:
+  #   acme:
+  #     provider: awskms
+  #     awskms: { region: eu-central-1, keyId: alias/bb-acme, credentialsSecret: bb-acme-kms }
+  #   beta:
+  #     provider: vault
+  #     vault: { address: https://vault:8200, keyName: bb-beta, tokenSecret: bb-beta-vault }
+  #   gamma:
+  #     provider: file
+  #     passphraseSecret: bb-gamma-passphrase
+  # A tenant missing here does not open: the gateway answers 503 for its
+  # buckets. The keyring Secret is not the chart's, so a change to it reaches
+  # the pods only with `kubectl rollout restart`; see the chart's README.
+  tenants: {}
 
 # The ServiceAccount the pods run as. On EKS it is what a role attaches to:
 # with IRSA, annotate it with eks.amazonaws.com/role-arn and set
