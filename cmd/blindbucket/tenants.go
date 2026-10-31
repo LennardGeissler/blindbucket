@@ -736,12 +736,94 @@ Flags:
 		"  Its keys are gone from this file, and from no earlier copy yet.\n"+
 		"  1. Roll this keyring out until blindbucket_keyring_generation is %d on every\n"+
 		"     instance, and let every command started on an earlier keyring end.\n"+
-		"  2. Then destroy each lock %s was ever sealed under:\n",
+		"  2. Then destroy each lock %s was ever sealed under. Until the last is gone,\n"+
+		"     a copy of the keyring from before opens its keys.\n",
 		name, path, f.Generation+1, strings.Join(tomb.Buckets, ", "), f.Generation+1, name)
-	for _, l := range tomb.Locks {
-		fmt.Fprintf(os.Stderr, "     - %s\n", describeLock(l))
+	deployment, err := keys.ReadRootKeyRef(sealed)
+	if err != nil {
+		return err
+	}
+	for _, line := range lockInstructions(f, deployment, cfg.Keys.Tenants[name], tomb) {
+		fmt.Fprintln(os.Stderr, "     "+line)
+	}
+	if _, ok := cfg.Keys.Tenants[name]; ok {
+		fmt.Fprintf(os.Stderr, "  3. Remove keys.tenants.%s from the configuration of every instance.\n", name)
 	}
 	return nil
+}
+
+// lockInstructions says, for each lock a destroyed tenant was ever sealed
+// under, what destroys it and where: the command does not, so that the
+// gateway's credentials need no right to delete keys. A key that also seals
+// the deployment or a live tenant is called out instead, since destroying it
+// would destroy them too. tc is the tenant's entry under keys.tenants, if the
+// configuration still has one.
+func lockInstructions(f *keys.File, deployment keys.RootKeyRef, tc config.Keys, tomb keys.Tombstone) []string {
+	var out []string
+	for _, l := range tomb.Locks {
+		if l.Source == keys.LockDeployment {
+			out = append(out,
+				"- the deployment's lock: every copy of the keyring from while "+tomb.Name+" was under it",
+				"  opens its keys with the deployment's root key, which cannot be destroyed without",
+				"  the deployment. Destroying them means deleting those copies: backups, Secrets,",
+				"  and old releases of the file.")
+			continue
+		}
+		if l.Source == keys.SourcePassphrase {
+			out = append(out,
+				"- a passphrase (salt "+l.Salt+"): forget it, every copy of it, in passphrase files,",
+				"  password managers and scripts. Nothing can check that it is gone.")
+			continue
+		}
+		if users := lockUsers(f, deployment, l); len(users) > 0 {
+			out = append(out,
+				"- "+describeLock(l)+": DO NOT DESTROY. It also seals "+strings.Join(users, " and ")+",",
+				"  which destroying it would destroy too. "+tomb.Name+"'s keys stay in every copy of",
+				"  the keyring from while it was under this key, until those copies are deleted.")
+			continue
+		}
+		switch l.Source {
+		case keys.SourceAWSKMS:
+			out = append(out,
+				"- "+describeLock(l)+": schedule its deletion. That takes a key id, not an",
+				"  alias, so look the key up; if an alias was moved since "+tomb.Name+" was sealed",
+				"  under it, the key is the one it pointed to then:",
+				"    aws kms describe-key --key-id "+l.KeyName+" --query KeyMetadata.KeyId",
+				"    aws kms schedule-key-deletion --key-id <that key id> --pending-window-in-days 7",
+				"  Until the waiting period of 7 to 30 days ends, the deletion can be cancelled and",
+				"  "+tomb.Name+" brought back with the key.")
+		case keys.SourceVaultTransit:
+			mount := "transit"
+			if tc.Provider == "vault" && tc.Vault.KeyName == l.KeyName && tc.Vault.Mount != "" {
+				mount = tc.Vault.Mount
+			}
+			out = append(out,
+				"- "+describeLock(l)+": delete it, where its Transit engine is mounted:",
+				"    vault write "+mount+"/keys/"+l.KeyName+"/config deletion_allowed=true",
+				"    vault delete "+mount+"/keys/"+l.KeyName,
+				"  Vault's snapshots, and any backup or export of the key, hold it until they are",
+				"  deleted too.")
+		default:
+			out = append(out, "- "+describeLock(l)+": destroy it at its key service.")
+		}
+	}
+	return out
+}
+
+// lockUsers names who else a service key seals: the deployment, or a live
+// tenant now or at any time before. Only the recorded names are compared, so
+// an alias and the key id it stands for are not seen to be the same key.
+func lockUsers(f *keys.File, deployment keys.RootKeyRef, l keys.Lock) []string {
+	var users []string
+	if deployment.Source == l.Source && deployment.KeyName == l.KeyName {
+		users = append(users, "the deployment")
+	}
+	for _, t := range f.Tenants {
+		if slices.Contains(t.Locks, l) {
+			users = append(users, "tenant "+t.Name)
+		}
+	}
+	return users
 }
 
 // destroyVerdict decides whether a census lets a tenant be destroyed: only a

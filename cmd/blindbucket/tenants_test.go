@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/LennardGeissler/blindbucket/internal/census"
+	"github.com/LennardGeissler/blindbucket/internal/config"
 	"github.com/LennardGeissler/blindbucket/internal/crypto/keys"
 	"github.com/LennardGeissler/blindbucket/internal/testprovider"
 )
@@ -454,7 +455,7 @@ func TestTenantsDestroy(t *testing.T) {
 	if !strings.Contains(stdout, bucket) || !strings.Contains(stdout, "(does not exist)") {
 		t.Errorf("destroy does not show its census:\n%s", stdout)
 	}
-	for _, want := range []string{"destroyed tenant acme", "generation 2", "a passphrase"} {
+	for _, want := range []string{"destroyed tenant acme", "generation 2", "a passphrase (salt", "forget it"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("destroy does not say %q:\n%s", want, stderr)
 		}
@@ -509,6 +510,44 @@ func TestDestroyVerdict(t *testing.T) {
 		}
 		if err := destroyVerdict("acme", r, true); err != nil {
 			t.Errorf("off %d, failed %d with --force: %v", r.OffTenant(), r.Failed(), err)
+		}
+	}
+}
+
+// Each lock is named with what destroys it, and a key that also seals the
+// deployment or a live tenant is called out rather than offered for deletion.
+func TestLockInstructions(t *testing.T) {
+	deployment := keys.RootKeyRef{Source: keys.SourceAWSKMS, KeyName: "alias/bb"}
+	shared := keys.Lock{Source: keys.SourceVaultTransit, KeyName: "bb-shared"}
+	f := &keys.File{Tenants: []*keys.Tenant{{Name: "beta", Locks: []keys.Lock{shared, {Source: keys.LockDeployment}}}}}
+	tomb := keys.Tombstone{Name: "acme", Locks: []keys.Lock{
+		{Source: keys.LockDeployment},
+		{Source: keys.SourcePassphrase, Salt: "c2FsdA=="},
+		{Source: keys.SourceAWSKMS, KeyName: "alias/bb-acme"},
+		{Source: keys.SourceVaultTransit, KeyName: "bb-acme"},
+		{Source: keys.SourceAWSKMS, KeyName: "alias/bb"},
+		shared,
+	}}
+	tc := config.Keys{Provider: "vault", Vault: config.VaultKeys{Mount: "tenants", KeyName: "bb-acme"}}
+	got := strings.Join(lockInstructions(f, deployment, tc, tomb), "\n")
+
+	for _, want := range []string{
+		"the deployment's lock: every copy of the keyring",
+		"a passphrase (salt c2FsdA==): forget it",
+		"aws kms describe-key --key-id alias/bb-acme",
+		"aws kms schedule-key-deletion --key-id <that key id> --pending-window-in-days 7",
+		"vault write tenants/keys/bb-acme/config deletion_allowed=true",
+		"vault delete tenants/keys/bb-acme",
+		"AWS KMS key alias/bb: DO NOT DESTROY. It also seals the deployment",
+		"Vault Transit key bb-shared: DO NOT DESTROY. It also seals tenant beta",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the instructions do not say %q", want)
+		}
+	}
+	for _, never := range []string{"--key-id alias/bb ", "keys/bb-shared"} {
+		if strings.Contains(got, never) {
+			t.Errorf("the instructions offer a shared key for deletion: %q", never)
 		}
 	}
 }
