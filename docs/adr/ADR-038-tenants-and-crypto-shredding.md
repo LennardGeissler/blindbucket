@@ -232,6 +232,11 @@ and in the audit log.
   stays readable after destruction for as long as the ciphertext is stored.
 - **Objects in the tenant's buckets that are not on its keys** when step 1 is
   overridden with `--force`.
+- **Earlier versions in a versioned bucket.** *Added while writing the threat model:*
+  the census, like `rotate`, lists current objects. A version written under the
+  default tenant's keys before the tenant was active, and replaced since, is not
+  counted and stays readable with those keys. A census over every version would
+  close this; until then such a bucket needs its noncurrent versions expired first.
 - **Copies a client made into another tenant's buckets.** They are the other
   tenant's data, wrapped under its keys, and that is correct.
 - **Plaintext that left the gateway**: client copies, caches, and the memory, swap

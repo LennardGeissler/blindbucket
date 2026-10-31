@@ -94,6 +94,7 @@ denotes an access architecture as defined in NIST SP 800-207, not an encryption 
 |---|---|
 | Object plaintext | in flight between client and proxy; transiently in proxy memory |
 | Key material — root key, KEKs, DEKs, token keys | KMS/Vault/passphrase; proxy memory; wrapped DEKs in object metadata |
+| A tenant's keys and the locks that seal them ([ADR-038](adr/ADR-038-tenants-and-crypto-shredding.md)) | the keyring, a section per tenant sealed under the tenant's own KMS key, Transit key or passphrase; proxy memory |
 | Client credentials for the proxy | proxy configuration, as references to the environment; a configuration `blindbucket init` wrote has the values in `blindbucket.env` beside it, mode 0600 |
 | Upstream credentials for the storage provider | proxy configuration, or resolved from the platform — IRSA, Pod Identity, the instance role ([ADR-024](adr/ADR-024-aws-credentials-without-the-sdk.md)); never disclosed to clients |
 
@@ -128,6 +129,7 @@ must reside in the same trust domain as the clients it serves.
 | Client authentication | **Yes** | SigV4 with proxy-specific credentials, constant-time comparison |
 | Tamper evidence of the audit log, once written | **Yes**, with limits | Hash chain and signed checkpoints, §5.8 |
 | Rollback to an older genuine version of the same key | **Yes**, with limits | Only with `freshness.index` configured, and only for objects the instance has seen before, §5.1 |
+| A destroyed tenant's objects, names and audit names unreadable | **Yes**, with limits | Its keys exist only under its locks, and destroying each lock destroys them, §5.12 |
 | Confidentiality of names, sizes, timestamps | **No** | §4 |
 | Authenticity of sizes reported in listings | **No** | Computed from unauthenticated upstream data, §5.4 |
 | Availability | **No** | The provider can delete or refuse access |
@@ -149,7 +151,9 @@ must reside in the same trust domain as the clients it serves.
 - Whether an object version has tags, and roughly how long its tag set is: the sidecar
   holding it ([ADR-037](adr/ADR-037-encrypted-object-tags.md)) is an object of its own,
   of a size that follows the tag set's. Not the tags themselves.
-- The id of the KEK in use — not the KEK itself.
+- The id of the KEK in use — not the KEK itself. With tenants, which buckets are whose is
+  in the keyring's sealed directory, not at the provider, but a key id names its tenant if
+  the operator's key ids do.
 - The chunk size the object was written with (`bb-c`). This is a deployment-wide
   constant rather than a property of the data, and it is recorded so that
   `HeadObject` and listings can report plaintext sizes without reading objects.
@@ -479,12 +483,58 @@ can do are **accepted risk**:
 
 Either looks like the client's own change.
 
+### 5.12 Tenants and their destruction
+
+A tenant ([ADR-038](adr/ADR-038-tenants-and-crypto-shredding.md)) is a set of buckets
+with its own KEKs and name key, sealed in the keyring under a lock of its own: a KMS
+key, a Vault Transit key or a passphrase. `blindbucket tenants destroy` takes a census
+of the tenant's buckets and writes the keyring without the tenant's keys. Once every
+instance serves that keyring and every lock the tenant ever had is destroyed at its
+service, **no copy of the keyring opens its keys**, current or old, in a backup or in a
+Secret's history. Every object the gateway wrote to its buckets is then unreadable, with
+its sealed tags and manifests. So are its encrypted names, in the bucket and in the audit
+log. That holds against the provider, against the operator, and against whoever holds
+the deployment's root key. The order of the steps, and why the locks come last, is
+model-checked (`spec/tla/Tenants.tla`).
+
+It promises nothing beyond what the key services do, and what remains is **accepted
+risk**:
+- **Before the service has deleted the key.** AWS KMS waits 7 to 30 days and the deletion
+  can be cancelled meanwhile. A Vault snapshot or storage backup from before still holds
+  a Transit key.
+- **A passphrase**, beyond everyone forgetting it, which nothing can check.
+- **A tenant under the deployment's lock.** It has keys of its own, but any copy of the
+  keyring opens them with the deployment's root key, so its destruction rests on every
+  such copy being deleted. `tenants create` warns, and `doctor` and `tenants destroy`
+  say so.
+- **Objects not under the tenant's keys.** The census stops a destruction that would
+  leave any, unless `--force` overrides it.
+- **Earlier versions in a versioned bucket.** The census and `rotate` see current objects
+  only. A version written under the default tenant's keys before the tenant was active,
+  and replaced since, is neither counted nor moved, and stays readable with those keys.
+  Such a bucket needs its noncurrent versions expired before the destruction.
+- **What the provider sees in clear** (§4): sizes, timestamps, access patterns, metadata
+  as clients sent it, and, with `names.encrypt` off, the names.
+- **Copies.** A client's copy into another tenant's bucket is that tenant's data.
+  Plaintext that left the gateway, and the memory of a process that held the keys (A5),
+  are beyond any key.
+- **Audit entries about a bucket whose tenant an instance did not hold** record their
+  names as digests under the audit secret. Those are not reversible, but whoever holds
+  the audit secret can test a guessed name against them (FORMAT §14.5).
+
+A destroyed tenant's buckets are refused, `403`, rather than falling back to the default
+tenant. Otherwise the first write after a destruction would store new data under keys
+nobody means to destroy.
+
 ---
 
 ## 6. Non-goals
 
 - Hiding metadata (names, sizes, timestamps, access patterns).
 - Protecting against a compromised proxy host or leaked KEK (A5).
+- Isolating tenants from each other or from the operator. Tenants share one gateway, one
+  deployment root key and one audit secret. A tenant is what can be destroyed, not a
+  boundary of trust.
 - Emulating S3 beyond the documented operation set — IAM, bucket policies, object lock,
   lifecycle and replication remain the provider's concern.
 - Compression or deduplication. Compressing before encrypting makes ciphertext length
