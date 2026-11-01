@@ -467,6 +467,21 @@ What the gateway does about it is to keep from making it worse:
   handles it. Both commands therefore need `s3:ListBucketMultipartUploads` on
   the bucket, as `gc` already did.
 
+### Object versions, for the census
+
+`tenants census`, and with it `tenants destroy`, counts every version a bucket keeps
+([#218](https://github.com/LennardGeissler/blindbucket/issues/218)). Measured on
+2026-11-01, with no gateway involved:
+
+| | MinIO `RELEASE.2026-09-22T19-25-18Z` | Garage v2.4.1 | AWS S3 |
+|---|---|---|---|
+| `ListObjectVersions` | **lists** every version and delete marker | `501 NotImplemented` | not measured |
+| `HeadObject` with `versionId` | **reads** the version's metadata | — | not measured |
+| `PutBucketVersioning` | **enabled** | `501 NotImplemented` | not measured |
+
+Garage has no versioning, so it keeps no earlier version to count, and the census
+lists its current objects instead and says so.
+
 ### Key services
 
 The root key that unlocks the keyring can come from a passphrase, from the

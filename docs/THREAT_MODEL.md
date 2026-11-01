@@ -507,12 +507,11 @@ risk**:
   keyring opens them with the deployment's root key, so its destruction rests on every
   such copy being deleted. `tenants create` warns, and `doctor` and `tenants destroy`
   say so.
-- **Objects not under the tenant's keys.** The census stops a destruction that would
-  leave any, unless `--force` overrides it.
-- **Earlier versions in a versioned bucket.** The census and `rotate` see current objects
-  only. A version written under the default tenant's keys before the tenant was active,
-  and replaced since, is neither counted nor moved, and stays readable with those keys.
-  Such a bucket needs its noncurrent versions expired before the destruction.
+- **Objects not under the tenant's keys**, when `--force` overrides the census, which
+  otherwise stops a destruction that would leave any. It counts every version a versioned
+  bucket keeps: a version written under the default tenant's keys before the tenant was
+  active survives its object being replaced, and `rotate` cannot move it, so it has to be
+  deleted or expired first.
 - **What the provider sees in clear** (§4): sizes, timestamps, access patterns, metadata
   as clients sent it, and, with `names.encrypt` off, the names.
 - **Copies.** A client's copy into another tenant's bucket is that tenant's data.

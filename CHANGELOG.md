@@ -41,7 +41,8 @@ version 1 would keep being readable.
   another tenant, and it and `scrub` report objects off the bucket's tenant's keys as
   `off_tenant`. `migrate-names` moves an active tenant's bucket from the default name
   key to the tenant's. `tenants census` counts, per bucket of a tenant, the objects not
-  under its keys, which is the first step of a destruction.
+  under its keys, earlier versions in a versioned bucket included, which is the first
+  step of a destruction.
 - **`tenants destroy` tombstones a tenant.** It takes the tenant's census and stops on
   any object not under its keys, or not readable, unless `--force`. It then writes the
   keyring with a tombstone in the tenant's place, which keeps its buckets refused and
@@ -66,8 +67,7 @@ version 1 would keep being readable.
   whether it opened here, with why not.
 - **A guide to running tenants and destroying one.**
   [docs/guides/tenants.md](docs/guides/tenants.md) gives the order of operations, and
-  THREAT_MODEL §5.12 what a destruction promises and what it does not. That includes one
-  limit: in a versioned bucket, the census and `rotate` see current objects only.
+  THREAT_MODEL §5.12 what a destruction promises and what it does not.
 - **Build details in `blindbucket version`.** The version remains the first line; when
   present in Go's build info, the output also reports the Go version, VCS revision and
   timestamp, modified-tree status, and target platform. Missing metadata is omitted.

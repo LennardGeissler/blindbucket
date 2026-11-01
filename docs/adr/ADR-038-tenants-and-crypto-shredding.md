@@ -175,7 +175,13 @@ shows it. Two rules follow, and they apply to a new KEK today as much as to a te
    stops it too, since nothing is known about its key. A tenant that was never
    active is counted as well: with its buckets empty, as after a mistaken `create`,
    it goes without `--force`, and with objects in them, all on the default tenant's
-   keys, only with it.*
+   keys, only with it. Amended again for
+   [#218](https://github.com/LennardGeissler/blindbucket/issues/218): the census
+   counts every version a versioned bucket keeps. Listing current objects alone, it
+   let a destruction through that left a version written under the default tenant's
+   keys before activation, and replaced since, readable. `rotate` cannot move such a
+   version, so the census names it as one to delete or expire. A provider that does
+   not list versions keeps none.*
 2. **Tombstone.** The keyring is rewritten without the tenant's section. The
    directory keeps a tombstone instead: the name, the bucket patterns, the key ids,
    every lock that ever sealed the tenant, and the date. The generation increases.
@@ -232,11 +238,6 @@ and in the audit log.
   stays readable after destruction for as long as the ciphertext is stored.
 - **Objects in the tenant's buckets that are not on its keys** when step 1 is
   overridden with `--force`.
-- **Earlier versions in a versioned bucket.** *Added while writing the threat model:*
-  the census, like `rotate`, lists current objects. A version written under the
-  default tenant's keys before the tenant was active, and replaced since, is not
-  counted and stays readable with those keys. A census over every version would
-  close this; until then such a bucket needs its noncurrent versions expired first.
 - **Copies a client made into another tenant's buckets.** They are the other
   tenant's data, wrapped under its keys, and that is correct.
 - **Plaintext that left the gateway**: client copies, caches, and the memory, swap
