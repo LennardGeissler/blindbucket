@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -524,4 +525,50 @@ func ExampleClient_objectURL() {
 	})
 	fmt.Println(c.objectURL("backups", "2026/09/db dump.sql").EscapedPath())
 	// Output: /backups/2026/09/db%20dump.sql
+}
+
+// ListObjectVersions asks for ?versions with the caller's markers and reads
+// versions and delete markers apart; HeadObjectVersion names the version.
+func TestListObjectVersionsAndHeadObjectVersion(t *testing.T) {
+	t.Parallel()
+
+	var listQuery, headQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			headQuery = r.URL.Query()
+			w.Header().Set("X-Amz-Meta-Bb-Kid", "2026-09")
+			return
+		}
+		listQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`<ListVersionsResult><Name>b</Name><IsTruncated>true</IsTruncated>
+<NextKeyMarker>k2</NextKeyMarker><NextVersionIdMarker>v9</NextVersionIdMarker>
+<Version><Key>k1</Key><VersionId>v2</VersionId><IsLatest>true</IsLatest><Size>5</Size></Version>
+<DeleteMarker><Key>k1</Key><VersionId>v3</VersionId><IsLatest>false</IsLatest></DeleteMarker>
+<Version><Key>k1</Key><VersionId>v1</VersionId><IsLatest>false</IsLatest><Size>4</Size></Version>
+</ListVersionsResult>`))
+	}))
+	defer srv.Close()
+	c := testClient(t, srv.URL)
+
+	got, err := c.ListObjectVersions(context.Background(), "b",
+		url.Values{"key-marker": {"k0"}, "version-id-marker": {"v0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := listQuery["versions"]; !ok || listQuery.Get("key-marker") != "k0" || listQuery.Get("version-id-marker") != "v0" {
+		t.Errorf("listing query = %v", listQuery)
+	}
+	if !got.IsTruncated || got.NextKeyMarker != "k2" || got.NextVersionIDMarker != "v9" ||
+		len(got.Versions) != 2 || len(got.DeleteMarkers) != 1 ||
+		!got.Versions[0].IsLatest || got.Versions[1].VersionID != "v1" || got.DeleteMarkers[0].VersionID != "v3" {
+		t.Errorf("listing = %+v", got)
+	}
+
+	info, err := c.HeadObjectVersion(context.Background(), "b", "k1", "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headQuery.Get("versionId") != "v1" || info.Metadata["Bb-Kid"] != "2026-09" {
+		t.Errorf("head query %v, metadata %v", headQuery, info.Metadata)
+	}
 }

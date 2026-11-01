@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -233,5 +235,87 @@ func TestIntegrationEmptyObject(t *testing.T) {
 	}
 	if head.ContentLength != 0 {
 		t.Errorf("ContentLength = %d, want 0", head.ContentLength)
+	}
+}
+
+// versionedBucket creates a bucket of its own with versioning on, and removes
+// every version and the bucket when the test ends. It skips where the
+// provider's credentials may not create buckets, or the provider does not
+// version: Garage v2.4.1 answers PutBucketVersioning and ListObjectVersions
+// with 501 NotImplemented.
+func versionedBucket(t *testing.T, c *Client) string {
+	t.Helper()
+	ctx := context.Background()
+	name := fmt.Sprintf("bb-versions-%d", time.Now().UnixNano())
+	if _, err := c.Passthrough(ctx, http.MethodPut, name, nil, nil); err != nil {
+		if ae, ok := AsAPIError(err); ok && ae.Code == "AccessDenied" {
+			t.Skipf("the provider's credentials may not create a bucket: %v", err)
+		}
+		t.Fatalf("CreateBucket: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		var specs []DeleteObjectSpec
+		list, err := c.ListObjectVersions(ctx, name, nil)
+		if err == nil {
+			for _, v := range list.Versions {
+				specs = append(specs, DeleteObjectSpec{Key: v.Key, VersionID: v.VersionID})
+			}
+			for _, m := range list.DeleteMarkers {
+				specs = append(specs, DeleteObjectSpec{Key: m.Key, VersionID: m.VersionID})
+			}
+		}
+		if len(specs) > 0 {
+			if _, err := c.DeleteObjects(ctx, name, DeleteRequest{Quiet: true, Objects: specs}); err != nil {
+				t.Errorf("cleanup DeleteObjects: %v", err)
+			}
+		}
+		if _, err := c.Passthrough(ctx, http.MethodDelete, name, nil, nil); err != nil {
+			t.Errorf("cleanup DeleteBucket: %v", err)
+		}
+	})
+	body := []byte(`<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>Enabled</Status></VersioningConfiguration>`)
+	if _, err := c.Passthrough(ctx, http.MethodPut, name, url.Values{"versioning": {""}}, body); err != nil {
+		if ae, ok := AsAPIError(err); ok && ae.Code == "NotImplemented" {
+			t.Skipf("the provider does not version: %v", err)
+		}
+		t.Fatalf("PutBucketVersioning: %v", err)
+	}
+	return name
+}
+
+// A replaced object keeps its earlier version, which ListObjectVersions lists
+// and HeadObjectVersion reads, metadata included.
+func TestIntegrationObjectVersions(t *testing.T) {
+	c := requireProvider(t)
+	ctx := context.Background()
+	bucket := versionedBucket(t, c)
+	for _, kid := range []string{"old-key", "new-key"} {
+		if _, err := c.PutObject(ctx, PutObjectInput{
+			Bucket: bucket, Key: "doc.txt", Body: strings.NewReader(kid), ContentLength: int64(len(kid)),
+			Metadata: map[string]string{"bb-kid": kid},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, err := c.ListObjectVersions(ctx, bucket, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Versions) != 2 {
+		t.Fatalf("%d versions listed, want 2: %+v", len(list.Versions), list)
+	}
+	var noncurrent ObjectVersion
+	for _, v := range list.Versions {
+		if !v.IsLatest {
+			noncurrent = v
+		}
+	}
+	info, err := c.HeadObjectVersion(ctx, bucket, "doc.txt", noncurrent.VersionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Metadata["Bb-Kid"] != "old-key" {
+		t.Errorf("the noncurrent version's metadata: %v", info.Metadata)
 	}
 }

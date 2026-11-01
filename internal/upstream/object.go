@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -165,6 +166,24 @@ func (c *Client) HeadObject(ctx context.Context, bucket, key string) (*ObjectInf
 	if err != nil {
 		return nil, err
 	}
+	//nolint:bodyclose // closed by drainAndClose, which the linter cannot see through.
+	resp, err := c.do(ctx, req, "HeadObject", true)
+	if err != nil {
+		return nil, err
+	}
+	defer drainAndClose(resp.Body)
+
+	info := objectInfo(resp)
+	return &info, nil
+}
+
+// HeadObjectVersion fetches the metadata of one version of an object.
+func (c *Client) HeadObjectVersion(ctx context.Context, bucket, key, versionID string) (*ObjectInfo, error) {
+	req, err := c.newRequest(ctx, http.MethodHead, bucket, key)
+	if err != nil {
+		return nil, err
+	}
+	req.URL.RawQuery = url.Values{"versionId": {versionID}}.Encode()
 	//nolint:bodyclose // closed by drainAndClose, which the linter cannot see through.
 	resp, err := c.do(ctx, req, "HeadObject", true)
 	if err != nil {
