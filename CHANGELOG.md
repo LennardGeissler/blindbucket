@@ -64,6 +64,14 @@ version 1 would keep being readable.
 - **The status page shows the tenants.** With tenants, it shows the keyring generation
   the instance serves, and per tenant its buckets, the key its writes use, its lock and
   whether it opened here, with why not.
+- **Two alerts for tenants.** `BlindbucketTenantNotOpen` fires when a tenant's keys have
+  not opened on an instance for five minutes, since it answers 503 for the tenant's
+  buckets. `BlindbucketKeyringGenerationSkew` fires when a job's instances have served
+  different keyring generations for 30 minutes, a rollout that a tenant's next step
+  waits for.
+- **The Helm chart configures tenants.** `keys.tenants` takes each tenant's lock, a
+  provider and its settings, with its secret in a Secret of its own; the chart refuses
+  an entry without one. Its README says how a keyring change reaches the pods.
 - **A guide to running tenants and destroying one.**
   [docs/guides/tenants.md](docs/guides/tenants.md) gives the order of operations, and
   THREAT_MODEL §5.12 what a destruction promises and what it does not. That includes one

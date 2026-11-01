@@ -70,6 +70,24 @@ rests on every such copy being deleted. `blindbucket reseal --tenant` gives it a
 later, and moves a tenant from one lock to another. The old lock stays in the tenant's
 history, because the copies of the keyring from before still open with it.
 
+### With the Helm chart
+
+The chart takes each tenant's lock under `keys.tenants`, with its secret in a Secret of
+its own:
+
+```yaml
+keys:
+  tenants:
+    acme:
+      provider: awskms
+      awskms: { region: eu-central-1, keyId: alias/bb-acme, credentialsSecret: bb-acme-kms }
+```
+
+The keyring Secret is not the chart's, so a new generation reaches the pods only when
+they restart. Replace the Secret, then roll the Deployment, and wait for
+`blindbucket_keyring_generation` on every pod before the next step
+([the chart's README](../../deploy/helm/blindbucket/README.md#tenants)).
+
 ## Moving existing objects onto the tenant's keys
 
 Objects already in the buckets stay under the keys they were written with. Once the
@@ -89,7 +107,9 @@ default name key to the tenant's.
   It warns about a tenant under the deployment's lock, and about an entry in
   `keys.tenants` the keyring does not have.
 - `blindbucket_tenant_open{tenant}` is 0 for a tenant whose keys did not open on an
-  instance. The instance's log says why.
+  instance. The instance's log says why. `BlindbucketTenantNotOpen` alerts on it, and
+  `BlindbucketKeyringGenerationSkew` on a rollout that has not ended within 30 minutes
+  ([deploy/prometheus/alerts.yaml](../../deploy/prometheus/alerts.yaml)).
 - The status page lists the tenants, the key their writes use, their lock, and whether
   each opened.
 - `blindbucket tenants list` and `blindbucket keys list` show the keyring itself.
