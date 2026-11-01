@@ -669,8 +669,9 @@ Destroys a tenant (ADR-038). This cannot be undone.
 
 First it takes the tenant's census, as "blindbucket tenants census" does: an
 object in its buckets that is not under its keys would stay readable after the
-destruction, so any such object, or any object it could not read, stops it.
---force destroys the tenant all the same.
+destruction, so any such object, earlier versions in a versioned bucket
+included, or any object it could not read, stops it. --force destroys the
+tenant all the same.
 
 Then it writes the keyring as its next generation with the tenant's keys left
 out and a tombstone in their place: the tenant's buckets stay its own and are
@@ -862,17 +863,18 @@ func lockUsers(f *keys.File, deployment keys.RootKeyRef, l keys.Lock) []string {
 // clean one does, unless force says otherwise, and then it says what is left
 // readable.
 func destroyVerdict(name string, result *census.Result, force bool) error {
-	off, failed := result.OffTenant(), result.Failed()
-	if off == 0 && failed == 0 {
+	off, noncurrent, failed := result.OffTenant(), result.NoncurrentOff(), result.Failed()
+	if off == 0 && noncurrent == 0 && failed == 0 {
 		return nil
 	}
 	if !force {
 		return fmt.Errorf("not destroying tenant %s: %w\n"+
-			"Rotate those objects onto its keys, or delete them, and run this again; "+
-			"--force destroys it with them left as they are", name, censusErrors(name, result))
+			"Rotate current objects onto its keys or delete them, delete earlier versions or expire "+
+			"them by a lifecycle rule, and run this again; --force destroys it with them left as "+
+			"they are", name, censusErrors(name, result))
 	}
-	fmt.Fprintf(os.Stderr, "\nwarning: --force: destroying tenant %s with %d objects in its buckets not under its\n"+
-		"  keys, which stay readable with the keys they are under, and %d whose keys are not known.\n",
-		name, off, failed)
+	fmt.Fprintf(os.Stderr, "\nwarning: --force: destroying tenant %s with %d objects and %d earlier versions in its\n"+
+		"  buckets not under its keys, which stay readable with the keys they are under, and %d\n"+
+		"  whose keys are not known.\n", name, off, noncurrent, failed)
 	return nil
 }

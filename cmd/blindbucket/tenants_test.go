@@ -500,19 +500,25 @@ func TestTenantsDestroyRefusals(t *testing.T) {
 }
 
 func TestDestroyVerdict(t *testing.T) {
-	result := func(off, failed int64) *census.Result {
-		return &census.Result{Buckets: []*census.Bucket{{Name: "acme-a", OffTenant: off, Failed: failed}}}
+	result := func(off, noncurrent, failed int64) *census.Result {
+		return &census.Result{Buckets: []*census.Bucket{
+			{Name: "acme-a", OffTenant: off, NoncurrentOff: noncurrent, Failed: failed},
+		}}
 	}
-	if err := destroyVerdict("acme", result(0, 0), false); err != nil {
+	if err := destroyVerdict("acme", result(0, 0, 0), false); err != nil {
 		t.Errorf("a clean census: %v", err)
 	}
-	for _, r := range []*census.Result{result(2, 0), result(0, 1)} {
+	if err := destroyVerdict("acme", result(0, 3, 0), false); err == nil ||
+		!strings.Contains(err.Error(), "3 earlier versions") || !strings.Contains(err.Error(), "lifecycle rule") {
+		t.Errorf("earlier versions off the tenant: %v", err)
+	}
+	for _, r := range []*census.Result{result(2, 0, 0), result(0, 1, 0), result(0, 0, 1)} {
 		err := destroyVerdict("acme", r, false)
 		if err == nil || !strings.Contains(err.Error(), "not destroying") || !strings.Contains(err.Error(), "--force") {
-			t.Errorf("off %d, failed %d: %v", r.OffTenant(), r.Failed(), err)
+			t.Errorf("off %d, noncurrent %d, failed %d: %v", r.OffTenant(), r.NoncurrentOff(), r.Failed(), err)
 		}
 		if err := destroyVerdict("acme", r, true); err != nil {
-			t.Errorf("off %d, failed %d with --force: %v", r.OffTenant(), r.Failed(), err)
+			t.Errorf("off %d, noncurrent %d, failed %d with --force: %v", r.OffTenant(), r.NoncurrentOff(), r.Failed(), err)
 		}
 	}
 }
