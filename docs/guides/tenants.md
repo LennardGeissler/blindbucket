@@ -108,9 +108,10 @@ It reads every object's metadata in the tenant's buckets and counts those not un
 tenant's keys. Each of those would stay readable after the destruction. Rotate them, or
 delete them, until it reports none. It needs no key and decrypts nothing.
 
-In a **versioned bucket**, the census sees current objects only. A version written under
-the default tenant's keys before the tenant was active, and replaced since, is not
-counted and would survive. Expire noncurrent versions first.
+In a **versioned bucket**, the census counts every version. A version written under the
+default tenant's keys before the tenant was active survives its object being replaced,
+and `rotate` cannot move a version that is not current: delete such versions, or expire
+noncurrent versions with a lifecycle rule, until the census reports none.
 
 **2. Destroy the tenant in the keyring.** Try it with `--dry-run`, which takes the same
 census and writes nothing:

@@ -103,6 +103,80 @@ func (c *Client) ListObjects(ctx context.Context, bucket string, query url.Value
 	return &out, nil
 }
 
+// ListVersionsResult is the body of ListObjectVersions: every version of every
+// object, current and noncurrent, and the delete markers, in key order and,
+// within a key, newest first.
+type ListVersionsResult struct {
+	XMLName xml.Name `xml:"ListVersionsResult"`
+
+	Name                string `xml:"Name"`
+	Prefix              string `xml:"Prefix"`
+	KeyMarker           string `xml:"KeyMarker"`
+	VersionIDMarker     string `xml:"VersionIdMarker"`
+	NextKeyMarker       string `xml:"NextKeyMarker"`
+	NextVersionIDMarker string `xml:"NextVersionIdMarker"`
+	MaxKeys             int    `xml:"MaxKeys"`
+	IsTruncated         bool   `xml:"IsTruncated"`
+
+	Versions      []ObjectVersion `xml:"Version"`
+	DeleteMarkers []DeleteMarker  `xml:"DeleteMarker"`
+}
+
+// ObjectVersion is one version of an object. A bucket that was never versioned
+// lists each object once, with the version id "null" and IsLatest true.
+type ObjectVersion struct {
+	Key          string `xml:"Key"`
+	VersionID    string `xml:"VersionId"`
+	IsLatest     bool   `xml:"IsLatest"`
+	LastModified string `xml:"LastModified"`
+	ETag         string `xml:"ETag"`
+	Size         int64  `xml:"Size"`
+}
+
+// DeleteMarker is a version that records a deletion. It has no content.
+type DeleteMarker struct {
+	Key       string `xml:"Key"`
+	VersionID string `xml:"VersionId"`
+	IsLatest  bool   `xml:"IsLatest"`
+}
+
+// ListObjectVersions lists a bucket's object versions (GET /?versions). query
+// carries prefix, max-keys and the key-marker and version-id-marker of the
+// page before; versions is added here.
+func (c *Client) ListObjectVersions(ctx context.Context, bucket string, query url.Values) (*ListVersionsResult, error) {
+	u := c.bucketURL(bucket)
+	q := url.Values{}
+	for k, v := range query {
+		q[k] = v
+	}
+	q.Set("versions", "")
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.URL = u
+	req.Host = u.Host
+
+	//nolint:bodyclose // closed by drainAndClose below.
+	resp, err := c.do(ctx, req, "ListObjectVersions", true)
+	if err != nil {
+		return nil, err
+	}
+	defer drainAndClose(resp.Body)
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxListBody))
+	if err != nil {
+		return nil, fmt.Errorf("upstream: reading the version listing: %w", err)
+	}
+	var out ListVersionsResult
+	if err := xml.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("upstream: the version listing is not valid XML: %w", err)
+	}
+	return &out, nil
+}
+
 // DeleteRequest is the body of a DeleteObjects call.
 type DeleteRequest struct {
 	XMLName xml.Name           `xml:"Delete"`

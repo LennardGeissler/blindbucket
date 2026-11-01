@@ -412,15 +412,18 @@ func TestTenantsCensusRefusals(t *testing.T) {
 
 func TestMarshalCensusJSON(t *testing.T) {
 	data, err := marshalCensusJSON("acme", 4, &census.Result{Buckets: []*census.Bucket{
-		{Name: "acme-a", Scanned: 3, OnTenant: 2, OffTenant: 1, OffKIDs: map[string]int64{"2026-10": 1}},
+		{Name: "acme-a", Versioned: true, Scanned: 4, Noncurrent: 1, OnTenant: 2, OffTenant: 1, NoncurrentOff: 1,
+			OffKIDs: map[string]int64{"2026-10": 1}, NoncurrentKIDs: map[string]int64{"2026-09": 1}},
 		{Name: "acme-gone", Missing: true, OffKIDs: map[string]int64{}},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"tenant":"acme","generation":4,"off_tenant":1,"failed":0,"buckets":[` +
-		`{"bucket":"acme-a","missing":false,"scanned":3,"on_tenant":2,"off_tenant":1,"foreign":0,"failed":0,"off_kids":{"2026-10":1}},` +
-		`{"bucket":"acme-gone","missing":true,"scanned":0,"on_tenant":0,"off_tenant":0,"foreign":0,"failed":0,"off_kids":{}}]}` + "\n"
+	want := `{"tenant":"acme","generation":4,"off_tenant":1,"noncurrent_off_tenant":1,"failed":0,"buckets":[` +
+		`{"bucket":"acme-a","missing":false,"versioned":true,"scanned":4,"noncurrent":1,"on_tenant":2,"off_tenant":1,` +
+		`"noncurrent_off_tenant":1,"foreign":0,"failed":0,"off_kids":{"2026-10":1},"noncurrent_off_kids":{"2026-09":1}},` +
+		`{"bucket":"acme-gone","missing":true,"versioned":false,"scanned":0,"noncurrent":0,"on_tenant":0,"off_tenant":0,` +
+		`"noncurrent_off_tenant":0,"foreign":0,"failed":0,"off_kids":{},"noncurrent_off_kids":{}}]}` + "\n"
 	if string(data) != want {
 		t.Errorf("got\n%s\nwant\n%s", data, want)
 	}
@@ -497,19 +500,25 @@ func TestTenantsDestroyRefusals(t *testing.T) {
 }
 
 func TestDestroyVerdict(t *testing.T) {
-	result := func(off, failed int64) *census.Result {
-		return &census.Result{Buckets: []*census.Bucket{{Name: "acme-a", OffTenant: off, Failed: failed}}}
+	result := func(off, noncurrent, failed int64) *census.Result {
+		return &census.Result{Buckets: []*census.Bucket{
+			{Name: "acme-a", OffTenant: off, NoncurrentOff: noncurrent, Failed: failed},
+		}}
 	}
-	if err := destroyVerdict("acme", result(0, 0), false); err != nil {
+	if err := destroyVerdict("acme", result(0, 0, 0), false); err != nil {
 		t.Errorf("a clean census: %v", err)
 	}
-	for _, r := range []*census.Result{result(2, 0), result(0, 1)} {
+	if err := destroyVerdict("acme", result(0, 3, 0), false); err == nil ||
+		!strings.Contains(err.Error(), "3 earlier versions") || !strings.Contains(err.Error(), "lifecycle rule") {
+		t.Errorf("earlier versions off the tenant: %v", err)
+	}
+	for _, r := range []*census.Result{result(2, 0, 0), result(0, 1, 0), result(0, 0, 1)} {
 		err := destroyVerdict("acme", r, false)
 		if err == nil || !strings.Contains(err.Error(), "not destroying") || !strings.Contains(err.Error(), "--force") {
-			t.Errorf("off %d, failed %d: %v", r.OffTenant(), r.Failed(), err)
+			t.Errorf("off %d, noncurrent %d, failed %d: %v", r.OffTenant(), r.NoncurrentOff(), r.Failed(), err)
 		}
 		if err := destroyVerdict("acme", r, true); err != nil {
-			t.Errorf("off %d, failed %d with --force: %v", r.OffTenant(), r.Failed(), err)
+			t.Errorf("off %d, noncurrent %d, failed %d with --force: %v", r.OffTenant(), r.NoncurrentOff(), r.Failed(), err)
 		}
 	}
 }
