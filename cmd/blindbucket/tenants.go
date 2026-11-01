@@ -451,6 +451,12 @@ something can still write the tenant's buckets under the default tenant's keys
 (ADR-038, rule 2). blindbucket_keyring_generation says what each instance serves.
 The objects found are moved by "blindbucket rotate" on their bucket.
 
+In a versioned bucket it counts every version the provider keeps. An earlier
+version written under another tenant's keys survives its object being replaced,
+and rotate cannot move it: it goes by deleting it, or by a lifecycle rule that
+expires noncurrent versions. A provider that does not list versions keeps none,
+and its buckets are counted by their current objects.
+
 Flags:
 `)
 		fs.PrintDefaults()
@@ -547,14 +553,14 @@ func takeCensus(ctx context.Context, cfg *config.Config, tn *keys.Tenant, worker
 // tenant, and which keyring generation the count holds for.
 func printCensus(f *keys.File, cfgPath string, result *census.Result) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "BUCKET\tSCANNED\tON TENANT\tOFF TENANT\tNOT OURS\tFAILED\t")
+	_, _ = fmt.Fprintln(w, "BUCKET\tSCANNED\tON TENANT\tOFF TENANT\tEARLIER VERSIONS OFF\tNOT OURS\tFAILED\t")
 	for _, b := range result.Buckets {
 		if b.Missing {
-			_, _ = fmt.Fprintf(w, "%s\t(does not exist)\t\t\t\t\t\n", b.Name)
+			_, _ = fmt.Fprintf(w, "%s\t(does not exist)\t\t\t\t\t\t\n", b.Name)
 			continue
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t\n",
-			b.Name, b.Scanned, b.OnTenant, b.OffTenant, b.Foreign, b.Failed)
+		_, _ = fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t\n",
+			b.Name, b.Scanned, b.OnTenant, b.OffTenant, b.NoncurrentOff, b.Foreign, b.Failed)
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -563,6 +569,15 @@ func printCensus(f *keys.File, cfgPath string, result *census.Result) error {
 		for _, kid := range slices.Sorted(maps.Keys(b.OffKIDs)) {
 			fmt.Fprintf(os.Stderr, "%s: %d under %q (%s); `blindbucket rotate --config %s s3://%s` "+
 				"moves them\n", b.Name, b.OffKIDs[kid], kid, keyOwner(f, kid), cfgPath, b.Name)
+		}
+		for _, kid := range slices.Sorted(maps.Keys(b.NoncurrentKIDs)) {
+			fmt.Fprintf(os.Stderr, "%s: %d earlier versions under %q (%s); rotate cannot move a "+
+				"version that is not current, so delete them, or expire noncurrent versions by a "+
+				"lifecycle rule\n", b.Name, b.NoncurrentKIDs[kid], kid, keyOwner(f, kid))
+		}
+		if !b.Missing && !b.Versioned {
+			fmt.Fprintf(os.Stderr, "%s: the provider does not list versions, so current objects were "+
+				"counted; a provider without versions keeps no earlier ones\n", b.Name)
 		}
 	}
 	fmt.Fprintf(os.Stderr, "\nCounted against keyring generation %d. The count holds only if every instance\n"+
@@ -586,6 +601,9 @@ func censusErrors(name string, result *census.Result) error {
 	if n := result.OffTenant(); n > 0 {
 		errs = append(errs, fmt.Errorf("%d objects in tenant %s's buckets are not under its keys", n, name))
 	}
+	if n := result.NoncurrentOff(); n > 0 {
+		errs = append(errs, fmt.Errorf("%d earlier versions in tenant %s's buckets are not under its keys", n, name))
+	}
 	if n := result.Failed(); n > 0 {
 		errs = append(errs, fmt.Errorf("%d objects could not be read; see the log", n))
 	}
@@ -593,32 +611,46 @@ func censusErrors(name string, result *census.Result) error {
 }
 
 type censusJSON struct {
-	Tenant     string             `json:"tenant"`
-	Generation uint64             `json:"generation"`
-	OffTenant  int64              `json:"off_tenant"`
-	Failed     int64              `json:"failed"`
-	Buckets    []censusBucketJSON `json:"buckets"`
+	Tenant     string `json:"tenant"`
+	Generation uint64 `json:"generation"`
+	OffTenant  int64  `json:"off_tenant"`
+	// NoncurrentOffTenant counts earlier versions off the tenant's keys,
+	// which rotate cannot move (#218).
+	NoncurrentOffTenant int64              `json:"noncurrent_off_tenant"`
+	Failed              int64              `json:"failed"`
+	Buckets             []censusBucketJSON `json:"buckets"`
 }
 
 type censusBucketJSON struct {
-	Bucket    string           `json:"bucket"`
-	Missing   bool             `json:"missing"`
-	Scanned   int64            `json:"scanned"`
-	OnTenant  int64            `json:"on_tenant"`
-	OffTenant int64            `json:"off_tenant"`
-	Foreign   int64            `json:"foreign"`
-	Failed    int64            `json:"failed"`
-	OffKIDs   map[string]int64 `json:"off_kids"`
+	Bucket    string `json:"bucket"`
+	Missing   bool   `json:"missing"`
+	Versioned bool   `json:"versioned"`
+	Scanned   int64  `json:"scanned"`
+	// Noncurrent counts the versions among Scanned that are not current.
+	Noncurrent          int64            `json:"noncurrent"`
+	OnTenant            int64            `json:"on_tenant"`
+	OffTenant           int64            `json:"off_tenant"`
+	NoncurrentOffTenant int64            `json:"noncurrent_off_tenant"`
+	Foreign             int64            `json:"foreign"`
+	Failed              int64            `json:"failed"`
+	OffKIDs             map[string]int64 `json:"off_kids"`
+	NoncurrentOffKIDs   map[string]int64 `json:"noncurrent_off_kids"`
 }
 
 // marshalCensusJSON renders a census as newline-terminated JSON.
 func marshalCensusJSON(name string, generation uint64, result *census.Result) ([]byte, error) {
 	out := censusJSON{Tenant: name, Generation: generation, OffTenant: result.OffTenant(),
-		Failed: result.Failed(), Buckets: []censusBucketJSON{}}
+		NoncurrentOffTenant: result.NoncurrentOff(), Failed: result.Failed(), Buckets: []censusBucketJSON{}}
 	for _, b := range result.Buckets {
+		noncurrentKIDs := b.NoncurrentKIDs
+		if noncurrentKIDs == nil {
+			noncurrentKIDs = map[string]int64{}
+		}
 		out.Buckets = append(out.Buckets, censusBucketJSON{
-			Bucket: b.Name, Missing: b.Missing, Scanned: b.Scanned, OnTenant: b.OnTenant,
-			OffTenant: b.OffTenant, Foreign: b.Foreign, Failed: b.Failed, OffKIDs: b.OffKIDs,
+			Bucket: b.Name, Missing: b.Missing, Versioned: b.Versioned, Scanned: b.Scanned,
+			Noncurrent: b.Noncurrent, OnTenant: b.OnTenant, OffTenant: b.OffTenant,
+			NoncurrentOffTenant: b.NoncurrentOff, Foreign: b.Foreign, Failed: b.Failed,
+			OffKIDs: b.OffKIDs, NoncurrentOffKIDs: noncurrentKIDs,
 		})
 	}
 	data, err := json.Marshal(out)

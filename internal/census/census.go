@@ -2,6 +2,10 @@
 // wrapped under the tenant's keys: those a destruction of the tenant would
 // leave readable (ADR-038, the first step of a destruction).
 //
+// It counts every version the provider keeps, not only current objects: in a
+// versioned bucket, a version written under the default tenant's keys before
+// the tenant was active survives being replaced, and a destruction (#218).
+//
 // It reads each object's metadata and decrypts nothing, so it needs no key,
 // the tenant's lock included. The key id it reads is the one every read of the
 // object goes by.
@@ -50,10 +54,21 @@ type Bucket struct {
 	Name string
 	// Missing is a bucket named exactly by an entry that does not exist at
 	// the provider. It holds nothing, so it strands nothing.
-	Missing   bool
-	Scanned   int64
-	OnTenant  int64
-	OffTenant int64
+	Missing bool
+	// Versioned says the provider listed the bucket's versions. A provider
+	// that does not implement listing them (Garage v2.4.1 answers 501) keeps
+	// no earlier versions either, and the bucket is listed as objects.
+	Versioned bool
+	// Scanned counts every version read, current or not, and Noncurrent the
+	// versions among them that are not current.
+	Scanned    int64
+	Noncurrent int64
+	OnTenant   int64
+	// OffTenant counts current objects not under the tenant's keys, which
+	// rotate can move, and NoncurrentOff earlier versions, which it cannot:
+	// they go by deleting them, or by a lifecycle rule.
+	OffTenant     int64
+	NoncurrentOff int64
 	// Foreign counts objects the gateway did not write. They carry no key
 	// and are not encrypted, so destroying the tenant changes nothing for
 	// them either way.
@@ -63,8 +78,10 @@ type Bucket struct {
 	Failed int64
 
 	mu sync.Mutex
-	// OffKIDs counts the objects off the tenant by the key they are under.
-	OffKIDs map[string]int64
+	// OffKIDs counts the current objects off the tenant by the key they are
+	// under, and NoncurrentKIDs the earlier versions.
+	OffKIDs        map[string]int64
+	NoncurrentKIDs map[string]int64
 }
 
 // Result is a census.
@@ -75,6 +92,12 @@ type Result struct {
 // OffTenant is how many objects in all the tenant's buckets are not under its
 // keys.
 func (r *Result) OffTenant() int64 { return r.sum(func(b *Bucket) int64 { return b.OffTenant }) }
+
+// NoncurrentOff is how many earlier versions in all the tenant's buckets are
+// not under its keys.
+func (r *Result) NoncurrentOff() int64 {
+	return r.sum(func(b *Bucket) int64 { return b.NoncurrentOff })
+}
 
 // Failed is how many objects could not be counted.
 func (r *Result) Failed() int64 { return r.sum(func(b *Bucket) int64 { return b.Failed }) }
@@ -107,7 +130,7 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	}
 	result := &Result{}
 	for _, name := range names {
-		b := &Bucket{Name: name, OffKIDs: map[string]int64{}}
+		b := &Bucket{Name: name, OffKIDs: map[string]int64{}, NoncurrentKIDs: map[string]int64{}}
 		result.Buckets = append(result.Buckets, b)
 		if err := count(ctx, cfg, b); err != nil {
 			return result, err
@@ -177,49 +200,44 @@ func listBuckets(ctx context.Context, up *upstream.Client) ([]string, error) {
 	return out, nil
 }
 
-// count reads the metadata of every object in one bucket.
+// version is one object version to read: a current object when versionID is
+// empty or the version is the latest.
+type version struct {
+	key, versionID string
+	latest         bool
+}
+
+// count reads the metadata of every version in one bucket, or of every object
+// where the provider does not list versions.
 func count(ctx context.Context, cfg Config, b *Bucket) error {
-	work := make(chan string)
+	work := make(chan version)
 	var wg sync.WaitGroup
 	for range cfg.Concurrency {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for key := range work {
-				one(ctx, cfg, b, key)
+			for v := range work {
+				one(ctx, cfg, b, v)
 			}
 		}()
 	}
-
-	query := url.Values{"list-type": {"2"}, "max-keys": {"1000"}}
-	if cfg.Prefix != "" {
-		query.Set("prefix", cfg.Prefix)
+	send := func(v version) error {
+		// Manifests and tag sidecars belong to their objects and carry no
+		// key of their own; the probe's object is not a client's.
+		if strings.HasPrefix(v.key, s3api.ReservedPrefix) {
+			return nil
+		}
+		select {
+		case work <- v:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	var err error
-list:
-	for {
-		var page *upstream.ListBucketResult
-		page, err = cfg.Upstream.ListObjects(ctx, b.Name, query)
-		if err != nil {
-			break
-		}
-		for _, entry := range page.Contents {
-			// Manifests and tag sidecars belong to their objects and carry
-			// no key of their own; the probe's object is not a client's.
-			if strings.HasPrefix(entry.Key, s3api.ReservedPrefix) {
-				continue
-			}
-			select {
-			case work <- entry.Key:
-			case <-ctx.Done():
-				err = ctx.Err()
-				break list
-			}
-		}
-		if !page.IsTruncated || page.NextContinuationToken == "" {
-			break
-		}
-		query.Set("continuation-token", page.NextContinuationToken)
+
+	err := listVersions(ctx, cfg, b, send)
+	if ae, ok := upstream.AsAPIError(err); ok && ae.Code == "NotImplemented" {
+		err = listObjects(ctx, cfg, b, send)
 	}
 	close(work)
 	wg.Wait()
@@ -234,16 +252,81 @@ list:
 	return nil
 }
 
-func one(ctx context.Context, cfg Config, b *Bucket, key string) {
+// listVersions hands on every version in the bucket. Delete markers have no
+// content and no key, and are skipped. It returns the provider's error for
+// the first page unchanged, so that NotImplemented can be told apart.
+func listVersions(ctx context.Context, cfg Config, b *Bucket, send func(version) error) error {
+	query := url.Values{"max-keys": {"1000"}}
+	if cfg.Prefix != "" {
+		query.Set("prefix", cfg.Prefix)
+	}
+	for {
+		page, err := cfg.Upstream.ListObjectVersions(ctx, b.Name, query)
+		if err != nil {
+			return err
+		}
+		b.Versioned = true
+		for _, v := range page.Versions {
+			if err := send(version{key: v.Key, versionID: v.VersionID, latest: v.IsLatest}); err != nil {
+				return err
+			}
+		}
+		if !page.IsTruncated || page.NextKeyMarker == "" && page.NextVersionIDMarker == "" {
+			return nil
+		}
+		query.Set("key-marker", page.NextKeyMarker)
+		query.Set("version-id-marker", page.NextVersionIDMarker)
+	}
+}
+
+// listObjects hands on every current object, for a provider that does not
+// list versions.
+func listObjects(ctx context.Context, cfg Config, b *Bucket, send func(version) error) error {
+	query := url.Values{"list-type": {"2"}, "max-keys": {"1000"}}
+	if cfg.Prefix != "" {
+		query.Set("prefix", cfg.Prefix)
+	}
+	for {
+		page, err := cfg.Upstream.ListObjects(ctx, b.Name, query)
+		if err != nil {
+			return err
+		}
+		for _, entry := range page.Contents {
+			if err := send(version{key: entry.Key, latest: true}); err != nil {
+				return err
+			}
+		}
+		if !page.IsTruncated || page.NextContinuationToken == "" {
+			return nil
+		}
+		query.Set("continuation-token", page.NextContinuationToken)
+	}
+}
+
+func one(ctx context.Context, cfg Config, b *Bucket, v version) {
 	atomic.AddInt64(&b.Scanned, 1)
-	info, err := cfg.Upstream.HeadObject(ctx, b.Name, key)
+	if !v.latest {
+		atomic.AddInt64(&b.Noncurrent, 1)
+	}
+	var (
+		info *upstream.ObjectInfo
+		err  error
+	)
+	if v.versionID == "" || v.versionID == "null" {
+		info, err = cfg.Upstream.HeadObject(ctx, b.Name, v.key)
+	} else {
+		info, err = cfg.Upstream.HeadObjectVersion(ctx, b.Name, v.key, v.versionID)
+	}
 	if upstream.NotFound(err) {
 		// Deleted since the listing: nothing left to strand.
 		atomic.AddInt64(&b.Scanned, -1)
+		if !v.latest {
+			atomic.AddInt64(&b.Noncurrent, -1)
+		}
 		return
 	}
 	if err != nil {
-		cfg.Log.Warn("could not read the object", "bucket", b.Name, "key", key, "err", err)
+		cfg.Log.Warn("could not read the object", "bucket", b.Name, "key", v.key, "version", v.versionID, "err", err)
 		atomic.AddInt64(&b.Failed, 1)
 		return
 	}
@@ -252,14 +335,19 @@ func one(ctx context.Context, cfg Config, b *Bucket, key string) {
 	case errors.Is(err, objectmeta.ErrNotEncrypted):
 		atomic.AddInt64(&b.Foreign, 1)
 	case err != nil:
-		cfg.Log.Warn("object metadata is unusable", "bucket", b.Name, "key", key, "err", err)
+		cfg.Log.Warn("object metadata is unusable", "bucket", b.Name, "key", v.key, "version", v.versionID, "err", err)
 		atomic.AddInt64(&b.Failed, 1)
 	case slices.Contains(cfg.KIDs, meta.KeyID):
 		atomic.AddInt64(&b.OnTenant, 1)
-	default:
+	case v.latest:
 		atomic.AddInt64(&b.OffTenant, 1)
 		b.mu.Lock()
 		b.OffKIDs[meta.KeyID]++
+		b.mu.Unlock()
+	default:
+		atomic.AddInt64(&b.NoncurrentOff, 1)
+		b.mu.Lock()
+		b.NoncurrentKIDs[meta.KeyID]++
 		b.mu.Unlock()
 	}
 }
