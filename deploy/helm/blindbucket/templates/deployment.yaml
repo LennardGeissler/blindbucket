@@ -47,6 +47,9 @@ spec:
           ports:
             - { name: s3, containerPort: 9000, protocol: TCP }
             - { name: admin, containerPort: 9100, protocol: TCP }
+            {{- if and .Values.dashboard.enabled .Values.dashboard.oidc.enabled }}
+            - { name: dashboard, containerPort: {{ .Values.dashboard.port }}, protocol: TCP }
+            {{- end }}
           env:
             {{- if eq .Values.upstream.credentialSource "static" }}
             - name: UPSTREAM_ACCESS_KEY_ID
@@ -87,6 +90,10 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- if and .Values.dashboard.enabled .Values.dashboard.oidc.enabled .Values.dashboard.oidc.existingSecret }}
+            - name: DASHBOARD_OIDC_SECRET
+              valueFrom: { secretKeyRef: { name: {{ .Values.dashboard.oidc.existingSecret | quote }}, key: client_secret } }
+            {{- end }}
             {{- range $i, $c := .Values.clients }}
             - name: CLIENT_{{ $i }}_ACCESS_KEY_ID
               valueFrom: { secretKeyRef: { name: {{ $c.existingSecret | quote }}, key: access_key_id } }
@@ -116,6 +123,9 @@ spec:
             - { name: config, mountPath: /etc/blindbucket/config, readOnly: true }
             - { name: tls, mountPath: /etc/blindbucket/tls, readOnly: true }
             - { name: keyring, mountPath: /etc/blindbucket/keys, readOnly: true }
+            {{- if and .Values.dashboard.enabled .Values.dashboard.oidc.enabled }}
+            - { name: dashboard-tls, mountPath: /etc/blindbucket/dashboard-tls, readOnly: true }
+            {{- end }}
             {{- if eq .Values.keys.provider "file" }}
             - { name: passphrase, mountPath: /etc/blindbucket/passphrase, readOnly: true }
             {{- end }}
@@ -142,6 +152,13 @@ spec:
             secretName: {{ .Values.keys.keyringSecret | quote }}
             items: [{ key: keyring.json, path: keyring.json }]
             defaultMode: 0440
+        {{- if and .Values.dashboard.enabled .Values.dashboard.oidc.enabled }}
+        - name: dashboard-tls
+          secret:
+            secretName: {{ .Values.dashboard.tlsSecret | quote }}
+            items: [{ key: tls.crt, path: tls.crt }, { key: tls.key, path: tls.key }]
+            defaultMode: 0440
+        {{- end }}
         {{- if eq .Values.keys.provider "file" }}
         - name: passphrase
           secret:

@@ -1,0 +1,21 @@
+{{- if and .Values.dashboard.enabled .Values.dashboard.oidc.enabled }}
+# The dashboard behind sign-in (ADR-039), on a Service of its own so that it can
+# be exposed apart from S3 and the metrics. Each pod seals its sessions under a
+# key of its own, so the Service routes a client to the same pod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "blindbucket.fullname" . }}-dashboard
+  labels:
+    {{- include "blindbucket.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.dashboard.service.type }}
+  selector:
+    {{- include "blindbucket.selectorLabels" . | nindent 4 }}
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: {{ .Values.dashboard.service.affinityTimeoutSeconds | int }}
+  ports:
+    - { name: dashboard, port: {{ .Values.dashboard.port }}, targetPort: dashboard, protocol: TCP }
+{{- end }}

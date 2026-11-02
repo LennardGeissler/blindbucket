@@ -21,4 +21,11 @@ spec:
         {{- toYaml . | nindent 8 }}
       ports: [{ port: admin, protocol: TCP }]
     {{- end }}
+    {{- if and .Values.dashboard.enabled .Values.dashboard.oidc.enabled }}
+    {{- with .Values.networkPolicy.dashboardFrom }}
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports: [{ port: dashboard, protocol: TCP }]
+    {{- end }}
+    {{- end }}
 {{- end }}

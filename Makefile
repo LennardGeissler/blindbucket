@@ -173,17 +173,23 @@ chart: ## Lint, render and validate the Helm chart.
 	@! $(HELM) template bb blindbucket -f blindbucket/ci/eks-values.yaml --set upstream.credentialSource=sso >/dev/null 2>&1 \
 		|| { echo "the chart rendered an unknown credential source"; exit 1; }
 	@echo "refuses static without a Secret, and an unknown source: ok"
-	@# The status page on the pod's loopback, CORS, and presigned uploads, which
+	@# The status page behind sign-in, CORS, and presigned uploads, which
 	@# need a listener that accepts unsigned bodies, so they render apart.
-	@grep -q 'listen: "127.0.0.1:9101"' bin/chart.yaml && grep -q 'https://app.example' bin/chart.yaml \
-		|| { echo "the dashboard or CORS did not render"; exit 1; }
+	@grep -q 'listen: "0.0.0.0:9101"' bin/chart.yaml && grep -q 'client_secret: $${DASHBOARD_OIDC_SECRET}' bin/chart.yaml \
+		&& grep -q 'name: bb-blindbucket-dashboard' bin/chart.yaml && grep -q 'sessionAffinity: ClientIP' bin/chart.yaml \
+		&& grep -q 'secretName: "blindbucket-dashboard-tls"' bin/chart.yaml && grep -q 'https://app.example' bin/chart.yaml \
+		|| { echo "the dashboard behind sign-in or CORS did not render"; exit 1; }
+	@$(HELM) template bb blindbucket -f blindbucket/ci/full-values.yaml --set dashboard.oidc.enabled=false \
+		| grep -q 'listen: "127.0.0.1:9101"' || { echo "the dashboard without sign-in left loopback"; exit 1; }
+	@! $(HELM) template bb blindbucket -f blindbucket/ci/full-values.yaml --set dashboard.tlsSecret= >/dev/null 2>&1 \
+		|| { echo "the chart rendered sign-in without TLS"; exit 1; }
 	@$(HELM) template bb blindbucket -f blindbucket/ci/full-values.yaml --set server.requireSignedPayload=false \
 		--set server.presign.uploads.maxSize=100MiB | grep -q 'max_size: "100MiB"' \
 		|| { echo "presigned uploads did not render"; exit 1; }
 	@! $(HELM) template bb blindbucket -f blindbucket/ci/full-values.yaml \
 		--set server.presign.uploads.maxSize=100MiB >/dev/null 2>&1 \
 		|| { echo "the chart rendered presigned uploads with requireSignedPayload"; exit 1; }
-	@echo "renders the dashboard, CORS and uploads, and refuses uploads with signed bodies only: ok"
+	@echo "renders the dashboard on loopback and behind sign-in, CORS and uploads, and refuses sign-in without TLS and uploads with signed bodies only: ok"
 	@# Each tenant's lock, with its secret from the Secret the values name.
 	@grep -q 'passphrase_file: /etc/blindbucket/tenants/gamma/passphrase' bin/chart.yaml \
 		&& grep -q 'token: $${TENANT_1_VAULT_TOKEN}' bin/chart.yaml \

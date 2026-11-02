@@ -34,11 +34,23 @@ clients:
 server:
   requireSignedPayload: true
   cors: { allowedOrigins: ["https://app.example"] }
-dashboard: { enabled: true }
+dashboard:
+  enabled: true
+  tlsSecret: blindbucket-dashboard-tls
+  oidc:
+    enabled: true
+    issuer: https://idp.example.com/realms/ops
+    clientId: blindbucket-dashboard
+    existingSecret: blindbucket-dashboard-oidc
+    redirectUrl: https://blindbucket.example.com:9101/callback
+    allowed: [blindbucket-operators]
+    scopes: [groups]
+    session: 4h
 names: { encrypt: true }
 networkPolicy:
   enabled: true
   s3From: [{ podSelector: { matchLabels: { app: backup-job } } }]
   metricsFrom: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } } }]
+  dashboardFrom: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress } } }]
 serviceMonitor: { enabled: true }
 prometheusRule: { enabled: true }

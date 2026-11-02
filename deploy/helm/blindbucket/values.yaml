@@ -164,13 +164,42 @@ service:
   adminPort: 9100
 
 # The read-only status page (ADR-035): health, the keyring and what seals it,
-# and whether the audit log verifies. It listens on the pod's loopback only and
-# is on no Service; reach it with
+# and whether the audit log verifies. Without sign-in it listens on the pod's
+# loopback only and is on no Service; reach it with
 #   kubectl port-forward pod/<pod> 9101:<port>
 # whose RBAC is what stands in front of it. Needs gateway 1.6.0 or later.
 dashboard:
   enabled: false
   port: 9101
+  # Sign-in through the organisation's identity provider (ADR-039), which puts
+  # the page on the pod's network and on a Service of its own, over TLS. Only
+  # people whose ID token carries an allowed value of the claim get the page.
+  # Needs gateway 1.8.0 or later.
+  oidc:
+    enabled: false
+    issuer: ""
+    clientId: ""
+    # A Secret with the client secret under client_secret. Empty for a public
+    # client, which relies on PKCE alone.
+    existingSecret: ""
+    # The address people use for the page, with the path /callback. It is
+    # registered with the identity provider, and the page answers to its host.
+    redirectUrl: ""
+    claim: groups
+    allowed: []
+    # Asked for besides openid, profile and email; [groups] where the identity
+    # provider adds groups only when asked, as Dex and Okta do.
+    scopes: []
+    # How long a sign-in lasts at most: 8h by default, 24h at most.
+    session: ""
+  # A Secret of type kubernetes.io/tls for the page; required with sign-in.
+  tlsSecret: ""
+  service:
+    type: ClusterIP
+    # Each pod seals its sessions under a key of its own, so a browser has to
+    # keep reaching the pod it signed in on: the Service routes by client IP,
+    # for as long as a session lasts by default.
+    affinityTimeoutSeconds: 28800
 
 # Only the pods selected here may reach the S3 port; the admin port stays open
 # to the namespaces listed under metricsFrom. Off by default because it depends
@@ -181,6 +210,8 @@ networkPolicy:
   s3From: []
   #  - podSelector: { matchLabels: { app: backup-job } }
   metricsFrom: []
+  # Who may reach the dashboard's port, with dashboard.oidc on.
+  dashboardFrom: []
   #  - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
 
 # Prometheus Operator resources. The rules are deploy/prometheus/alerts.yaml,

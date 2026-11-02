@@ -40,10 +40,34 @@ data:
       listen: "0.0.0.0:9100"
       pprof: false
       {{- if .Values.dashboard.enabled }}
-      # On the pod's loopback only: the gateway refuses anything else, and
-      # kubectl port-forward reaches it there.
+      {{- $o := .Values.dashboard.oidc }}
       dashboard:
+        {{- if $o.enabled }}
+        # On the pod's network, behind sign-in and over TLS (ADR-039).
+        listen: "0.0.0.0:{{ .Values.dashboard.port }}"
+        tls:
+          cert_file: /etc/blindbucket/dashboard-tls/tls.crt
+          key_file: /etc/blindbucket/dashboard-tls/tls.key
+        oidc:
+          issuer: {{ $o.issuer | quote }}
+          client_id: {{ $o.clientId | quote }}
+          {{- if $o.existingSecret }}
+          client_secret: ${DASHBOARD_OIDC_SECRET}
+          {{- end }}
+          redirect_url: {{ $o.redirectUrl | quote }}
+          claim: {{ $o.claim | quote }}
+          allowed: {{ toJson $o.allowed }}
+          {{- with $o.scopes }}
+          scopes: {{ toJson . }}
+          {{- end }}
+          {{- with $o.session }}
+          session: {{ . | quote }}
+          {{- end }}
+        {{- else }}
+        # On the pod's loopback only: without sign-in the gateway refuses
+        # anything else, and kubectl port-forward reaches it there.
         listen: "127.0.0.1:{{ .Values.dashboard.port }}"
+        {{- end }}
       {{- end }}
 
     upstream:

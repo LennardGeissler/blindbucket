@@ -98,6 +98,18 @@ the cluster network, which is the one outcome this chart exists to prevent.
 {{- fail (printf "keys.tenants.%s.provider must be file, vault or awskms, not %q" $name $t.provider) -}}
 {{- end -}}
 {{- end -}}
+{{- $o := .Values.dashboard.oidc -}}
+{{- if $o.enabled -}}
+{{- if not .Values.dashboard.enabled -}}
+{{- fail "dashboard.oidc needs dashboard.enabled" -}}
+{{- end -}}
+{{- if not .Values.dashboard.tlsSecret -}}
+{{- fail "dashboard.tlsSecret is required with dashboard.oidc: sign-in is served over TLS only (ADR-039)" -}}
+{{- end -}}
+{{- if or (not $o.issuer) (not $o.clientId) (not $o.redirectUrl) (not $o.claim) (not $o.allowed) -}}
+{{- fail "dashboard.oidc needs issuer, clientId, redirectUrl, claim and allowed" -}}
+{{- end -}}
+{{- end -}}
 {{- if not .Values.clients -}}
 {{- fail "clients must name at least one client: without one, every request is refused" -}}
 {{- end -}}
