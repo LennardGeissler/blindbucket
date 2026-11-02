@@ -312,7 +312,10 @@ func one(ctx context.Context, cfg Config, b *Bucket, v version) {
 		info *upstream.ObjectInfo
 		err  error
 	)
-	if v.versionID == "" || v.versionID == "null" {
+	// Only a listing of objects leaves the version id empty. "null" is a
+	// version like any other: an object written before versioning was on,
+	// which a HEAD without the id would not reach once anything is on top.
+	if v.versionID == "" {
 		info, err = cfg.Upstream.HeadObject(ctx, b.Name, v.key)
 	} else {
 		info, err = cfg.Upstream.HeadObjectVersion(ctx, b.Name, v.key, v.versionID)

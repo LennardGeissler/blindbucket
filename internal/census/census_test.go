@@ -61,10 +61,9 @@ func TestIntegrationCensus(t *testing.T) {
 	}
 }
 
-// versionedBucket creates a bucket of its own with versioning on, removed with
-// every version when the test ends. It skips on a provider that does not
-// version.
-func versionedBucket(t *testing.T, up *upstream.Client) string {
+// newBucket creates a bucket of its own, removed with every version when the
+// test ends.
+func newBucket(t *testing.T, up *upstream.Client) string {
 	t.Helper()
 	ctx := context.Background()
 	name := fmt.Sprintf("bb-census-%d", time.Now().UnixNano())
@@ -84,14 +83,47 @@ func versionedBucket(t *testing.T, up *upstream.Client) string {
 			if len(specs) > 0 {
 				_, _ = up.DeleteObjects(ctx, name, upstream.DeleteRequest{Quiet: true, Objects: specs})
 			}
+		} else {
+			_ = up.DeleteObject(ctx, name, "doc")
+			_ = up.DeleteObject(ctx, name, "gone")
 		}
 		_, _ = up.Passthrough(ctx, http.MethodDelete, name, nil, nil)
 	})
+	return name
+}
+
+// enableVersioning turns versioning on, and skips on a provider that does not
+// version.
+func enableVersioning(t *testing.T, up *upstream.Client, bucket string) {
+	t.Helper()
 	body := []byte(`<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>Enabled</Status></VersioningConfiguration>`)
-	if _, err := up.Passthrough(ctx, http.MethodPut, name, url.Values{"versioning": {""}}, body); err != nil {
+	if _, err := up.Passthrough(context.Background(), http.MethodPut, bucket, url.Values{"versioning": {""}}, body); err != nil {
 		t.Skipf("the provider does not version: %v", err)
 	}
+}
+
+// versionedBucket is a bucket of its own with versioning on.
+func versionedBucket(t *testing.T, up *upstream.Client) string {
+	t.Helper()
+	name := newBucket(t, up)
+	enableVersioning(t, up, name)
 	return name
+}
+
+// copyStored copies the stored form of src in the shared bucket to dst in
+// bucket. The census reads metadata alone, so such a copy stands in for an
+// object written to bucket through the gateway.
+func copyStored(t *testing.T, up *upstream.Client, src, bucket, dst string) {
+	t.Helper()
+	head, err := up.HeadObject(t.Context(), proxytest.Bucket, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := up.CopyObject(t.Context(), upstream.CopyObjectInput{
+		SourceBucket: proxytest.Bucket, SourceKey: src, Bucket: bucket, Key: dst, Metadata: head.Metadata,
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // An earlier version under the default tenant's keys survives its object
@@ -107,20 +139,7 @@ func TestIntegrationCensusCountsEarlierVersions(t *testing.T) {
 	prefix := proxytest.TestKey(t, "versions") + "/"
 	before.Store(t, prefix+"old.bin", proxytest.RandomBytes(t, 100))
 	after.Store(t, prefix+"new.bin", proxytest.RandomBytes(t, 100))
-	// Census reads metadata alone, so a copy of each object's stored form
-	// stands in for one written to the versioned bucket through the gateway.
-	copyAs := func(src, dst string) {
-		t.Helper()
-		head, err := up.HeadObject(t.Context(), proxytest.Bucket, src)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := up.CopyObject(t.Context(), upstream.CopyObjectInput{
-			SourceBucket: proxytest.Bucket, SourceKey: src, Bucket: bucket, Key: dst, Metadata: head.Metadata,
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
+	copyAs := func(src, dst string) { copyStored(t, up, src, bucket, dst) }
 	copyAs(prefix+"old.bin", "doc")
 	copyAs(prefix+"new.bin", "doc") // replaced: the old version is noncurrent
 	copyAs(prefix+"old.bin", "gone")
@@ -176,5 +195,41 @@ func TestCensusWithoutVersionListing(t *testing.T) {
 	b := result.Buckets[0]
 	if !listed || b.Versioned || b.Scanned != 1 || b.Foreign != 1 {
 		t.Errorf("listed %v, %+v; want the object listed as one, not versioned", listed, b)
+	}
+}
+
+// Objects written before a bucket was versioned keep the version id "null".
+// Once a newer version or a delete marker is on top, such a version is
+// noncurrent, and the census has to read that version and not the latest:
+// these are what was written under the default tenant's keys before the
+// tenant was active.
+func TestIntegrationCensusCountsNullVersions(t *testing.T) {
+	tn := proxytest.NewTenancy(t)
+	before := proxytest.New(t, proxytest.WithKeys(tn.Inactive))
+	after := proxytest.New(t, proxytest.WithKeys(tn.Active))
+	up := after.Upstream
+	bucket := newBucket(t, up)
+
+	prefix := proxytest.TestKey(t, "null-versions") + "/"
+	before.Store(t, prefix+"old.bin", proxytest.RandomBytes(t, 100))
+	after.Store(t, prefix+"new.bin", proxytest.RandomBytes(t, 100))
+	copyStored(t, up, prefix+"old.bin", bucket, "doc")
+	copyStored(t, up, prefix+"old.bin", bucket, "gone")
+	enableVersioning(t, up, bucket)
+	copyStored(t, up, prefix+"new.bin", bucket, "doc")                   // the null version is noncurrent now
+	if err := up.DeleteObject(t.Context(), bucket, "gone"); err != nil { // a delete marker on top
+		t.Fatal(err)
+	}
+
+	result, err := census.Run(t.Context(), census.Config{
+		Upstream: up, Entries: []string{bucket}, KIDs: []string{proxytest.TenantKID}, Log: proxytest.DiscardLogger(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := result.Buckets[0]
+	if b.Scanned != 3 || b.Noncurrent != 2 || b.OnTenant != 1 || b.NoncurrentOff != 2 ||
+		b.NoncurrentKIDs[proxytest.DefaultKID] != 2 {
+		t.Errorf("%+v; want both null versions read, and both off the tenant under the default key", b)
 	}
 }
