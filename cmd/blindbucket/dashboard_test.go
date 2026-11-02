@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -110,6 +111,46 @@ func TestDashboardSealingNamesNoCredential(t *testing.T) {
 			if strings.Contains(got, secret) {
 				t.Errorf("sealing(%s) names %q", tc.keys.Provider, secret)
 			}
+		}
+	}
+}
+
+// With admin.dashboard.tls the page is served over TLS with that certificate,
+// and a plain HTTP request to the same port gets no page.
+func TestServeDashboardOverTLS(t *testing.T) {
+	keyring := setupKeyring(t, "2026-09")
+	provider, _ := stubProvider(t)
+	certFile, keyFile, pool := selfSignedCert(t)
+	dashAddr := freeAddr(t)
+
+	startServe(t, fmt.Sprintf(`
+server: { listen: %q }
+admin:
+  listen: ""
+  dashboard:
+    listen: %q
+    tls: { cert_file: %q, key_file: %q }
+upstream: { endpoint: %q, region: us-east-1, path_style: true, access_key_id: a, secret_access_key: b }
+keys: { provider: file, keyring: %q }
+clients: [{ name: tester, access_key_id: TESTCLIENT, secret_access_key: s, buckets: ["readybucket"] }]
+`, freeAddr(t), dashAddr, certFile, keyFile, provider.URL, keyring))
+
+	secure := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
+	}}
+	resp := waitFor(t, secure, "https://"+dashAddr+"/", http.StatusOK)
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if !strings.Contains(string(body), "2026-09") {
+		t.Errorf("the page over TLS does not show the keyring:\n%s", body)
+	}
+
+	plain := &http.Client{Timeout: 2 * time.Second}
+	if resp, err := plain.Get("http://" + dashAddr + "/"); err == nil {
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if strings.Contains(string(b), "2026-09") {
+			t.Error("the TLS listener served the page over plain HTTP")
 		}
 	}
 }

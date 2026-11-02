@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"os"
@@ -33,6 +34,15 @@ func startDashboard(
 		Keyring: ring, Sealing: sealing(cfg.Keys),
 		Generation: served.Generation(), Tenants: dashboardTenants(served),
 		Logger: log,
+	}
+	if t := cfg.Admin.Dashboard.TLS; t.Enabled() {
+		// Loaded here rather than by the listener, so that a certificate that
+		// does not match its key stops the start, as the S3 listener's does.
+		pair, err := tls.LoadX509KeyPair(t.CertFile, t.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("admin.dashboard.tls: %w", err)
+		}
+		dc.TLS = &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS12}
 	}
 	// Set only with a writer: a nil *audit.Writer in the interface would read
 	// as a configured log.

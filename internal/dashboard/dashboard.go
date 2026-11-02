@@ -18,6 +18,7 @@ package dashboard
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	_ "embed"
 	"errors"
 	"html/template"
@@ -90,7 +91,9 @@ type Verification struct {
 type Config struct {
 	// Listen is the address to serve on. The configuration has already
 	// refused anything but loopback.
-	Listen  string
+	Listen string
+	// TLS, if set, serves the page over TLS (ADR-039).
+	TLS     *tls.Config
 	Version string
 	Started time.Time
 	// Ready is the readiness check /readyz runs. Nil means ready.
@@ -130,6 +133,8 @@ type Server struct {
 	cfg    Config
 	server *http.Server
 
+	addr net.Addr
+
 	mu         sync.Mutex
 	readyAt    time.Time
 	readyErr   error
@@ -168,6 +173,10 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
+	s.addr = listener.Addr()
+	if s.cfg.TLS != nil {
+		listener = tls.NewListener(listener, s.cfg.TLS)
+	}
 	go func() {
 		if err := s.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.cfg.Logger.Error("the dashboard stopped serving", "err", err)
@@ -178,9 +187,12 @@ func (s *Server) Start() error {
 		s.stopVerify, s.verifyDone = cancel, make(chan struct{})
 		go s.verifyLoop(ctx)
 	}
-	s.cfg.Logger.Info("dashboard listening", "addr", listener.Addr().String())
+	s.cfg.Logger.Info("dashboard listening", "addr", s.addr.String(), "tls", s.cfg.TLS != nil)
 	return nil
 }
+
+// Addr is the address the listener is bound to, once Start has returned.
+func (s *Server) Addr() net.Addr { return s.addr }
 
 // Shutdown stops the listener and the verification.
 func (s *Server) Shutdown(ctx context.Context) error {
