@@ -180,10 +180,123 @@ type Dashboard struct {
 	// through kubectl port-forward or an SSH tunnel, never directly, until it
 	// has an authentication of its own (ADR-035).
 	Listen string `yaml:"listen"`
+	// TLS serves the page over TLS, which sign-in needs (ADR-039).
+	TLS TLS `yaml:"tls"`
+	// OIDC signs people in through the organisation's identity provider
+	// (ADR-039).
+	OIDC *DashboardOIDC `yaml:"oidc"`
 }
 
-// validate refuses a dashboard address that is not loopback.
+// DashboardOIDC is sign-in for the status page: the authorization code flow
+// with PKCE, and access decided by one claim (ADR-039).
+type DashboardOIDC struct {
+	// Issuer is the identity provider's issuer URL, from which its discovery
+	// document is fetched.
+	Issuer   string `yaml:"issuer"`
+	ClientID string `yaml:"client_id"`
+	// ClientSecret is a reference to the environment, as every credential is.
+	// Empty, the client is public and relies on PKCE alone.
+	ClientSecret string `yaml:"client_secret"`
+	// RedirectURL is where the identity provider sends the browser back to:
+	// the address people use for the page, with the path /callback.
+	RedirectURL string `yaml:"redirect_url"`
+	// Claim names the claim that decides access, and Allowed its values that
+	// may read the page.
+	Claim   string   `yaml:"claim"`
+	Allowed []string `yaml:"allowed"`
+	// Session is how long a sign-in lasts at most; the ID token's expiry may
+	// end it sooner. Eight hours by default, a day at most.
+	Session string `yaml:"session"`
+}
+
+// DefaultDashboardSession and MaxDashboardSession bound a dashboard sign-in.
+const (
+	DefaultDashboardSession = 8 * time.Hour
+	MaxDashboardSession     = 24 * time.Hour
+)
+
+// SessionLength parses Session, with its default.
+func (o DashboardOIDC) SessionLength() (time.Duration, error) {
+	if o.Session == "" {
+		return DefaultDashboardSession, nil
+	}
+	d, err := time.ParseDuration(o.Session)
+	if err != nil {
+		return 0, fmt.Errorf("admin.dashboard.oidc.session: %w", err)
+	}
+	if d <= 0 || d > MaxDashboardSession {
+		return 0, fmt.Errorf("admin.dashboard.oidc.session %s is outside (0, %s]: a sign-in "+
+			"has to end, and a day is the most this page is worth", d, MaxDashboardSession)
+	}
+	return d, nil
+}
+
+// validate checks sign-in's settings against each other.
+func (o DashboardOIDC) validate() error {
+	issuer, err := url.Parse(o.Issuer)
+	switch {
+	case o.Issuer == "":
+		return errors.New("admin.dashboard.oidc.issuer is required")
+	case err != nil || issuer.Host == "":
+		return fmt.Errorf("admin.dashboard.oidc.issuer %q is not a URL", o.Issuer)
+	case issuer.Scheme != "https" && (issuer.Scheme != "http" || !loopbackHost(issuer.Hostname())):
+		return fmt.Errorf("admin.dashboard.oidc.issuer %q is not https: tokens are verified "+
+			"against keys fetched from it, which plain HTTP would let anyone on the path "+
+			"replace (http is accepted on loopback, for testing)", o.Issuer)
+	case o.ClientID == "":
+		return errors.New("admin.dashboard.oidc.client_id is required")
+	case o.Claim == "":
+		return errors.New("admin.dashboard.oidc.claim is required: it names the claim, such as " +
+			"groups, that decides who may read the page")
+	case len(o.Allowed) == 0:
+		return errors.New("admin.dashboard.oidc.allowed is required: every person the identity " +
+			"provider knows is not a sensible default for a page about keys")
+	}
+	for _, v := range o.Allowed {
+		if strings.TrimSpace(v) == "" {
+			return errors.New("admin.dashboard.oidc.allowed holds an empty value")
+		}
+	}
+	redirect, err := url.Parse(o.RedirectURL)
+	if o.RedirectURL == "" || err != nil || redirect.Scheme != "https" || redirect.Host == "" ||
+		redirect.Path != "/callback" || redirect.RawQuery != "" || redirect.Fragment != "" {
+		return fmt.Errorf("admin.dashboard.oidc.redirect_url %q must be the page's https "+
+			"address with the path /callback, such as https://blindbucket.example.com:9101/callback",
+			o.RedirectURL)
+	}
+	_, err = o.SessionLength()
+	return err
+}
+
+// loopbackHost reports whether host is localhost or a loopback address.
+func loopbackHost(host string) bool {
+	ip := net.ParseIP(host)
+	return host == "localhost" || (ip != nil && ip.IsLoopback())
+}
+
+// validate refuses a dashboard address that is not loopback, and sign-in
+// without TLS.
 func (d Dashboard) validate() error {
+	if d.TLS.CertFile != "" || d.TLS.KeyFile != "" {
+		if !d.TLS.Enabled() {
+			return errors.New("admin.dashboard.tls needs both cert_file and key_file")
+		}
+		if d.Listen == "" {
+			return errors.New("admin.dashboard.tls is set, but admin.dashboard.listen is not")
+		}
+	}
+	if d.OIDC != nil {
+		if d.Listen == "" {
+			return errors.New("admin.dashboard.oidc is set, but admin.dashboard.listen is not")
+		}
+		if !d.TLS.Enabled() {
+			return errors.New("admin.dashboard.oidc needs admin.dashboard.tls: sign-in over plain " +
+				"HTTP would hand the session cookie to anyone on the path (ADR-039)")
+		}
+		if err := d.OIDC.validate(); err != nil {
+			return err
+		}
+	}
 	if d.Listen == "" {
 		return nil
 	}
@@ -191,7 +304,7 @@ func (d Dashboard) validate() error {
 	if err != nil {
 		return fmt.Errorf("admin.dashboard.listen %q is not host:port: %w", d.Listen, err)
 	}
-	if ip := net.ParseIP(host); host == "localhost" || (ip != nil && ip.IsLoopback()) {
+	if loopbackHost(host) {
 		return nil
 	}
 	return fmt.Errorf("admin.dashboard.listen %q is not a loopback address. The dashboard "+
@@ -653,6 +766,11 @@ func Load(path string) (*Config, error) {
 			if err := expandEnv("clients["+strconv.Itoa(i)+"]."+name, field); err != nil {
 				return nil, err
 			}
+		}
+	}
+	if o := cfg.Admin.Dashboard.OIDC; o != nil {
+		if err := expandEnv("admin.dashboard.oidc.client_secret", &o.ClientSecret); err != nil {
+			return nil, err
 		}
 	}
 	if cfg.Audit.Export.OTLP != nil {

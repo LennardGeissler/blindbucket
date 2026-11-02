@@ -773,3 +773,79 @@ func TestPresignUploadSizes(t *testing.T) {
 		t.Errorf("an unset size is %d, %v; want 0, which serves no uploads", got, err)
 	}
 }
+
+// dashboardSignIn is a dashboard with TLS and sign-in, with replace applied to
+// its YAML.
+func dashboardSignIn(replace ...string) string {
+	y := `admin:
+  dashboard:
+    listen: "127.0.0.1:9101"
+    tls: { cert_file: /tls/dash.crt, key_file: /tls/dash.key }
+    oidc:
+      issuer: https://idp.example.com/realms/ops
+      client_id: blindbucket-dashboard
+      client_secret: ${DASH_OIDC_SECRET}
+      redirect_url: https://127.0.0.1:9101/callback
+      claim: groups
+      allowed: [blindbucket-operators]
+`
+	for i := 0; i+1 < len(replace); i += 2 {
+		y = strings.Replace(y, replace[i], replace[i+1], 1)
+	}
+	return y
+}
+
+// TestDashboardSignInSettings is ADR-039's configuration: sign-in only with
+// TLS, from an https issuer, back to an https /callback, for an explicit list
+// of allowed values, for a day at most.
+func TestDashboardSignInSettings(t *testing.T) {
+	t.Setenv("DASH_OIDC_SECRET", "s3cret")
+	cfg, err := Load(write(t, minimal+dashboardSignIn()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := cfg.Admin.Dashboard.OIDC
+	if o.ClientSecret != "s3cret" {
+		t.Errorf("client_secret = %q, want it read from the environment", o.ClientSecret)
+	}
+	if d, err := o.SessionLength(); err != nil || d != DefaultDashboardSession {
+		t.Errorf("session = %v, %v; want the default", d, err)
+	}
+
+	for name, c := range map[string]struct {
+		replace []string
+		want    string
+	}{
+		"without TLS":            {[]string{"    tls: { cert_file: /tls/dash.crt, key_file: /tls/dash.key }\n", ""}, "needs admin.dashboard.tls"},
+		"half a certificate":     {[]string{"key_file: /tls/dash.key", "key_file: \"\""}, "both cert_file and key_file"},
+		"no issuer":              {[]string{"issuer: https://idp.example.com/realms/ops", "issuer: \"\""}, "issuer is required"},
+		"an http issuer":         {[]string{"https://idp.example.com", "http://idp.example.com"}, "not https"},
+		"no client id":           {[]string{"client_id: blindbucket-dashboard", "client_id: \"\""}, "client_id is required"},
+		"an http redirect":       {[]string{"redirect_url: https://", "redirect_url: http://"}, "/callback"},
+		"another redirect path":  {[]string{"9101/callback", "9101/cb"}, "/callback"},
+		"no claim":               {[]string{"claim: groups", "claim: \"\""}, "claim is required"},
+		"no allowed values":      {[]string{"allowed: [blindbucket-operators]", "allowed: []"}, "allowed is required"},
+		"an empty allowed value": {[]string{"allowed: [blindbucket-operators]", "allowed: [\"\"]"}, "empty value"},
+		"a session of two days":  {[]string{"allowed: [blindbucket-operators]\n", "allowed: [blindbucket-operators]\n      session: 48h\n"}, "outside"},
+		"no listener":            {[]string{"    listen: \"127.0.0.1:9101\"\n", ""}, "admin.dashboard.listen is not"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(write(t, minimal+dashboardSignIn(c.replace...)))
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("got %v, want an error saying %q", err, c.want)
+			}
+		})
+	}
+
+	for name, replace := range map[string][]string{
+		"an http issuer on loopback": {"https://idp.example.com", "http://127.0.0.1:5556"},
+		"a public client":            {"      client_secret: ${DASH_OIDC_SECRET}\n", ""},
+		"a session of two hours":     {"allowed: [blindbucket-operators]\n", "allowed: [blindbucket-operators]\n      session: 2h\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(write(t, minimal+dashboardSignIn(replace...))); err != nil {
+				t.Fatalf("refused: %v", err)
+			}
+		})
+	}
+}
