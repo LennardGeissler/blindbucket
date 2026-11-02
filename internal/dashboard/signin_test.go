@@ -142,7 +142,7 @@ func signInServer(t *testing.T, p *testIDP, now *time.Time) *Server {
 		SignIn: &SignIn{
 			Issuer: p.srv.URL, ClientID: "blindbucket-dashboard", ClientSecret: testSecret,
 			RedirectURL: testRedirect, Claim: "groups", Allowed: []string{"blindbucket-operators"},
-			Session: 8 * time.Hour, HTTPClient: p.srv.Client(), Now: func() time.Time { return *now },
+			Scopes: []string{"groups"}, Session: 8 * time.Hour, HTTPClient: p.srv.Client(), Now: func() time.Time { return *now },
 		},
 	})
 }
@@ -186,6 +186,9 @@ func (b *browser) start() url.Values {
 		b.t.Fatal(err)
 	}
 	q := loc.Query()
+	if q.Get("scope") != "openid profile email groups" {
+		b.t.Fatalf("the authorization request asks for the scopes %q", q.Get("scope"))
+	}
 	if q.Get("code_challenge_method") != "S256" || q.Get("code_challenge") == "" || q.Get("nonce") == "" ||
 		q.Get("state") == "" || q.Get("redirect_uri") != testRedirect || q.Get("client_id") != "blindbucket-dashboard" {
 		b.t.Fatalf("the authorization request lacks something: %s", loc)

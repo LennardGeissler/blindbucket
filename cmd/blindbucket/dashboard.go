@@ -51,7 +51,7 @@ func startDashboard(
 		}
 		dc.SignIn = &dashboard.SignIn{
 			Issuer: o.Issuer, ClientID: o.ClientID, ClientSecret: o.ClientSecret,
-			RedirectURL: o.RedirectURL, Claim: o.Claim, Allowed: o.Allowed, Session: length,
+			RedirectURL: o.RedirectURL, Claim: o.Claim, Allowed: o.Allowed, Scopes: o.Scopes, Session: length,
 		}
 	}
 	// Set only with a writer: a nil *audit.Writer in the interface would read

@@ -26,6 +26,8 @@ type SignIn struct {
 	RedirectURL  string
 	Claim        string
 	Allowed      []string
+	// Scopes are asked for besides openid, profile and email.
+	Scopes []string
 	// Session is how long a sign-in lasts at most; the ID token's expiry may
 	// end it sooner.
 	Session time.Duration
@@ -119,7 +121,7 @@ func (s *signer) provider(ctx context.Context) (*oauth2.Config, *oidc.IDTokenVer
 	}
 	s.oauth = &oauth2.Config{
 		ClientID: s.cfg.ClientID, ClientSecret: s.cfg.ClientSecret, RedirectURL: s.cfg.RedirectURL,
-		Endpoint: p.Endpoint(), Scopes: []string{oidc.ScopeOpenID, "profile", "email"},
+		Endpoint: p.Endpoint(), Scopes: append([]string{oidc.ScopeOpenID, "profile", "email"}, s.cfg.Scopes...),
 	}
 	if s.cfg.ClientSecret == "" {
 		s.oauth.Endpoint.AuthStyle = oauth2.AuthStyleInParams

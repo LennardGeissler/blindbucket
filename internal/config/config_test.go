@@ -826,6 +826,7 @@ func TestDashboardSignInSettings(t *testing.T) {
 		"no claim":               {[]string{"claim: groups", "claim: \"\""}, "claim is required"},
 		"no allowed values":      {[]string{"allowed: [blindbucket-operators]", "allowed: []"}, "allowed is required"},
 		"an empty allowed value": {[]string{"allowed: [blindbucket-operators]", "allowed: [\"\"]"}, "empty value"},
+		"a scope with a space":   {[]string{"allowed: [blindbucket-operators]\n", "allowed: [blindbucket-operators]\n      scopes: [\"groups email\"]\n"}, "not a scope"},
 		"a session of two days":  {[]string{"allowed: [blindbucket-operators]\n", "allowed: [blindbucket-operators]\n      session: 48h\n"}, "outside"},
 		"no listener":            {[]string{"    listen: \"127.0.0.1:9101\"\n", ""}, "admin.dashboard.listen is not"},
 	} {
@@ -841,6 +842,7 @@ func TestDashboardSignInSettings(t *testing.T) {
 		"an http issuer on loopback": {"https://idp.example.com", "http://127.0.0.1:5556"},
 		"a public client":            {"      client_secret: ${DASH_OIDC_SECRET}\n", ""},
 		"a session of two hours":     {"allowed: [blindbucket-operators]\n", "allowed: [blindbucket-operators]\n      session: 2h\n"},
+		"the groups scope":           {"allowed: [blindbucket-operators]\n", "allowed: [blindbucket-operators]\n      scopes: [groups]\n"},
 		// Sign-in is what lets the page leave loopback (ADR-039).
 		"every interface": {"listen: \"127.0.0.1:9101\"", "listen: \"0.0.0.0:9101\""},
 	} {

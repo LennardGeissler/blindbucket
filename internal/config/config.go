@@ -204,6 +204,11 @@ type DashboardOIDC struct {
 	// may read the page.
 	Claim   string   `yaml:"claim"`
 	Allowed []string `yaml:"allowed"`
+	// Scopes are asked for besides openid, profile and email. Some identity
+	// providers, Dex and Okta among them, put a groups claim in the ID token
+	// only when the groups scope is asked for; others refuse a scope they do
+	// not know, so none is added by default.
+	Scopes []string `yaml:"scopes"`
 	// Session is how long a sign-in lasts at most; the ID token's expiry may
 	// end it sooner. Eight hours by default, a day at most.
 	Session string `yaml:"session"`
@@ -255,6 +260,11 @@ func (o DashboardOIDC) validate() error {
 	for _, v := range o.Allowed {
 		if strings.TrimSpace(v) == "" {
 			return errors.New("admin.dashboard.oidc.allowed holds an empty value")
+		}
+	}
+	for _, v := range o.Scopes {
+		if v == "" || strings.ContainsAny(v, " \t\"\\") {
+			return fmt.Errorf("admin.dashboard.oidc.scopes holds %q, which is not a scope", v)
 		}
 	}
 	redirect, err := url.Parse(o.RedirectURL)
