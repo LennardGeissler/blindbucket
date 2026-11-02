@@ -331,3 +331,37 @@ func TestResealATenantMistakes(t *testing.T) {
 		})
 	}
 }
+
+// A keyring command keeps the file's mode, and writes through a symlink
+// rather than over it: a keyring shared with the gateway through its group
+// must stay readable to the gateway after it.
+func TestKeyringWritesKeepModeAndLink(t *testing.T) {
+	path := setupKeyring(t, "2026-09")
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "keyring-link.json")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, err := runCLI(t, "tenants", "create", "--keyring", link, "--deployment-lock", "acme", "acme-*")
+	if err != nil {
+		t.Fatalf("create: %v\n%s", err, stderr)
+	}
+	if strings.Contains(stderr, "group could not be kept") {
+		t.Errorf("the group was not kept: %s", stderr)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("the symlink was replaced: %v %v", fi.Mode(), err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o640 {
+		t.Errorf("mode %04o after the write, want 0640", fi.Mode().Perm())
+	}
+	if openWhole(t, path).Tenant("acme") == nil {
+		t.Error("the write did not reach the file the link points to")
+	}
+}

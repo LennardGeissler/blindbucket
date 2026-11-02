@@ -56,11 +56,29 @@ func createKeyringFile(path string, data []byte) error {
 
 // replaceKeyring writes a rewritten keyring over the one that was read as
 // opened, unless the file no longer holds exactly that.
+//
+// The new file keeps the old one's mode and group, and a symlink stays a
+// symlink: a keyring shared with the gateway's account through its group,
+// which warnIfExposed allows, must still be readable by it after a tenants
+// or reseal command, or the gateway does not start at its next restart.
 func replaceKeyring(path string, opened, data []byte) error {
+	path, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
 	tmp, err := writeTemp(path, data)
 	if err != nil {
 		return err
 	}
+	if err := os.Chmod(tmp, info.Mode().Perm()); err != nil { //nolint:gosec // the operator's own mode, kept.
+		_ = os.Remove(tmp) //nolint:gosec // beside the operator's own keyring.
+		return err
+	}
+	keepGroup(tmp, info)
 	renamed := false
 	defer func() {
 		if !renamed {
