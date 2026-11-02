@@ -817,12 +817,21 @@ func lockInstructions(f *keys.File, deployment keys.RootKeyRef, tc config.Keys, 
 		}
 		switch l.Source {
 		case keys.SourceAWSKMS:
+			region := kmsRegion(l, tc)
+			regionNote := []string{}
+			if region == "<its region>" {
+				regionNote = append(regionNote,
+					"  The keyring does not record the key's region: name it, or the CLI's default",
+					"  region decides which key an alias or key id stands for.")
+			}
 			out = append(out,
 				"- "+describeLock(l)+": schedule its deletion. That takes a key id, not an",
 				"  alias, so look the key up; if an alias was moved since "+tomb.Name+" was sealed",
 				"  under it, the key is the one it pointed to then:",
-				"    aws kms describe-key --key-id "+l.KeyName+" --query KeyMetadata.KeyId",
-				"    aws kms schedule-key-deletion --key-id <that key id> --pending-window-in-days 7",
+				"    aws kms describe-key --region "+region+" --key-id "+l.KeyName+" --query KeyMetadata.KeyId",
+				"    aws kms schedule-key-deletion --region "+region+" --key-id <that key id> --pending-window-in-days 7")
+			out = append(out, regionNote...)
+			out = append(out,
 				"  Until the waiting period of 7 to 30 days ends, the deletion can be cancelled and",
 				"  "+tomb.Name+" brought back with the key.")
 		case keys.SourceVaultTransit:
@@ -841,6 +850,19 @@ func lockInstructions(f *keys.File, deployment keys.RootKeyRef, tc config.Keys, 
 		}
 	}
 	return out
+}
+
+// kmsRegion is the region of a KMS lock's key: from its ARN, or from the
+// tenant's entry under keys.tenants when that names the same key. The keyring
+// records neither, so without them it is a placeholder the operator fills in.
+func kmsRegion(l keys.Lock, tc config.Keys) string {
+	if parts := strings.Split(l.KeyName, ":"); len(parts) >= 6 && parts[0] == "arn" && parts[2] == "kms" && parts[3] != "" {
+		return parts[3]
+	}
+	if tc.Provider == "awskms" && tc.AWSKMS.KeyID == l.KeyName && tc.AWSKMS.Region != "" {
+		return tc.AWSKMS.Region
+	}
+	return "<its region>"
 }
 
 // lockUsers names who else a service key seals: the deployment, or a live

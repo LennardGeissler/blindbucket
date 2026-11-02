@@ -543,8 +543,9 @@ func TestLockInstructions(t *testing.T) {
 	for _, want := range []string{
 		"the deployment's lock: every copy of the keyring",
 		"a passphrase (salt c2FsdA==): forget it",
-		"aws kms describe-key --key-id alias/bb-acme",
-		"aws kms schedule-key-deletion --key-id <that key id> --pending-window-in-days 7",
+		"aws kms describe-key --region <its region> --key-id alias/bb-acme",
+		"aws kms schedule-key-deletion --region <its region> --key-id <that key id> --pending-window-in-days 7",
+		"does not record the key's region",
 		"vault write tenants/keys/bb-acme/config deletion_allowed=true",
 		"vault delete tenants/keys/bb-acme",
 		"AWS KMS key alias/bb: DO NOT DESTROY. It also seals the deployment",
@@ -557,6 +558,28 @@ func TestLockInstructions(t *testing.T) {
 	for _, never := range []string{"--key-id alias/bb ", "keys/bb-shared"} {
 		if strings.Contains(got, never) {
 			t.Errorf("the instructions offer a shared key for deletion: %q", never)
+		}
+	}
+}
+
+// A KMS lock's region comes from its ARN, or from the tenant's configuration
+// when that names the same key; the CLI's default region never decides it.
+func TestKMSRegion(t *testing.T) {
+	arn := keys.Lock{Source: keys.SourceAWSKMS, KeyName: "arn:aws:kms:eu-west-1:111122223333:key/1234"}
+	alias := keys.Lock{Source: keys.SourceAWSKMS, KeyName: "alias/bb-acme"}
+	tc := config.Keys{Provider: "awskms", AWSKMS: config.AWSKMSKeys{Region: "eu-central-1", KeyID: "alias/bb-acme"}}
+	for _, c := range []struct {
+		lock keys.Lock
+		tc   config.Keys
+		want string
+	}{
+		{arn, config.Keys{}, "eu-west-1"},
+		{alias, tc, "eu-central-1"},
+		{alias, config.Keys{}, "<its region>"},
+		{keys.Lock{Source: keys.SourceAWSKMS, KeyName: "alias/old"}, tc, "<its region>"},
+	} {
+		if got := kmsRegion(c.lock, c.tc); got != c.want {
+			t.Errorf("kmsRegion(%q, %+v) = %q, want %q", c.lock.KeyName, c.tc.AWSKMS, got, c.want)
 		}
 	}
 }
