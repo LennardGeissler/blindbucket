@@ -347,6 +347,14 @@ func (w *Writer) Err() error {
 func (w *Writer) Append(ev Event) error {
 	bucket, key, err := w.encode(ev.Bucket, ev.Key)
 	if err != nil {
+		// The entry cannot be written, so the request it describes goes
+		// unrecorded: that breaks the writer, as a failed write does, and
+		// with fail_closed the gateway refuses the next request. No name a
+		// client sends can cause this -- one too long to encrypt becomes a
+		// digest -- only a tenant's key that cannot be derived.
+		w.mu.Lock()
+		err = w.fail(fmt.Errorf("encrypting an entry's names: %w", err))
+		w.mu.Unlock()
 		return err
 	}
 

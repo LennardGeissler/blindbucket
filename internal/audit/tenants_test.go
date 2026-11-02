@@ -2,6 +2,7 @@ package audit
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,5 +121,42 @@ func TestNamesPerTenant(t *testing.T) {
 	}
 	if entries[4].Bucket != "" || entries[4].Key != "" {
 		t.Errorf("an entry about no bucket: %q %q", entries[4].Bucket, entries[4].Key)
+	}
+}
+
+// brokenTenants cannot give a tenant's key.
+type brokenTenants struct{}
+
+func (brokenTenants) AuditTenant(bucket string) (string, bool) {
+	if strings.HasPrefix(bucket, "acme-") {
+		return "acme", true
+	}
+	return "", true
+}
+
+func (brokenTenants) AuditNameKey(string) ([]byte, error) {
+	return nil, errors.New("the key could not be derived")
+}
+
+// An entry whose names cannot be encrypted cannot be written, so the request
+// goes unrecorded: the writer is broken, as for a failed write, which is what
+// fail_closed turns into refusals.
+func TestAnEntryThatCannotBeEncodedBreaksTheWriter(t *testing.T) {
+	key := testKey(t, 8)
+	cfg := testConfig(t, key, filepath.Join(t.TempDir(), "audit.log"))
+	cfg.Tenants = brokenTenants{}
+	w, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Close() }()
+	if err := w.Append(event("PutObject", "acme-data", "k")); err == nil {
+		t.Fatal("an entry with no key for its names was appended")
+	}
+	if err := w.Err(); !errors.Is(err, ErrBroken) {
+		t.Errorf("Err() = %v, want ErrBroken", err)
+	}
+	if err := w.Append(event("PutObject", "photos", "k")); !errors.Is(err, ErrBroken) {
+		t.Errorf("the next entry: %v, want ErrBroken", err)
 	}
 }
