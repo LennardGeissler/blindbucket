@@ -109,3 +109,24 @@ func TestSealKeyRefusesAnOversizedPlaintext(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A bucket named in another letter case is in the same tenant: entries are
+// lower case, and a provider that takes names case-insensitively would
+// otherwise serve a destroyed tenant's bucket as the default tenant's.
+func TestDirectoryTenantIgnoresLetterCase(t *testing.T) {
+	d := Directory{
+		Tenants:    []DirectoryTenant{{Name: "acme", Buckets: []string{"acme-*"}}},
+		Tombstones: []Tombstone{{Name: "globex", Buckets: []string{"globex-data"}}},
+	}
+	for bucket, want := range map[string]struct {
+		tenant    string
+		destroyed bool
+	}{
+		"ACME-photos": {"acme", false}, "Acme-x": {"acme", false},
+		"GLOBEX-DATA": {"globex", true}, "Other": {DefaultTenant, false},
+	} {
+		if name, destroyed := d.Tenant(bucket); name != want.tenant || destroyed != want.destroyed {
+			t.Errorf("Tenant(%q) = %q, %v; want %q, %v", bucket, name, destroyed, want.tenant, want.destroyed)
+		}
+	}
+}

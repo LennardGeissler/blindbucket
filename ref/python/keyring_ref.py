@@ -84,6 +84,7 @@ class Opened:
 
     def tenant_of(self, bucket: str) -> tuple[str, bool]:
         """§18.5: the tenant a bucket is in, and whether it is destroyed."""
+        bucket = bucket.lower()
         for t in self.directory["tenants"]:
             if any(matches(e, bucket) for e in t["buckets"]):
                 return t["name"], False

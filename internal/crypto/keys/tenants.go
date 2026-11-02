@@ -91,8 +91,12 @@ type keyringFileV2 struct {
 
 // Tenant resolves a bucket to its tenant (FORMAT.md section 18.5): the live
 // tenant whose bucket entry matches, DefaultTenant if none does, and destroyed
-// set when the matching entry is a tombstone's.
+// set when the matching entry is a tombstone's. The name is compared in lower
+// case, as entries are written: a provider that takes bucket names
+// case-insensitively would otherwise serve a tenant's bucket, a destroyed one
+// included, as the default tenant's under another spelling.
 func (d Directory) Tenant(bucket string) (name string, destroyed bool) {
+	bucket = strings.ToLower(bucket)
 	for _, t := range d.Tenants {
 		if matchesAny(t.Buckets, bucket) {
 			return t.Name, false

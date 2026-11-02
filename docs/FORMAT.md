@@ -1252,7 +1252,10 @@ secret of another kind.
 
 An entry of `buckets` is a bucket name, 3 to 63 bytes of `a-z 0-9 . -`, or a
 prefix of 1 to 62 such bytes followed by `*`. A bucket name matches an entry that
-equals it, and a prefix entry that it starts with.
+equals it, and a prefix entry that it starts with, once its letters are made
+lower case: entries hold none in upper case, and a provider that takes bucket
+names case-insensitively would otherwise let `ACME-photos` reach a tenant's bucket
+as the default tenant's.
 
 No two entries anywhere in the directory, live tenants and tombstones together,
 may **overlap**: two names overlap if they are equal, a name and a prefix if the
