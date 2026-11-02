@@ -6,8 +6,8 @@ type: application
 # gateway release it deploys by default, and moving it is a change to the chart
 # like any other -- a release commit bumps both. Every version is published to
 # ghcr.io once and never again with other contents (build/chart.sh).
-version: 0.1.10
-appVersion: "1.6.0"
+version: 0.1.11
+appVersion: "1.7.0"
 home: https://github.com/LennardGeissler/blindbucket
 sources:
   - https://github.com/LennardGeissler/blindbucket
@@ -23,7 +23,7 @@ annotations:
   artifacthub.io/category: security
   artifacthub.io/images: |
     - name: blindbucket
-      image: ghcr.io/lennardgeissler/blindbucket:1.6.0
+      image: ghcr.io/lennardgeissler/blindbucket:1.7.0
       platforms:
         - linux/amd64
         - linux/arm64
@@ -40,9 +40,9 @@ annotations:
       url: https://github.com/LennardGeissler/blindbucket/issues
   artifacthub.io/changes: |
     - kind: changed
-      description: Deploys blindbucket 1.6.0 by default.
+      description: Deploys blindbucket 1.7.0 by default.
     - kind: added
-      description: dashboard.enabled serves the read-only status page on each pod's loopback, reached with kubectl port-forward.
+      description: keys.tenants configures each tenant's lock, a KMS key, a Vault Transit key or a passphrase, with its secret in a Secret of its own.
     - kind: added
-      description: server.presign.uploads and server.cors serve presigned uploads and the browser pages that make them.
+      description: Two alerts, BlindbucketTenantNotOpen for a tenant whose keys did not open on a pod, and BlindbucketKeyringGenerationSkew for a keyring rollout that has not ended.
 keywords: [s3, encryption, gateway, proxy]

@@ -13,7 +13,7 @@ mapping, added with `internal/crypto/names`; section 14, the audit log, added wi
 `internal/audit`; clarifications from the independent reference decoder, and the manifest
 and upload token of sections 10 and 11 becoming normative with M4)
 
-Every section but the version 2 parts of 18 is implemented. Sections 4 to 9 live in `internal/crypto/stream`,
+Every section is implemented. Sections 4 to 9 live in `internal/crypto/stream`,
 `internal/crypto/keys` and `internal/crypto/envelope` and are pinned by the
 known-answer vectors of section 13; section 10 is `internal/manifest`, section 11
 is `internal/upload`, section 14 is `internal/audit`, section 15 is
@@ -21,7 +21,7 @@ is `internal/upload`, section 14 is `internal/audit`, section 15 is
 `internal/crypto/tags`, pinned by its own vectors as well, and the gateway has
 written tag sidecars since `v1.6.0`. Section 18 is `internal/crypto/keys`; its
 version 1 is what every release has written, and version 2, tenants, is read and
-written by the keyring commands and served by the gateway
+written by every command and served by the gateway since `v1.7.0`
 ([ADR-038](adr/ADR-038-tenants-and-crypto-shredding.md)).
 
 This document is the authoritative specification of the bytes blindbucket writes to

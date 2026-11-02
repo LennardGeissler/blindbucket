@@ -1,7 +1,12 @@
 # Threat Model
 
-**Status:** Current as of `v1.6.0`, which brings one new adversary and three things this
-model now names. The new adversary is whoever holds a presigned upload URL: they can
+**Status:** Current as of `v1.7.0`, which adds one guarantee and the limits it comes
+with. A destroyed tenant's objects, names and audit names are unreadable once every lock
+it ever had is destroyed at its key service (§3, §5.12). What that does not reach is
+written out with it: a key service's own waiting period and backups, a passphrase, a
+tenant left under the deployment's lock, and what the provider sees in clear. Tenants
+share one gateway and are no boundary of trust between each other or the operator (§6).
+`v1.6.0` brought one new adversary and three things this model names. The new adversary is whoever holds a presigned upload URL: they can
 write one key, bounded in size and time (§5.10). CORS answers a browser's preflight
 without authentication (§5.10). Object tags are sealed in sidecars, of which the provider
 sees whether there are any and roughly how large, and can drop or replay one of the same
@@ -77,7 +82,7 @@ detection, binding to bucket and key), the HTTP surface, client authentication,
 and the multipart path including the manifest and the upload token. Where a
 mitigation is deferred rather than present, the entry says so and names the
 milestone.
-**Last updated:** 2026-10-03
+**Last updated:** 2026-11-02
 
 This document states precisely what blindbucket protects against and what it does not.
 It is deliberately explicit about residual risk. A security tool that overstates its

@@ -16,6 +16,26 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-11-02
+
+**Tenants, and a tenant deleted by destroying its keys.** A tenant is a set of buckets with
+key-encryption keys and a name key of its own, sealed in the keyring under a lock of its
+own: a KMS key, a Vault Transit key or a passphrase
+([ADR-038](docs/adr/ADR-038-tenants-and-crypto-shredding.md)). `tenants destroy` takes a
+census of every object and version in the tenant's buckets, writes the keyring without its
+keys, and names each lock to destroy. Once those are destroyed, its objects, names and
+audit names are unreadable wherever the ciphertext and the copies of the keyring are. The
+keyring file is specified (FORMAT.md §18), with version 2 for tenants; the object format
+is still `1`, and everything is additive under
+[ADR-021](docs/adr/ADR-021-what-1.0-promises.md).
+
+**Upgrading:** nothing to do while no tenant is created. The keyring stays version 1, and
+1.6 still opens it. The first `tenants create` writes version 2, which no release before
+1.7 opens, so a downgrade is possible only until then. `doctor --json` gains a check,
+`tenants`, after `feature_keys`. With tenants, every keyring change reaches an instance
+when it restarts, and the next step waits until every instance serves it;
+[docs/guides/tenants.md](docs/guides/tenants.md) gives the order.
+
 ### Added
 
 - **The keyring file is specified, with version 2 for tenants.** FORMAT.md §18 writes
@@ -1495,7 +1515,8 @@ figures and the methodology are in [bench/](bench/).
   of ten seconds, so the time is the provider's; why it behaves that way under
   this access pattern is not established.
 
-[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.4.0...v1.5.0
