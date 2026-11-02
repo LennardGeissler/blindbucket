@@ -93,7 +93,10 @@ type Config struct {
 	// refused anything but loopback.
 	Listen string
 	// TLS, if set, serves the page over TLS (ADR-039).
-	TLS     *tls.Config
+	TLS *tls.Config
+	// SignIn, if set, puts sign-in in front of the page (ADR-039). The
+	// configuration has already required TLS with it.
+	SignIn  *SignIn
 	Version string
 	Started time.Time
 	// Ready is the readiness check /readyz runs. Nil means ready.
@@ -134,6 +137,10 @@ type Server struct {
 	server *http.Server
 
 	addr net.Addr
+	// signin is sign-in, when configured; signinErr says why it could not be
+	// set up, and then every request is refused rather than served without.
+	signin    *signer
+	signinErr error
 
 	mu         sync.Mutex
 	readyAt    time.Time
@@ -155,6 +162,9 @@ func New(cfg Config) *Server {
 		cfg.Started = time.Now()
 	}
 	s := &Server{cfg: cfg}
+	if cfg.SignIn != nil {
+		s.signin, s.signinErr = newSigner(*cfg.SignIn, cfg.Logger)
+	}
 	s.server = &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           s.Handler(),
@@ -233,14 +243,24 @@ func (s *Server) verifyLoop(ctx context.Context) {
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
+		// The page's one form is the sign-out button, which exists only
+		// with sign-in.
+		formAction := "'none'"
+		if s.cfg.SignIn != nil {
+			formAction = "'self'"
+		}
 		h.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self'; "+
-			"base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+			"base-uri 'none'; form-action "+formAction+"; frame-ancestors 'none'")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Cache-Control", "no-store")
 
 		// A DNS-rebinding page reaches loopback under its own name, and that
 		// name is what arrives here. A tunnel arrives as localhost.
+		if s.cfg.SignIn != nil {
+			s.serveSignedIn(w, r)
+			return
+		}
 		if !loopbackHost(r.Host) {
 			http.Error(w, "this dashboard answers only to localhost", http.StatusMisdirectedRequest)
 			return
@@ -252,14 +272,62 @@ func (s *Server) Handler() http.Handler {
 		}
 		switch r.URL.Path {
 		case "/":
-			s.servePage(w, r)
+			s.servePage(w, r, "")
 		case "/style.css":
-			h.Set("Content-Type", "text/css; charset=utf-8")
-			_, _ = w.Write(styleCSS)
+			serveStyle(w)
 		default:
 			http.NotFound(w, r)
 		}
 	})
+}
+
+// serveSignedIn serves the dashboard behind sign-in (ADR-039). Every path but
+// the stylesheet needs a session; /callback and /logout change nothing but
+// the session.
+func (s *Server) serveSignedIn(w http.ResponseWriter, r *http.Request) {
+	if s.signin == nil {
+		s.cfg.Logger.Error("dashboard sign-in could not be set up", "err", s.signinErr)
+		http.Error(w, "Sign-in is unavailable.", http.StatusServiceUnavailable)
+		return
+	}
+	if !s.signin.allowsHost(r.Host) {
+		http.Error(w, "this dashboard answers only to its own address", http.StatusMisdirectedRequest)
+		return
+	}
+	readOnly := r.Method == http.MethodGet || r.Method == http.MethodHead
+	switch {
+	case r.URL.Path == "/logout" && r.Method == http.MethodPost:
+		s.signin.logout(w, r)
+		return
+	case r.URL.Path == "/logout":
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "sign out with POST", http.StatusMethodNotAllowed)
+		return
+	case !readOnly:
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "the dashboard is read-only", http.StatusMethodNotAllowed)
+		return
+	}
+	switch r.URL.Path {
+	case "/style.css":
+		serveStyle(w)
+	case "/callback":
+		s.signin.callback(w, r)
+	case "/":
+		sess, ok := s.signin.current(r)
+		if !ok {
+			s.signin.begin(w, r)
+			return
+		}
+		s.servePage(w, r, sess.Name)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func serveStyle(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	_, _ = w.Write(styleCSS)
 }
 
 // loopbackHost reports whether a Host header names this machine's loopback.
@@ -284,6 +352,9 @@ type view struct {
 	NotReady           string
 	ReadyAt            time.Time
 
+	// SignedInAs names who is signed in, with sign-in; empty without.
+	SignedInAs string
+
 	Keys       []keyView
 	Sealing    string
 	Generation uint64
@@ -300,9 +371,10 @@ type keyView struct {
 	Created time.Time
 }
 
-func (s *Server) servePage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) servePage(w http.ResponseWriter, r *http.Request, signedInAs string) {
 	v := view{
-		Version: s.cfg.Version, GoVersion: runtime.Version(), Started: s.cfg.Started,
+		SignedInAs: signedInAs,
+		Version:    s.cfg.Version, GoVersion: runtime.Version(), Started: s.cfg.Started,
 		Uptime:  time.Since(s.cfg.Started).Round(time.Second).String(),
 		Sealing: s.cfg.Sealing, Generation: s.cfg.Generation, Tenants: s.cfg.Tenants,
 	}

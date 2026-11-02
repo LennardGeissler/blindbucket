@@ -11,6 +11,9 @@
 <header>
   <h1>blindbucket</h1>
   <p class="sub">{{.Version}} &middot; {{.GoVersion}} &middot; up {{.Uptime}}, since {{when .Started}}</p>
+  {{if .SignedInAs}}
+  <form class="signout" method="post" action="/logout"><span>Signed in as {{.SignedInAs}}</span> <button type="submit">Sign out</button></form>
+  {{end}}
 </header>
 
 <section>
