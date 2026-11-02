@@ -14,6 +14,7 @@ import (
 
 	"github.com/LennardGeissler/blindbucket/internal/audit"
 	"github.com/LennardGeissler/blindbucket/internal/config"
+	"github.com/LennardGeissler/blindbucket/internal/crypto/names"
 )
 
 // writeAuditLog writes a log the way the gateway does, signed with the audit
@@ -392,5 +393,27 @@ func TestAuditCommandLineMistakes(t *testing.T) {
 				t.Errorf("error %q does not mention %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// A bucket recorded as a digest, for a name too long to encrypt, leaves the
+// object key encrypted, and the key that opens it is tried on its own.
+func TestDecodeNamesWithADigestedBucket(t *testing.T) {
+	key := bytes.Repeat([]byte{7}, 32)
+	coder, err := names.New(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := names.New(bytes.Repeat([]byte{8}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encKey, err := coder.EncryptKey("secret/key.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bucket, got := decodeNames([]*names.Encrypter{other, coder}, "h:0123abcd", encKey)
+	if bucket != "h:0123abcd" || got != "secret/key.txt" {
+		t.Errorf("decodeNames = %q, %q", bucket, got)
 	}
 }

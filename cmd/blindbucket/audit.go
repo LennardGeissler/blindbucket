@@ -428,8 +428,8 @@ func entryPrinter(enabled bool, coders []*names.Encrypter) func(*audit.Entry) er
 }
 
 // decodeNames reverses an entry's encrypted names with the first key that
-// opens its bucket, leaving what no key opens as it stands rather than
-// pretending to have read it. A wrong key fails the name encryption's own
+// opens its bucket, or, when none does, the object key on its own, leaving
+// what no key opens as it stands rather than pretending to have read it. A wrong key fails the name encryption's own
 // check (FORMAT.md section 15.4), so at most one key opens a name.
 func decodeNames(coders []*names.Encrypter, bucket, key string) (string, string) {
 	if bucket == "" {
@@ -447,6 +447,16 @@ func decodeNames(coders []*names.Encrypter, bucket, key string) (string, string)
 			}
 		}
 		return plainBucket, plainKey
+	}
+	// No key opens the bucket: a digest, for a bucket name too long to
+	// encrypt or one whose tenant was not held. The object key may still be
+	// encrypted, and is read on its own.
+	if key != "" {
+		for _, coder := range coders {
+			if k, err := coder.DecryptKey(key); err == nil {
+				return bucket, k
+			}
+		}
 	}
 	return bucket, key
 }
