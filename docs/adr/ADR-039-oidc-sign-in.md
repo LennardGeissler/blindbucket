@@ -82,6 +82,9 @@ What is checked, each with a test that requires a refusal:
 Discovery happens on the first sign-in, not at startup, and is retried on the next one
 after a failure. A gateway starts, and serves S3, whatever the identity provider is
 doing. The page answers `503` with a short reason while the issuer cannot be reached.
+*Amended after a review: every call to the identity provider has a deadline, ten
+seconds. go-oidc fetches the key set once for every waiting caller, so one fetch
+without a deadline that never ended held every later sign-in until a restart.*
 
 ### Who may read it: one claim, and a list of values
 
@@ -114,8 +117,11 @@ identity provider is one redirect.
 The cookie is `__Host-` prefixed, `Secure`, `HttpOnly`, `Path=/`, and `SameSite=Lax`.
 `Lax` rather than `Strict`, because the session has to be set while returning from the
 identity provider, a navigation that began on another site. A cross-site `POST` does
-not carry a `Lax` cookie, so `POST /logout` cannot be forged. Nothing else on the
-listener accepts anything but `GET` and `HEAD`.
+not carry a `Lax` cookie, so `POST /logout` cannot be forged. *Amended after a review:
+that holds only because sign-out clears the cookie for a request that carries the
+session. A browser takes a cross-site navigation's `Set-Cookie`, so one that cleared it
+regardless could be posted to from another page.* Nothing else on the listener accepts
+anything but `GET` and `HEAD`.
 
 A restart ends every session, and each instance has its own key. Since each instance
 has its own page (ADR-035), a person signs in once per pod they look at. Behind a load
@@ -124,10 +130,13 @@ balancer, the dashboard needs sticky routing or a hostname per pod.
 ### The Host header names the configured address
 
 ADR-035 accepted only loopback names in `Host`, which turns away a DNS-rebinding page.
-With sign-in, the listener accepts the host of the configured `redirect_url`, and
-loopback names as before. A rebinding page still arrives with its own name and gets
-`421`. The redirect URL is also what the identity provider sends the browser back to,
-so it has to be the address people use.
+With sign-in, the listener accepts the host of the configured `redirect_url`. A
+rebinding page still arrives with its own name and gets `421`. The redirect URL is also
+what the identity provider sends the browser back to, so it has to be the address people
+use. *Amended after a review: loopback names were accepted as well, but a sign-in
+started under one can never finish, since its cookie is bound to that name and the
+provider returns to the redirect URL's host. They are accepted only when the redirect
+URL is itself on loopback.*
 
 ### Read-only stays read-only
 

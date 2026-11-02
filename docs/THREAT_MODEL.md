@@ -450,14 +450,20 @@ under a key the issuer publishes, and whose claim holds an allowed value. The te
 refuse every other kind of token, unsigned and HS256 included. The session cookie is
 sealed under a key the process keeps in memory, `__Host-`, `Secure`, `HttpOnly` and
 `SameSite=Lax`, so another site cannot send it with a request that writes, and nothing
-on the page writes but the sign-out. The Host rule accepts the redirect URL's host and
-loopback names, so DNS rebinding is still turned away. What remains is **accepted
+on the page writes but the sign-out, which clears only a session the request carries.
+The Host rule accepts the redirect URL's host alone, so DNS rebinding is still turned
+away. Every call to the identity provider has a deadline. What remains is **accepted
 risk**:
 - **The identity provider decides who reads the page.** One that is compromised, or that
   puts the wrong people in the allowed group, gives them read access to it.
-- **A stolen session cookie** reads the page until the session ends: at the ID token's
-  expiry or after `session`, eight hours by default, or at a restart. There is no
-  revocation before that, short of restarting the instance.
+- **A session is not revoked before it ends.** A stolen session cookie reads the page
+  until the session ends: at the ID token's expiry or after `session`, eight hours by
+  default, or at a restart. So does the session of someone removed from the allowed
+  group meanwhile. Signing out ends the session in that browser, not a copy of its
+  cookie, and not the session at the identity provider.
+- **`email_verified` is not checked.** With `claim: email`, a provider that lets people
+  set an address they do not own would let them name an allowed one. A group claim the
+  organisation manages does not have that problem.
 - **The page is reconnaissance** (above), now for whoever signs in, and reachable to
   probe for whoever can reach the port.
 
