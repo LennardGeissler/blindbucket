@@ -33,6 +33,9 @@ type testIDP struct {
 	// codes maps an authorization code to the PKCE challenge it was issued
 	// for, and the ID token its redemption returns.
 	codes map[string]issued
+	// hangKeys, while set, makes the key set accept a request and never
+	// answer it, until the request gives up.
+	hangKeys bool
 }
 
 type issued struct {
@@ -65,7 +68,14 @@ func newTestIDP(t *testing.T) *testIDP {
 			"id_token_signing_alg_values_supported": []string{"RS256", "ES256", "HS256", "none"},
 		})
 	})
-	mux.HandleFunc("/keys", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/keys", func(w http.ResponseWriter, r *http.Request) {
+		p.mu.Lock()
+		hang := p.hangKeys
+		p.mu.Unlock()
+		if hang {
+			<-r.Context().Done()
+			return
+		}
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: p.published})
@@ -451,5 +461,49 @@ func TestSignInWithoutTheIdentityProvider(t *testing.T) {
 	b := &browser{t: t, h: s.Handler(), cookies: map[string]*http.Cookie{}}
 	if rec := b.do(http.MethodGet, "/"); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("GET / with the issuer down: %d, want 503", rec.Code)
+	}
+}
+
+// A key set that never answers holds a sign-in only until the client's timeout,
+// and once it answers again, the next sign-in works: go-oidc fetches it once
+// for every waiting caller, so without a timeout one stuck fetch would hold
+// every later sign-in until a restart. The default client has one.
+func TestSignInRecoversFromAKeySetThatHangs(t *testing.T) {
+	s, err := newSigner(SignIn{RedirectURL: testRedirect}, quiet())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.cfg.HTTPClient.Timeout <= 0 {
+		t.Error("the default client for the identity provider has no timeout")
+	}
+
+	p := newTestIDP(t)
+	now := time.Now()
+	srv := New(Config{
+		Version: "1.8.0", Keyring: keyring{}, Logger: quiet(),
+		SignIn: &SignIn{
+			Issuer: p.srv.URL, ClientID: "blindbucket-dashboard", ClientSecret: testSecret,
+			RedirectURL: testRedirect, Claim: "groups", Allowed: []string{"blindbucket-operators"},
+			Scopes: []string{"groups"}, Session: time.Hour, Now: func() time.Time { return now },
+			HTTPClient: &http.Client{Timeout: 300 * time.Millisecond, Transport: p.srv.Client().Transport},
+		},
+	})
+
+	p.mu.Lock()
+	p.hangKeys = true
+	p.mu.Unlock()
+	b := &browser{t: t, h: srv.Handler(), cookies: map[string]*http.Cookie{}}
+	q := b.start()
+	if rec := b.finish(p, q, p.sign(p.claims(q.Get("nonce"), now), jose.RS256, p.rsaKey, "rsa-1")); rec.Code != http.StatusForbidden {
+		t.Fatalf("while the key set hangs: %d, want 403", rec.Code)
+	}
+
+	p.mu.Lock()
+	p.hangKeys = false
+	p.mu.Unlock()
+	b = &browser{t: t, h: srv.Handler(), cookies: map[string]*http.Cookie{}}
+	q = b.start()
+	if rec := b.finish(p, q, p.sign(p.claims(q.Get("nonce"), now), jose.RS256, p.rsaKey, "rsa-1")); rec.Code != http.StatusSeeOther {
+		t.Fatalf("after the key set answers again: %d, want a sign-in\n%s", rec.Code, rec.Body)
 	}
 }

@@ -31,7 +31,9 @@ type SignIn struct {
 	// Session is how long a sign-in lasts at most; the ID token's expiry may
 	// end it sooner.
 	Session time.Duration
-	// HTTPClient talks to the identity provider. Nil uses http.DefaultClient.
+	// HTTPClient talks to the identity provider. Nil uses a client with
+	// ProviderTimeout; one without a timeout would let a provider that never
+	// answers hold sign-in until a restart.
 	HTTPClient *http.Client
 	// Now is the clock, for tests. Nil uses time.Now.
 	Now func() time.Time
@@ -46,6 +48,11 @@ const (
 	// stateTTL bounds the time between the redirect to the identity provider
 	// and its answer.
 	stateTTL = 10 * time.Minute
+	// ProviderTimeout bounds every call to the identity provider: discovery, the
+	// token endpoint, and the key set, which go-oidc fetches once for every
+	// waiting caller, so a fetch that never ends would leave every later
+	// sign-in waiting on it.
+	ProviderTimeout = 10 * time.Second
 )
 
 // signingAlgs are the only signatures an ID token may carry (ADR-039). none
@@ -93,7 +100,7 @@ func newSigner(cfg SignIn, log interface {
 		cfg.Now = time.Now
 	}
 	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = http.DefaultClient
+		cfg.HTTPClient = &http.Client{Timeout: ProviderTimeout}
 	}
 	redirect, err := url.Parse(cfg.RedirectURL)
 	if err != nil {
@@ -115,6 +122,10 @@ func (s *signer) provider(ctx context.Context) (*oauth2.Config, *oidc.IDTokenVer
 	if s.oauth != nil {
 		return s.oauth, s.verifier, nil
 	}
+	// Discovery holds the lock, so every other sign-in waits for it: bounded,
+	// whatever client the caller passed.
+	ctx, cancel := context.WithTimeout(ctx, ProviderTimeout)
+	defer cancel()
 	p, err := oidc.NewProvider(oidc.ClientContext(ctx, s.cfg.HTTPClient), s.cfg.Issuer)
 	if err != nil {
 		return nil, nil, err
