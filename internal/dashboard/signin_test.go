@@ -507,3 +507,21 @@ func TestSignInRecoversFromAKeySetThatHangs(t *testing.T) {
 		t.Fatalf("after the key set answers again: %d, want a sign-in\n%s", rec.Code, rec.Body)
 	}
 }
+
+// A sign-out posted from another site arrives without the session, as a
+// SameSite=Lax cookie is not sent with it, and changes nothing.
+func TestSignOutNeedsTheSession(t *testing.T) {
+	p := newTestIDP(t)
+	now := time.Now()
+	h := signInServer(t, p, &now).Handler()
+	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	req.Host = testHost
+	req.Header.Set("Origin", "https://attacker.example")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookie {
+			t.Errorf("a sign-out without the session set %s: %+v", sessionCookie, c)
+		}
+	}
+}

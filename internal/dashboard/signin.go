@@ -274,13 +274,15 @@ func (s *signer) callback(w http.ResponseWriter, r *http.Request) {
 }
 
 // logout ends the browser's session. It is a POST, which a SameSite=Lax
-// cookie does not accompany from another site, so another page cannot sign
-// someone out.
+// cookie does not accompany from another site, and only a request that
+// carries the session ends it: a page on another site can still post here,
+// and a response that cleared the cookie regardless would sign the person
+// out, since a browser takes a top-level navigation's Set-Cookie.
 func (s *signer) logout(w http.ResponseWriter, r *http.Request) {
 	if sess, ok := s.current(r); ok {
 		s.log.Info("dashboard sign-out", "subject", sess.Subject, "issuer", sess.Issuer)
+		clearCookie(w, sessionCookie)
 	}
-	clearCookie(w, sessionCookie)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(`<!doctype html><html lang="en"><head><meta charset="utf-8">` +
 		`<title>Signed out</title><link rel="stylesheet" href="/style.css"></head>` +
