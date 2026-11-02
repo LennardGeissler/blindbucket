@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -152,5 +153,63 @@ clients: [{ name: tester, access_key_id: TESTCLIENT, secret_access_key: s, bucke
 		if strings.Contains(string(b), "2026-09") {
 			t.Error("the TLS listener served the page over plain HTTP")
 		}
+	}
+}
+
+// With admin.dashboard.oidc, serve puts sign-in in front of the page: a
+// request without a session is sent to the issuer, with PKCE, and the page
+// itself is not served.
+func TestServeDashboardWithSignIn(t *testing.T) {
+	keyring := setupKeyring(t, "2026-09")
+	provider, _ := stubProvider(t)
+	certFile, keyFile, pool := selfSignedCert(t)
+	dashAddr := freeAddr(t)
+
+	// An issuer on loopback over plain HTTP, which the configuration accepts
+	// for testing; it answers discovery and nothing else.
+	var issuer string
+	idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/openid-configuration" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":%q,"token_endpoint":%q,"jwks_uri":%q}`,
+			issuer, issuer+"/auth", issuer+"/token", issuer+"/keys")
+	}))
+	defer idp.Close()
+	issuer = idp.URL
+
+	startServe(t, fmt.Sprintf(`
+server: { listen: %q }
+admin:
+  listen: ""
+  dashboard:
+    listen: %q
+    tls: { cert_file: %q, key_file: %q }
+    oidc:
+      issuer: %q
+      client_id: blindbucket-dashboard
+      redirect_url: https://%s/callback
+      claim: groups
+      allowed: [blindbucket-operators]
+upstream: { endpoint: %q, region: us-east-1, path_style: true, access_key_id: a, secret_access_key: b }
+keys: { provider: file, keyring: %q }
+clients: [{ name: tester, access_key_id: TESTCLIENT, secret_access_key: s, buckets: ["readybucket"] }]
+`, freeAddr(t), dashAddr, certFile, keyFile, issuer, dashAddr, provider.URL, keyring))
+
+	secure := &http.Client{
+		Timeout:       5 * time.Second,
+		Transport:     &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	resp := waitFor(t, secure, "https://"+dashAddr+"/", http.StatusFound)
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	loc := resp.Header.Get("Location")
+	if !strings.HasPrefix(loc, issuer+"/auth?") || !strings.Contains(loc, "code_challenge_method=S256") {
+		t.Errorf("GET / without a session went to %q", loc)
+	}
+	if strings.Contains(string(body), "2026-09") {
+		t.Error("the page was served without a session")
 	}
 }

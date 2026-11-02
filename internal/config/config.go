@@ -176,9 +176,9 @@ type Admin struct {
 // Dashboard configures the read-only status page.
 type Dashboard struct {
 	// Listen is the address to serve the page on. Empty, the default, serves
-	// none. It must be a loopback address: the page is reached from elsewhere
-	// through kubectl port-forward or an SSH tunnel, never directly, until it
-	// has an authentication of its own (ADR-035).
+	// none. Without sign-in it must be a loopback address, and the page is
+	// reached from elsewhere through kubectl port-forward or an SSH tunnel
+	// (ADR-035). With OIDC, which needs TLS, it may be any address (ADR-039).
 	Listen string `yaml:"listen"`
 	// TLS serves the page over TLS, which sign-in needs (ADR-039).
 	TLS TLS `yaml:"tls"`
@@ -304,13 +304,13 @@ func (d Dashboard) validate() error {
 	if err != nil {
 		return fmt.Errorf("admin.dashboard.listen %q is not host:port: %w", d.Listen, err)
 	}
-	if loopbackHost(host) {
+	if loopbackHost(host) || d.OIDC != nil {
 		return nil
 	}
-	return fmt.Errorf("admin.dashboard.listen %q is not a loopback address. The dashboard "+
-		"has no authentication of its own, so it serves only on loopback, such as "+
-		"127.0.0.1:9101; reach it from elsewhere with kubectl port-forward or an SSH tunnel "+
-		"(ADR-035)", d.Listen)
+	return fmt.Errorf("admin.dashboard.listen %q is not a loopback address. Without sign-in "+
+		"the dashboard serves only on loopback, such as 127.0.0.1:9101; reach it from elsewhere "+
+		"with kubectl port-forward or an SSH tunnel (ADR-035), or configure admin.dashboard.oidc "+
+		"and admin.dashboard.tls to serve it on the network (ADR-039)", d.Listen)
 }
 
 // Client is one credential the proxy accepts from its own clients.

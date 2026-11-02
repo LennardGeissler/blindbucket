@@ -44,6 +44,16 @@ func startDashboard(
 		}
 		dc.TLS = &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS12}
 	}
+	if o := cfg.Admin.Dashboard.OIDC; o != nil {
+		length, err := o.SessionLength()
+		if err != nil {
+			return nil, err
+		}
+		dc.SignIn = &dashboard.SignIn{
+			Issuer: o.Issuer, ClientID: o.ClientID, ClientSecret: o.ClientSecret,
+			RedirectURL: o.RedirectURL, Claim: o.Claim, Allowed: o.Allowed, Session: length,
+		}
+	}
 	// Set only with a writer: a nil *audit.Writer in the interface would read
 	// as a configured log.
 	if auditLog != nil {

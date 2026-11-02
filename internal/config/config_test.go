@@ -841,6 +841,8 @@ func TestDashboardSignInSettings(t *testing.T) {
 		"an http issuer on loopback": {"https://idp.example.com", "http://127.0.0.1:5556"},
 		"a public client":            {"      client_secret: ${DASH_OIDC_SECRET}\n", ""},
 		"a session of two hours":     {"allowed: [blindbucket-operators]\n", "allowed: [blindbucket-operators]\n      session: 2h\n"},
+		// Sign-in is what lets the page leave loopback (ADR-039).
+		"every interface": {"listen: \"127.0.0.1:9101\"", "listen: \"0.0.0.0:9101\""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Load(write(t, minimal+dashboardSignIn(replace...))); err != nil {

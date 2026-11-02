@@ -88,6 +88,21 @@ admin:
   # (ADR-035). Off when unset.
   # dashboard:
   #   listen: "127.0.0.1:9101"
+  #
+  # Or on the network, behind sign-in through your identity provider, which
+  # needs TLS (ADR-039). Only people whose token carries an allowed value of
+  # the claim may read the page; a session lasts 8h by default, 24h at most.
+  # dashboard:
+  #   listen: "0.0.0.0:9101"
+  #   tls: { cert_file: /etc/blindbucket/tls/dashboard.crt, key_file: /etc/blindbucket/tls/dashboard.key }
+  #   oidc:
+  #     issuer: https://idp.example.com/realms/ops
+  #     client_id: blindbucket-dashboard
+  #     client_secret: ${DASHBOARD_OIDC_SECRET}  # leave out for a public client (PKCE alone)
+  #     redirect_url: https://blindbucket-1.example.com:9101/callback
+  #     claim: groups
+  #     allowed: [blindbucket-operators]
+  #     session: 8h
 
 upstream:
   endpoint: http://localhost:9002        # the MinIO from docker-compose.yml
