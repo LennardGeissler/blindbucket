@@ -207,6 +207,11 @@ type version struct {
 	latest         bool
 }
 
+// errTruncated is a listing that says it goes on and gives nothing to go on
+// from. S3 always gives a marker; a provider that does not would otherwise end
+// the census early and let it report clean what it never read.
+var errTruncated = errors.New("the provider says the listing goes on, and gives no marker to continue from")
+
 // count reads the metadata of every version in one bucket, or of every object
 // where the provider does not list versions.
 func count(ctx context.Context, cfg Config, b *Bucket) error {
@@ -236,7 +241,10 @@ func count(ctx context.Context, cfg Config, b *Bucket) error {
 	}
 
 	err := listVersions(ctx, cfg, b, send)
-	if ae, ok := upstream.AsAPIError(err); ok && ae.Code == "NotImplemented" {
+	// Only a provider that refuses the first page does not list versions; one
+	// that listed some and then refused is a failure, not a fallback, or the
+	// objects already counted would be counted again.
+	if ae, ok := upstream.AsAPIError(err); ok && ae.Code == "NotImplemented" && !b.Versioned {
 		err = listObjects(ctx, cfg, b, send)
 	}
 	close(work)
@@ -271,8 +279,12 @@ func listVersions(ctx context.Context, cfg Config, b *Bucket, send func(version)
 				return err
 			}
 		}
-		if !page.IsTruncated || page.NextKeyMarker == "" && page.NextVersionIDMarker == "" {
+		if !page.IsTruncated {
 			return nil
+		}
+		// A census that stopped here would report clean what it never read.
+		if page.NextKeyMarker == "" && page.NextVersionIDMarker == "" {
+			return errTruncated
 		}
 		query.Set("key-marker", page.NextKeyMarker)
 		query.Set("version-id-marker", page.NextVersionIDMarker)
@@ -296,8 +308,11 @@ func listObjects(ctx context.Context, cfg Config, b *Bucket, send func(version) 
 				return err
 			}
 		}
-		if !page.IsTruncated || page.NextContinuationToken == "" {
+		if !page.IsTruncated {
 			return nil
+		}
+		if page.NextContinuationToken == "" {
+			return errTruncated
 		}
 		query.Set("continuation-token", page.NextContinuationToken)
 	}

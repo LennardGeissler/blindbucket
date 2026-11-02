@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -231,5 +232,43 @@ func TestIntegrationCensusCountsNullVersions(t *testing.T) {
 	if b.Scanned != 3 || b.Noncurrent != 2 || b.OnTenant != 1 || b.NoncurrentOff != 2 ||
 		b.NoncurrentKIDs[proxytest.DefaultKID] != 2 {
 		t.Errorf("%+v; want both null versions read, and both off the tenant under the default key", b)
+	}
+}
+
+// A listing that says it goes on without saying from where is a failure, not
+// the end of the bucket: the census would otherwise report clean what it never
+// read.
+func TestCensusRefusesATruncatedListingWithoutAMarker(t *testing.T) {
+	for name, versions := range map[string]bool{"versions": true, "objects": false} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Query().Has("versions") && !versions:
+					w.WriteHeader(http.StatusNotImplemented)
+					_, _ = w.Write([]byte(`<Error><Code>NotImplemented</Code><Message>no</Message></Error>`))
+				case r.URL.Query().Has("versions"):
+					_, _ = w.Write([]byte(`<ListVersionsResult><Name>b</Name><IsTruncated>true</IsTruncated>` +
+						`<Version><Key>a</Key><VersionId>v1</VersionId><IsLatest>true</IsLatest></Version></ListVersionsResult>`))
+				case r.Method == http.MethodHead:
+					w.Header().Set("Content-Length", "1")
+				default:
+					_, _ = w.Write([]byte(`<ListBucketResult><Name>b</Name><IsTruncated>true</IsTruncated>` +
+						`<Contents><Key>a</Key><Size>1</Size></Contents></ListBucketResult>`))
+				}
+			}))
+			defer srv.Close()
+			up, err := upstream.New(upstream.Config{
+				Endpoint: srv.URL, Region: "us-east-1", PathStyle: true, AccessKeyID: "a", SecretAccessKey: "b",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = census.Run(t.Context(), census.Config{
+				Upstream: up, Entries: []string{"bucket"}, KIDs: []string{"acme-1"}, Log: proxytest.DiscardLogger(),
+			})
+			if err == nil || !strings.Contains(err.Error(), "no marker") {
+				t.Errorf("got %v, want the census to fail on a truncated listing without a marker", err)
+			}
+		})
 	}
 }
