@@ -369,6 +369,32 @@ jobs:
           docker logs vault || true
           docker logs kms || true
 
+  # The dashboard's sign-in against an identity provider this project did not
+  # write (ADR-039): Dex, with a mock connector that signs in one person in
+  # the group "authors", so the whole flow runs -- redirects, code, token
+  # endpoint, key set and groups claim -- without a login form. The refusals
+  # of bad tokens are tested on every run against a provider of the tests'
+  # own; this job is where the real one answers.
+  dex:
+    name: Dashboard sign-in (Dex)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Start Dex
+        run: test/services/dex.sh | sed -n 's/^export //p' >> "$GITHUB_ENV"
+
+      - name: Run the sign-in tests
+        run: go test -race -count=1 -run 'SignIn' ./internal/dashboard/...
+
+      - name: Dex logs on failure
+        if: failure()
+        run: docker logs blindbucket-dex || true
+
   # OpenBao is the open-source fork of Vault and serves the same Transit API.
   # The same tests, plus the commands that seal and reseal a keyring through it,
   # so that "works with OpenBao" stays a measurement rather than a claim about

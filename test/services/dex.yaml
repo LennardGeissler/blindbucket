@@ -1,0 +1,25 @@
+# Dex for the dashboard's sign-in test (ADR-039), started by test/services/dex.sh.
+#
+# The mockCallback connector signs in one fixed person without a login form:
+# Kilgore Trout, kilgore@kilgore.trout, in the group "authors". That is enough
+# to run the whole flow -- the redirects, the code, the token endpoint, the
+# key set and the groups claim -- against an identity provider this project
+# did not write. Nothing here is a secret.
+issuer: http://127.0.0.1:5556/dex
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+oauth2:
+  skipApprovalScreen: true
+connectors:
+  - type: mockCallback
+    id: mock
+    name: Mock
+staticClients:
+  - id: blindbucket-dashboard
+    name: blindbucket dashboard
+    secret: dashboard-test-secret-of-thirty-two-bytes
+    redirectURIs:
+      - https://127.0.0.1:19101/callback
+      - https://127.0.0.1:19102/callback
