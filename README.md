@@ -612,11 +612,17 @@ admin:
     listen: "127.0.0.1:9101"   # loopback only; off when unset
 ```
 
-It has no authentication of its own, so it serves only on loopback and only to
-requests that name `localhost`. From elsewhere, reach it through a tunnel: `kubectl
-port-forward pod/<gateway> 9101`, or `ssh -L 9101:127.0.0.1:9101 <host>`, then open
-`http://localhost:9101`. Nothing on it changes anything; that stays with the CLI
-([ADR-035](docs/adr/ADR-035-dashboard.md)).
+Without sign-in it serves only on loopback and only to requests that name `localhost`.
+From elsewhere, reach it through a tunnel: `kubectl port-forward pod/<gateway> 9101`, or
+`ssh -L 9101:127.0.0.1:9101 <host>`, then open `http://localhost:9101`. Nothing on it
+changes anything; that stays with the CLI ([ADR-035](docs/adr/ADR-035-dashboard.md)).
+
+Or put it on the network behind your identity provider. With `admin.dashboard.oidc` and
+TLS, people sign in with the authorization code flow and PKCE, and only those whose
+token carries an allowed value of a claim, a group for instance, may read the page. The
+gateway starts and serves S3 when the identity provider is down; only the page waits for
+it ([ADR-039](docs/adr/ADR-039-oidc-sign-in.md); `blindbucket.example.yaml` has the
+settings).
 
 `blindbucket_build_info{version,go_version}` is always 1 and identifies the
 running gateway and Go toolchain, even before any requests arrive. A development
@@ -834,7 +840,7 @@ the gateway already costs per request.
 | M12 | Works with software that cannot be changed: Nextcloud, Velero, GitLab, Loki and Mastodon storing through the gateway, each as a CI job and a guide, with what breaks written down, and an existing bucket's objects encrypted in place (ADR-034) | **done** |
 | M13 | A read-only dashboard: instance health, keyring and root-key source, the audit log verified — nothing on it changes state, served on loopback only until M15 brings sign-in (ADR-035) | **done** in 1.6 |
 | M14 | What is refused today, decided again: presigned uploads, served where the operator sets a size limit and with CORS for the browser (ADR-036), and object tags, stored sealed in a sidecar per object version (ADR-037) | **done** in 1.6 |
-| M15 | Several tenants on one gateway: keys per tenant, a tenant deleted by destroying its key, OIDC sign-in for the dashboard, the audit log exported | in progress: tenants in 1.7, the export in 1.5; sign-in to come |
+| M15 | Several tenants on one gateway: keys per tenant, a tenant deleted by destroying its key, OIDC sign-in for the dashboard, the audit log exported | **done**: tenants in 1.7, the export in 1.5, sign-in on main |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
 clients" actually means for anything over 8 MiB. M3.5 existed to get its coordination rules

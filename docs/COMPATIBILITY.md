@@ -482,6 +482,20 @@ What the gateway does about it is to keep from making it worse:
 Garage has no versioning, so it keeps no earlier version to count, and the census
 lists its current objects instead and says so.
 
+### Identity providers, for the dashboard's sign-in
+
+The dashboard's sign-in (ADR-039) is OpenID Connect and should work with any identity
+provider that serves discovery, the authorization code flow with PKCE, and ID tokens
+signed with RS256 or ES256. Measured:
+
+| Identity provider | Version | Status | Last measured | Settings |
+|---|---|---|---|---|
+| Dex | v2.41.1 | **Works** | every commit, in CI | `scopes: [groups]` for a groups claim |
+| Others | — | not measured | — | `scopes: [groups]` where the provider adds groups only when asked |
+
+A provider that signs ID tokens with another algorithm, or only with HS256, is refused
+by design.
+
 ### Key services
 
 The root key that unlocks the keyring can come from a passphrase, from the

@@ -441,6 +441,26 @@ no key material, credential or object name, writes nothing and runs no script. I
 audit verification runs on a schedule, never on a request, so it cannot be used to make
 the gateway read its whole log on demand.
 
+**With sign-in, the dashboard is on the network** ([ADR-039](adr/ADR-039-oidc-sign-in.md)).
+`admin.dashboard.oidc` lets it serve on any address, and only over TLS. Whoever can reach
+the port gets redirects to the identity provider, `403` and `421`, and the page only with
+a session. A session follows a sign-in whose ID token verifies, from the configured
+issuer, for this client, unexpired, with this browser's nonce, signed with RS256 or ES256
+under a key the issuer publishes, and whose claim holds an allowed value. The tests
+refuse every other kind of token, unsigned and HS256 included. The session cookie is
+sealed under a key the process keeps in memory, `__Host-`, `Secure`, `HttpOnly` and
+`SameSite=Lax`, so another site cannot send it with a request that writes, and nothing
+on the page writes but the sign-out. The Host rule accepts the redirect URL's host and
+loopback names, so DNS rebinding is still turned away. What remains is **accepted
+risk**:
+- **The identity provider decides who reads the page.** One that is compromised, or that
+  puts the wrong people in the allowed group, gives them read access to it.
+- **A stolen session cookie** reads the page until the session ends: at the ID token's
+  expiry or after `session`, eight hours by default, or at a restart. There is no
+  revocation before that, short of restarting the instance.
+- **The page is reconnaissance** (above), now for whoever signs in, and reachable to
+  probe for whoever can reach the port.
+
 ### 5.10 Presigned uploads
 
 With `server.presign.uploads.max_size` set, a presigned URL can upload

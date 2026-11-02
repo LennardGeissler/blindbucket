@@ -4,6 +4,8 @@
 **Date:** 2026-10-19
 **Milestone:** M13
 **Implements:** [#130](https://github.com/LennardGeissler/blindbucket/issues/130)
+**Amended by:** [ADR-039](ADR-039-oidc-sign-in.md) — with sign-in and TLS, the dashboard may
+leave loopback.
 
 ## Context
 

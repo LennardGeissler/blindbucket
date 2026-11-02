@@ -1,6 +1,6 @@
 # ADR-039 — OIDC sign-in for the dashboard, so that it can leave loopback
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-11-02
 **Milestone:** M15
 **Implements:** [#134](https://github.com/LennardGeissler/blindbucket/issues/134)
@@ -90,6 +90,12 @@ values of it that may read the page. A claim that is a string or a list of strin
 compared value by value. A token without the claim, or without an allowed value, gets
 `403` and nothing else. The configuration refuses `oidc` without `allowed`: every
 person the identity provider knows is not a sensible default for a page about keys.
+
+*Amended while writing the code:* `admin.dashboard.oidc.scopes` names scopes to ask for
+besides `openid`, `profile` and `email`. Dex and Okta put a `groups` claim into the ID
+token only when the `groups` scope is asked for, so with `claim: groups` and no scope
+nobody would ever be let in. Keycloak, among others, can refuse a scope it does not know,
+so none is added by default.
 
 **The page is all or nothing.** A claim does not choose which tenants a person sees.
 The page holds no tenant's secrets, the dashboard is an operator's tool, and a view

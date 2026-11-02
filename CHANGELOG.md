@@ -16,6 +16,17 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Added
+
+- **The status page can leave loopback, behind sign-in.** With `admin.dashboard.oidc` and
+  `admin.dashboard.tls`, the dashboard serves on any address, and people sign in through
+  the organisation's identity provider with the authorization code flow and PKCE. Only a
+  token whose claim, such as `groups`, holds an allowed value gets the page; the session
+  lasts eight hours by default and ends with a restart. The ID token is verified with
+  go-oidc, RS256 and ES256 only, and the gateway starts without the identity provider
+  ([ADR-039](docs/adr/ADR-039-oidc-sign-in.md),
+  [#134](https://github.com/LennardGeissler/blindbucket/issues/134)).
+
 ## [1.7.0] — 2026-11-02
 
 **Tenants, and a tenant deleted by destroying its keys.** A tenant is a set of buckets with
