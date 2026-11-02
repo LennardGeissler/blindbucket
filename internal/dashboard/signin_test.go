@@ -427,14 +427,17 @@ func TestSignInFollowsKeyRotationAndEnds(t *testing.T) {
 	}
 }
 
-// The page answers to its own address and to loopback, and to nothing else.
+// The page answers to the redirect URL's host and to nothing else.
 func TestSignInHosts(t *testing.T) {
 	p := newTestIDP(t)
 	now := time.Now()
 	h := signInServer(t, p, &now).Handler()
 	for host, want := range map[string]int{
-		testHost: http.StatusFound, "DASH.example": http.StatusFound, "localhost:9101": http.StatusFound,
+		testHost: http.StatusFound, "DASH.example": http.StatusFound,
 		"attacker.example": http.StatusMisdirectedRequest, "dash.example.attacker.example": http.StatusMisdirectedRequest,
+		// A sign-in started under a loopback name could not finish: the
+		// provider returns to the redirect URL's host.
+		"localhost:9101": http.StatusMisdirectedRequest, "127.0.0.1:9101": http.StatusMisdirectedRequest,
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Host = host
@@ -522,6 +525,29 @@ func TestSignOutNeedsTheSession(t *testing.T) {
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == sessionCookie {
 			t.Errorf("a sign-out without the session set %s: %+v", sessionCookie, c)
+		}
+	}
+}
+
+// A redirect URL on an IPv6 address is answered under that address, with or
+// without a port, and a loopback redirect URL under loopback.
+func TestSignInHostsByAddress(t *testing.T) {
+	for redirect, hosts := range map[string][]string{
+		"https://[2001:db8::1]/callback":  {"[2001:db8::1]", "[2001:db8::1]:443"},
+		"https://127.0.0.1:9101/callback": {"127.0.0.1:9101"},
+		"https://[::1]:9101/callback":     {"[::1]:9101"},
+	} {
+		s, err := newSigner(SignIn{RedirectURL: redirect}, quiet())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, h := range hosts {
+			if !s.allowsHost(h) {
+				t.Errorf("redirect %s: Host %q refused", redirect, h)
+			}
+		}
+		if s.allowsHost("attacker.example") {
+			t.Errorf("redirect %s: another host accepted", redirect)
 		}
 	}
 }

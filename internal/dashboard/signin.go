@@ -146,17 +146,18 @@ func (s *signer) provider(ctx context.Context) (*oauth2.Config, *oidc.IDTokenVer
 	return s.oauth, s.verifier, nil
 }
 
-// allowsHost reports whether a request names the dashboard by a name it
-// answers to: a loopback name, for a tunnel, or the host people use, from the
-// redirect URL. A DNS-rebinding page arrives under its own name.
+// allowsHost reports whether a request names the dashboard by the host of the
+// redirect URL, the address people use and the identity provider sends them
+// back to. A DNS-rebinding page arrives under its own name. Loopback names are
+// not accepted unless the redirect URL is on loopback: a sign-in started under
+// another name than the one the provider returns to cannot finish, since its
+// cookie is bound to the name it started under.
 func (s *signer) allowsHost(host string) bool {
-	if loopbackHost(host) {
-		return true
-	}
 	h, _, err := net.SplitHostPort(host)
 	if err != nil {
 		h = host
 	}
+	h = strings.TrimSuffix(strings.TrimPrefix(h, "["), "]")
 	return strings.EqualFold(h, s.redirect.Hostname())
 }
 
