@@ -26,6 +26,10 @@ version 1 would keep being readable.
   go-oidc, RS256 and ES256 only, and the gateway starts without the identity provider
   ([ADR-039](docs/adr/ADR-039-oidc-sign-in.md),
   [#134](https://github.com/LennardGeissler/blindbucket/issues/134)).
+- **The Helm chart serves the status page behind sign-in.** `dashboard.oidc` puts the
+  page on a Service of its own, over TLS from `dashboard.tlsSecret`, with the client
+  secret from a Secret of its own. The Service routes by client IP, since each pod seals
+  its sessions under its own key, and `networkPolicy.dashboardFrom` says who may reach it.
 
 ### Fixed
 

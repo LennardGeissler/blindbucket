@@ -7,7 +7,15 @@ you configured. Its certificate has to be trusted by the client, and has to
 name that host.
 
 Health and metrics: port {{ .Values.service.adminPort }}, /healthz, /readyz and /metrics.
-{{- if .Values.dashboard.enabled }}
+{{- if and .Values.dashboard.enabled .Values.dashboard.oidc.enabled }}
+
+The status page is behind sign-in through {{ .Values.dashboard.oidc.issuer }}, over TLS, on
+
+  {{ include "blindbucket.fullname" . }}-dashboard.{{ .Release.Namespace }}.svc:{{ .Values.dashboard.port }}
+
+People reach it at {{ .Values.dashboard.oidc.redirectUrl | trimSuffix "/callback" }}, which has to route
+to that Service; the identity provider sends them back to its /callback.
+{{- else if .Values.dashboard.enabled }}
 
 The status page listens on each pod's loopback, on no Service. Reach one with
 

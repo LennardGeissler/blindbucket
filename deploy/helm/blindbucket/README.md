@@ -142,6 +142,39 @@ kubectl port-forward -n <namespace> pod/<pod> 9101:9101
 
 Then open <http://localhost:9101/>. Each pod has its own page.
 
+### Behind sign-in
+
+`dashboard.oidc` puts the page on the network instead, behind sign-in through your
+identity provider and over TLS ([ADR-039](../../../docs/adr/ADR-039-oidc-sign-in.md)).
+Only people whose ID token carries an allowed value of the claim get the page.
+
+```yaml
+dashboard:
+  enabled: true
+  tlsSecret: blindbucket-dashboard-tls        # tls.crt and tls.key
+  oidc:
+    enabled: true
+    issuer: https://idp.example.com/realms/ops
+    clientId: blindbucket-dashboard
+    existingSecret: blindbucket-dashboard-oidc  # client_secret; leave out for a public client
+    redirectUrl: https://blindbucket.example.com:9101/callback
+    claim: groups
+    allowed: [blindbucket-operators]
+    scopes: [groups]                            # where the provider adds groups only when asked
+```
+
+The page is then on a Service of its own, `<release>-blindbucket-dashboard`, apart from
+S3 and the metrics, and `networkPolicy.dashboardFrom` says who may reach it. Expose it
+with `dashboard.service.type: LoadBalancer`, or route to it yourself: the pod speaks TLS
+with the certificate in `dashboard.tlsSecret`, so an Ingress has to pass TLS through
+rather than end it. The `redirectUrl` is the address people use, registered with the
+identity provider.
+
+Each pod seals its sessions under a key of its own, so the Service routes by client IP
+(`dashboard.service.affinityTimeoutSeconds`, eight hours). A load balancer in front of it
+has to keep a client on one pod as well, or a sign-in can start on one pod and come back
+to another, and fail.
+
 ## Browser uploads
 
 `server.presign.uploads.maxSize` serves presigned uploads, and
