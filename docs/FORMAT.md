@@ -792,6 +792,11 @@ the entries still verify. A `kid` in clear may name its tenant all the same, if 
 operator's key ids do. Each opened tenant's `nameKey_T` is among the keyring vectors
 of §18.8.
 
+Which key that is, is decided by the writer's keyring when it writes the entry. An
+entry about a bucket from before the bucket joined a tenant, or written by a writer
+whose keyring does not have the tenant yet, uses the audit secret's `nameKey`, and
+stays readable with it after the tenant is destroyed.
+
 A writer uses `nameKey_T` for every entry about a bucket of a tenant whose keys it
 holds, whether or not the tenant is active: readers try every key, so nothing
 requires writers to agree on when a tenant's entries start. A writer that does not

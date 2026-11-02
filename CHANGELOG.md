@@ -27,6 +27,39 @@ version 1 would keep being readable.
   ([ADR-039](docs/adr/ADR-039-oidc-sign-in.md),
   [#134](https://github.com/LennardGeissler/blindbucket/issues/134)).
 
+### Fixed
+
+- **The census reads a `null` version, and stops a destruction that would leave it.** An
+  object written before its bucket was versioned keeps the version id `null`; the census
+  read it with a HEAD that reaches the latest version instead, so under a newer version
+  or a delete marker it was miscounted or dropped. Such versions, typically written under
+  the default tenant's keys before the tenant was active, let `tenants destroy` go ahead
+  without `--force` and stayed readable. Every listed version is now read by its id.
+- **The census fails on a listing it cannot continue.** A provider page that said the
+  listing went on, without a marker to go on from, ended the census for that bucket as if
+  it were complete. It is now an error, and a provider that lists some versions and then
+  refuses to list more is no longer counted again by objects.
+- **A keyring changed to say version 1 is refused.** The version is in clear, and a
+  version 2 file changed to say 1 opened as its default tenant alone, dropping every
+  tenant and tombstone. It is now refused; a genuine older copy still opens, which
+  [#223](https://github.com/LennardGeissler/blindbucket/issues/223) addresses.
+- **A bucket's tenant is found whatever its letter case.** `ACME-photos` resolved to the
+  default tenant where the tenant's entry is `acme-*`, so a provider that takes bucket
+  names case-insensitively could store a write in a tenant's bucket, a destroyed one
+  included, under the default tenant's keys.
+- **`tenants destroy` names the region of a KMS key to delete.** Without it, the CLI's
+  default region decided which key an alias or key id stood for. The region comes from
+  the key's ARN or the tenant's configuration, or is left for the operator to name.
+- **The audit log fails closed when it cannot encrypt an entry's names.** The request
+  was served unrecorded and the writer left as it was, so `audit.fail_closed` did not
+  stop the next one. It now breaks the writer, as a failed write does.
+- **`audit verify --print` reads an object key whose bucket is a digest.** An entry about
+  a bucket name too long to encrypt printed its object key still encrypted, as 1.6 did
+  not.
+- **Keyring commands keep the file's mode, group and symlink.** Every rewrite left the
+  keyring 0600 and owned by whoever ran the command, so a keyring shared with the
+  gateway's account through its group became unreadable to it at the next restart.
+
 ## [1.7.0] — 2026-11-02
 
 **Tenants, and a tenant deleted by destroying its keys.** A tenant is a set of buckets with

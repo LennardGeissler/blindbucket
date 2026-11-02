@@ -517,8 +517,8 @@ of the tenant's buckets and writes the keyring without the tenant's keys. Once e
 instance serves that keyring and every lock the tenant ever had is destroyed at its
 service, **no copy of the keyring opens its keys**, current or old, in a backup or in a
 Secret's history. Every object the gateway wrote to its buckets is then unreadable, with
-its sealed tags and manifests. So are its encrypted names, in the bucket and in the audit
-log. That holds against the provider, against the operator, and against whoever holds
+its sealed tags and manifests. So are the names the gateway encrypted under its name key,
+in the bucket and in the audit log. That holds against the provider, against the operator, and against whoever holds
 the deployment's root key. The order of the steps, and why the locks come last, is
 model-checked (`spec/tla/Tenants.tla`).
 
@@ -545,6 +545,20 @@ risk**:
 - **Audit entries about a bucket whose tenant an instance did not hold** record their
   names as digests under the audit secret. Those are not reversible, but whoever holds
   the audit secret can test a guessed name against them (FORMAT §14.5).
+- **Audit entries written under the deployment's key.** An entry about a bucket from
+  before it joined the tenant, or written by an instance that did not serve the tenant
+  yet during the rollout after `tenants create`, encrypts its names under the audit
+  secret's key, which outlives the destruction. Entries cannot be re-encrypted without
+  breaking the chain, so whoever holds the audit secret reads those names for good.
+- **A keyring replaced rather than edited.** The directory is sealed, so an edited file
+  that drops a tenant or a tombstone does not open. But whoever can write the keyring's
+  file or Secret, without any root key, can put back a genuine older copy from before the
+  tenant was created or destroyed, or a version 2 file stripped down to a version 1 one.
+  If the default tenant's keys are the same, it opens: tenants and tombstones are gone,
+  and a destroyed tenant's buckets are served again under the default tenant's keys.
+  Nothing in the file can tell; [#223](https://github.com/LennardGeissler/blindbucket/issues/223)
+  proposes a floor on the generation, set outside it. Until then, the keyring's Secret
+  should be writable only by those who hold the root key.
 
 A destroyed tenant's buckets are refused, `403`, rather than falling back to the default
 tenant. Otherwise the first write after a destruction would store new data under keys

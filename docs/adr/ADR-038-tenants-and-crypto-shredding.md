@@ -115,7 +115,10 @@ default tenant.
   buckets behave exactly as the default tenant's. An instance that does not yet
   serve the tenant maps names under the default name key, and a switch at
   assignment would have split a bucket's names between instances during the
-  rollout, which for names, unlike KEKs, nothing reads across.*
+  rollout, which for names, unlike KEKs, nothing reads across. Found in a review
+  after 1.7.0: a bucket assigned to a tenant that is already active switches at its
+  assignment's rollout all the same, so its names split for that window. The
+  tenants guide says to rotate and migrate such a bucket once the rollout is done.*
 - **Audit entries about a tenant's buckets** encrypt their names under a key derived
   from the tenant's name key, and record nothing else about the tenant. A reader
   finds the key by trying those it holds, which the name encryption's own check
@@ -129,7 +132,11 @@ default tenant.
   not, since a reader tries every key and nothing needs instances to agree. An
   entry about a bucket whose tenant the instance does not hold, destroyed or not
   opened, records its names as digests under the audit secret: encrypted under it,
-  they would outlive the destruction.*
+  they would outlive the destruction. Amended a third time after a review: entries
+  written before a bucket joined the tenant, or by an instance not yet serving it
+  during a rollout, are under the audit secret's key, and outlive the destruction.
+  They cannot be re-encrypted without breaking the chain, so THREAT_MODEL §5.12
+  states it as a limit.*
 - **A destroyed tenant's buckets are refused**, reads and writes, with
   `403 AccessDenied` and a message naming the destruction. They do not fall back to
   the default tenant. Without that, the first write after a destruction would store

@@ -64,6 +64,14 @@ From then on, new writes to its buckets use its key, and with `names.encrypt` it
 key. A bucket joins a tenant and never leaves it: `tenants assign` adds more, and moving
 data between tenants is a copy.
 
+A bucket assigned to a tenant that is already active switches to the tenant's keys as
+each instance restarts, its name key included. Until every instance has, one still on
+the old keyring writes the bucket under the default tenant's keys, and with
+`names.encrypt` under the default name key, which instances on the new keyring do not
+find. Once the rollout is done, treat the bucket as any that joins a tenant: `rotate` it
+and, with `names.encrypt`, `migrate-names` it, whether it was new or not. The census
+counts what is left.
+
 `--deployment-lock` creates a tenant without a lock of its own. It has its own keys, but
 every copy of the keyring opens them with the deployment's root key, so destroying it
 rests on every such copy being deleted. `blindbucket reseal --tenant` gives it a lock
