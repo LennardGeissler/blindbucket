@@ -551,6 +551,22 @@ func parseKeyringFile(data []byte) (keyringFile, error) {
 	if len(file.Keys) == 0 {
 		return keyringFile{}, fmt.Errorf("keys: keyring contains no keys")
 	}
+	if file.Version == keyringVersion {
+		// version is in clear, and a version 2 file's default tenant opens
+		// as version 1 would. A file that says 1 and carries what only
+		// version 2 has is one whose version was changed, which would drop
+		// every tenant and tombstone (FORMAT.md section 18.6).
+		var v2 struct {
+			Generation uint64          `json:"generation"`
+			Directory  string          `json:"directory"`
+			Tenants    json.RawMessage `json:"tenants"`
+		}
+		if err := json.Unmarshal(data, &v2); err == nil &&
+			(v2.Generation != 0 || v2.Directory != "" || len(v2.Tenants) > 0 && string(v2.Tenants) != "null") {
+			return keyringFile{}, fmt.Errorf("%w: it says version 1 and holds a directory, tenants or a "+
+				"generation, which only version 2 has; its version was changed", ErrKeyringMalformed)
+		}
+	}
 	return file, nil
 }
 

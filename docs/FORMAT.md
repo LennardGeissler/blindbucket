@@ -1294,6 +1294,15 @@ A reader MUST refuse to open a version 2 file, as a whole, if
 These are failures of the file, all visible without a key, and a file that fails
 one of them cannot be trusted to say which buckets are whose.
 
+`version` is in clear, and a version 2 file's default tenant opens as a version 1
+file would. A reader MUST therefore refuse a file that says version 1 and holds
+`generation`, `directory` or `tenants`: its version was changed, and opening it as
+version 1 would drop every tenant and tombstone. A file whose version was changed
+and those members removed is indistinguishable from a genuine version 1 file, as is
+a genuine older copy; nothing in the file can tell. A floor on the generation, set
+outside the file, is what can
+([#223](https://github.com/LennardGeissler/blindbucket/issues/223)).
+
 A tenant whose root key the reader cannot obtain, or whose section has a `wrapped`
 value that does not open under it, is **unopened**. That is a failure of the tenant, not of the file. A reader MUST
 NOT use any key of an unopened tenant's section, MUST refuse requests for its

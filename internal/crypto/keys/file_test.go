@@ -2,6 +2,7 @@ package keys
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"slices"
@@ -459,5 +460,31 @@ func TestDestroyTheLastTenantKeepsVersion2(t *testing.T) {
 	back := openV(t, data, fileRoot, nil)
 	if len(back.Tenants) != 0 || len(back.Tombstones) != 2 {
 		t.Errorf("tenants %d, tombstones %d", len(back.Tenants), len(back.Tombstones))
+	}
+}
+
+// version is in clear. A version 2 file changed to say 1 would open as its
+// default tenant alone, dropping every tenant and tombstone; it is refused.
+// A file that also had those members removed is indistinguishable from a
+// genuine version 1 file, which is what keys.min_generation is for (#223).
+func TestAVersionFlipIsRefused(t *testing.T) {
+	data := withTenants(t)
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["version"] = 1
+	flipped, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenFile(flipped, fileRoot, nil); !errors.Is(err, ErrKeyringMalformed) {
+		t.Errorf("OpenFile on a version 2 file that says 1: %v, want ErrKeyringMalformed", err)
+	}
+	if _, err := LoadKeyringWithRootKey(flipped, fileRoot); !errors.Is(err, ErrKeyringMalformed) {
+		t.Errorf("LoadKeyringWithRootKey on it: %v, want ErrKeyringMalformed", err)
+	}
+	if _, err := OpenFile(v1File(t), fileRoot, nil); err != nil {
+		t.Errorf("a genuine version 1 file: %v", err)
 	}
 }
