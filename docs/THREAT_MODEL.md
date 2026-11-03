@@ -1,8 +1,14 @@
 # Threat Model
 
-**Status:** Current as of `v1.7.0`, which adds one guarantee and the limits it comes
-with. A destroyed tenant's objects, names and audit names are unreadable once every lock
-it ever had is destroyed at its key service (§3, §5.12). What that does not reach is
+**Status:** Current as of `v1.8.0`, which brings one new party and narrows a guarantee
+of `v1.7.0`. With sign-in, the dashboard can be on the network, and the identity provider
+decides who reads it (§5.9). A review found that `v1.7.0` promised more for a destroyed
+tenant than it delivered: its census missed versions written before a bucket was
+versioned, now fixed, and audit entries about its buckets from before they joined it,
+or written during a rollout, stay readable with the audit secret, which §5.12 now says.
+`v1.7.0` added that guarantee and the limits it comes with. A destroyed tenant's objects,
+names and audit names are unreadable once every lock it ever had is destroyed at its key
+service (§3, §5.12). What that does not reach is
 written out with it: a key service's own waiting period and backups, a passphrase, a
 tenant left under the deployment's lock, and what the provider sees in clear. Tenants
 share one gateway and are no boundary of trust between each other or the operator (§6).
@@ -82,7 +88,7 @@ detection, binding to bucket and key), the HTTP surface, client authentication,
 and the multipart path including the manifest and the upload token. Where a
 mitigation is deferred rather than present, the entry says so and names the
 milestone.
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-03
 
 This document states precisely what blindbucket protects against and what it does not.
 It is deliberately explicit about residual risk. A security tool that overstates its

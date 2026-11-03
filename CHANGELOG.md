@@ -16,6 +16,21 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-11-03
+
+**Sign-in for the status page, and the census of 1.7.0 fixed.** The dashboard can leave
+loopback: with `admin.dashboard.oidc` and TLS, people sign in through the organisation's
+identity provider, and only a token whose claim holds an allowed value gets the page
+([ADR-039](docs/adr/ADR-039-oidc-sign-in.md)). That completes M15. A review before this
+release found that the census `tenants destroy` takes in 1.7.0 missed versions written
+before a bucket was versioned, and a handful of smaller defects; all are fixed below.
+
+**Upgrading:** nothing to do; sign-in is off unless configured. If you use tenants,
+upgrade before destroying one. If you destroyed a tenant with 1.7.0 whose buckets are
+versioned, list their noncurrent versions with the id `null` and delete them, or expire
+noncurrent versions with a lifecycle rule: they may be under the default tenant's keys.
+`tenants census --json` and `doctor --json` are unchanged since 1.7.0.
+
 ### Added
 
 - **The status page can leave loopback, behind sign-in.** With `admin.dashboard.oidc` and
@@ -1563,7 +1578,8 @@ figures and the methodology are in [bench/](bench/).
   of ten seconds, so the time is the provider's; why it behaves that way under
   this access pattern is not established.
 
-[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.0...v1.5.1

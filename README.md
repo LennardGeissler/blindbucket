@@ -38,7 +38,7 @@
 </sub></p>
 
 > [!NOTE]
-> **Status: `v1.7.0` — stable, and measured against AWS.** Standard S3 clients round-trip
+> **Status: `v1.8.0` — stable, and measured against AWS.** Standard S3 clients round-trip
 > through the gateway, multipart included: AWS CLI, boto3, `mc`, rclone and
 > s5cmd all work, and a 5 GiB `aws s3 cp` across two instances comes back with
 > an identical SHA-256. Key rotation, server-side copy, a signed audit log,
@@ -50,11 +50,11 @@
 > itself without a key, `scrub` verifies every stored object without waiting for a
 > read, and every release artifact carries a provenance attestation.
 >
-> **New in 1.7:** tenants. Groups that share a gateway get keys of their own, sealed
-> under a lock of their own, and a tenant is deleted by destroying that lock: its
-> objects, names and audit names become unreadable wherever the ciphertext and the
-> copies of the keyring are. 1.6 brought presigned uploads with CORS, object tags stored
-> sealed, and a read-only status page on loopback.
+> **New in 1.8:** the status page can leave loopback, behind sign-in through your
+> identity provider, and 1.8 fixes the census a tenant's destruction rests on, which in
+> 1.7.0 missed versions written before a bucket was versioned. 1.7 brought tenants:
+> groups that share a gateway get keys of their own under a lock of their own, and a
+> tenant is deleted by destroying that lock.
 > **Releases up to 1.1.0 were built with Go 1.24.0** and lack the standard
 > library's fixes since February 2025, in the HTTP and TLS stack among others;
 > every release since 1.2.0 is built with current Go. Upgrade.
@@ -202,7 +202,7 @@ in **[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)**.
 
 ```sh
 # Container: distroless, nonroot, no shell, 21 MB.
-docker pull ghcr.io/lennardgeissler/blindbucket:1.7.0
+docker pull ghcr.io/lennardgeissler/blindbucket:1.8.0
 
 # Or with Homebrew, on macOS and Linux, with the completions for bash, zsh and fish:
 brew install --cask lennardgeissler/tap/blindbucket
@@ -840,7 +840,7 @@ the gateway already costs per request.
 | M12 | Works with software that cannot be changed: Nextcloud, Velero, GitLab, Loki and Mastodon storing through the gateway, each as a CI job and a guide, with what breaks written down, and an existing bucket's objects encrypted in place (ADR-034) | **done** |
 | M13 | A read-only dashboard: instance health, keyring and root-key source, the audit log verified — nothing on it changes state, served on loopback only until M15 brings sign-in (ADR-035) | **done** in 1.6 |
 | M14 | What is refused today, decided again: presigned uploads, served where the operator sets a size limit and with CORS for the browser (ADR-036), and object tags, stored sealed in a sidecar per object version (ADR-037) | **done** in 1.6 |
-| M15 | Several tenants on one gateway: keys per tenant, a tenant deleted by destroying its key, OIDC sign-in for the dashboard, the audit log exported | **done**: tenants in 1.7, the export in 1.5, sign-in on main |
+| M15 | Several tenants on one gateway: keys per tenant, a tenant deleted by destroying its key, OIDC sign-in for the dashboard, the audit log exported | **done**: tenants in 1.7, sign-in in 1.8, the export in 1.5 |
 
 M4 is the point the project becomes worth showing: multipart is what "works with real S3
 clients" actually means for anything over 8 MiB. M3.5 existed to get its coordination rules
