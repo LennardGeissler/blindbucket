@@ -23,7 +23,9 @@ loopback: with `admin.dashboard.oidc` and TLS, people sign in through the organi
 identity provider, and only a token whose claim holds an allowed value gets the page
 ([ADR-039](docs/adr/ADR-039-oidc-sign-in.md)). That completes M15. A review before this
 release found that the census `tenants destroy` takes in 1.7.0 missed versions written
-before a bucket was versioned, and a handful of smaller defects; all are fixed below.
+before a bucket was versioned
+([GHSA-jh7c-j2m4-vm46](https://github.com/LennardGeissler/blindbucket/security/advisories/GHSA-jh7c-j2m4-vm46)), and a handful of
+smaller defects; all are fixed below.
 
 **Upgrading:** nothing to do; sign-in is off unless configured. If you use tenants,
 upgrade before destroying one. If you destroyed a tenant with 1.7.0 whose buckets are
@@ -53,7 +55,8 @@ noncurrent versions with a lifecycle rule: they may be under the default tenant'
   read it with a HEAD that reaches the latest version instead, so under a newer version
   or a delete marker it was miscounted or dropped. Such versions, typically written under
   the default tenant's keys before the tenant was active, let `tenants destroy` go ahead
-  without `--force` and stayed readable. Every listed version is now read by its id.
+  without `--force` and stayed readable. Every listed version is now read by its id
+  ([GHSA-jh7c-j2m4-vm46](https://github.com/LennardGeissler/blindbucket/security/advisories/GHSA-jh7c-j2m4-vm46)).
 - **The census fails on a listing it cannot continue.** A provider page that said the
   listing went on, without a marker to go on from, ended the census for that bucket as if
   it were complete. It is now an error, and a provider that lists some versions and then

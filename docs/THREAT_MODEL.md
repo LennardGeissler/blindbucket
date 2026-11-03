@@ -4,8 +4,10 @@
 of `v1.7.0`. With sign-in, the dashboard can be on the network, and the identity provider
 decides who reads it (§5.9). A review found that `v1.7.0` promised more for a destroyed
 tenant than it delivered: its census missed versions written before a bucket was
-versioned, now fixed, and audit entries about its buckets from before they joined it,
-or written during a rollout, stay readable with the audit secret, which §5.12 now says.
+versioned, now fixed
+([GHSA-jh7c-j2m4-vm46](https://github.com/LennardGeissler/blindbucket/security/advisories/GHSA-jh7c-j2m4-vm46)), and audit
+entries about its buckets from before they joined it, or written during a rollout, stay
+readable with the audit secret, which §5.12 now says.
 `v1.7.0` added that guarantee and the limits it comes with. A destroyed tenant's objects,
 names and audit names are unreadable once every lock it ever had is destroyed at its key
 service (§3, §5.12). What that does not reach is
