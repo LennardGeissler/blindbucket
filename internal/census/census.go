@@ -329,7 +329,8 @@ func one(ctx context.Context, cfg Config, b *Bucket, v version) {
 	)
 	// Only a listing of objects leaves the version id empty. "null" is a
 	// version like any other: an object written before versioning was on,
-	// which a HEAD without the id would not reach once anything is on top.
+	// which a HEAD without the id would not reach once anything is on top
+	// (GHSA-jh7c-j2m4-vm46).
 	if v.versionID == "" {
 		info, err = cfg.Upstream.HeadObject(ctx, b.Name, v.key)
 	} else {
