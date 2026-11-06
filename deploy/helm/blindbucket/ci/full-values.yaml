@@ -13,6 +13,7 @@ keys:
     keyId: alias/blindbucket
     credentialsSecret: blindbucket-kms
     encryptionContext: { deployment: prod-eu }
+  minGeneration: 1234567
   tenants:
     acme:
       provider: awskms

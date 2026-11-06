@@ -120,6 +120,12 @@ keys:
   # the pods only with `kubectl rollout restart`; see the chart's README. Needs
   # gateway 1.7.0 or later.
   tenants: {}
+  # The lowest keyring generation the gateway opens (ADR-040). With tenants, an
+  # older copy of the keyring Secret opens as well as the newest; raise this to
+  # the generation every pod serves after each rollout. It lives in the
+  # ConfigMap, apart from the Secret, which is what makes it a check. 0 opens
+  # any. Needs gateway 1.9.0 or later.
+  minGeneration: 0
 
 # The ServiceAccount the pods run as. On EKS it is what a role attaches to:
 # with IRSA, annotate it with eks.amazonaws.com/role-arn and set
