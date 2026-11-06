@@ -63,6 +63,7 @@ document is gone, so they are kept here.
 | [037](ADR-037-encrypted-object-tags.md) | Object tags, sealed in a sidecar bound to the object version | Accepted | M14 |
 | [038](ADR-038-tenants-and-crypto-shredding.md) | Tenants: keys per set of buckets, each under its own lock, and a tenant deleted by destroying them | Accepted | M15 |
 | [039](ADR-039-oidc-sign-in.md) | OIDC sign-in for the dashboard, so that it can leave loopback | Accepted | M15 |
+| [040](ADR-040-keyring-generation-floor.md) | A floor on the keyring's generation, set in the configuration | Proposed | post-M15 |
 
 Every entry is Accepted. 039 was Proposed until its code landed, and 038 was Proposed until its model passed and every step of it landed. 037 was Proposed until its code landed, in four PRs, and 036 until its code landed, in three PRs. 025 was Accepted with its code: it corrects an assumption
 010 had stated as fact, which the AWS workflow disproved, and amends 009 and 022 for
