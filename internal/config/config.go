@@ -549,6 +549,13 @@ type Keys struct {
 	Vault  VaultKeys  `yaml:"vault"`
 	AWSKMS AWSKMSKeys `yaml:"awskms"`
 
+	// MinGeneration is the lowest keyring generation this deployment opens
+	// (ADR-040). A genuine older copy of the keyring, or a version 2 file
+	// stripped down to version 1, opens like the newest one, so the floor is
+	// set here, apart from the file. 0 opens any; a version 1 keyring is
+	// generation 0.
+	MinGeneration uint64 `yaml:"min_generation"`
+
 	// Tenants says, for each tenant sealed by a lock of its own, how to open
 	// that lock: a provider and its settings, as above, without a keyring
 	// (ADR-038). Which tenants exist and which buckets are theirs is recorded
@@ -880,6 +887,8 @@ func (k Keys) validate() error {
 			return fmt.Errorf("%s.keyring: a tenant is a section of keys.keyring, not a file of its own", at)
 		case len(t.Tenants) != 0:
 			return fmt.Errorf("%s.tenants: tenants do not nest", at)
+		case t.MinGeneration != 0:
+			return fmt.Errorf("%s.min_generation: the floor is the keyring's, set under keys", at)
 		}
 		if err := t.validateSource(at); err != nil {
 			return err

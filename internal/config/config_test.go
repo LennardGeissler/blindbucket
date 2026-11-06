@@ -519,6 +519,25 @@ func TestCredentialSourcesAreAccepted(t *testing.T) {
 	}
 }
 
+// TestMinGeneration: the floor is read as given, and absent means none
+// (ADR-040).
+func TestMinGeneration(t *testing.T) {
+	const rest = "upstream: {endpoint: \"http://x\", region: r, access_key_id: a, secret_access_key: b}\n" +
+		"clients: [{name: c, access_key_id: k, secret_access_key: s, buckets: [\"*\"]}]\n"
+	for keys, want := range map[string]uint64{
+		"keys: {keyring: k}":                     0,
+		"keys: {keyring: k, min_generation: 12}": 12,
+	} {
+		cfg, err := Load(write(t, rest+keys+"\n"))
+		if err != nil {
+			t.Fatalf("%s: %v", keys, err)
+		}
+		if cfg.Keys.MinGeneration != want {
+			t.Errorf("%s: min_generation %d, want %d", keys, cfg.Keys.MinGeneration, want)
+		}
+	}
+}
+
 // TestValidationNamesTheProblem complements TestValidation, which only requires
 // a refusal: here each case must be refused for its own reason, so a check that
 // stopped working cannot hide behind another one that fires first.
@@ -603,6 +622,11 @@ func TestValidationNamesTheProblem(t *testing.T) {
 		"a tenant called default": {doc(upstreamOK, clientsOK,
 			`keys: {provider: file, keyring: k, tenants: {default: {provider: file}}}`),
 			"keys.tenants.default"},
+		"a tenant with a floor of its own": {doc(upstreamOK, clientsOK,
+			`keys: {provider: file, keyring: k, tenants: {acme: {provider: file, min_generation: 3}}}`),
+			"keys.tenants.acme.min_generation"},
+		"a negative floor": {doc(upstreamOK, clientsOK, `keys: {keyring: k, min_generation: -1}`),
+			"into uint64"},
 		"kms without credentials": {doc(upstreamOK, clientsOK,
 			`keys: {provider: awskms, keyring: k, awskms: {region: r, key_id: i}}`), "keys.awskms credentials are required"},
 		"upstream without keys or a source": {doc(`upstream: {endpoint: "http://x", region: r}`,
