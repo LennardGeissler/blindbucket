@@ -97,6 +97,7 @@ Flags:
 		opened[t.Name] = t.Ring != nil
 	}
 	metrics.TenantsLoaded(served.Generation(), opened)
+	metrics.KeyringFloor(cfg.Keys.MinGeneration)
 
 	client, upstreamCreds, err := upstreamClient(cfg, metrics.Upstream)
 	if err != nil {
@@ -657,6 +658,11 @@ func openServedKeyring(
 	if len(f.Tenants) > 0 || len(f.Tombstones) > 0 {
 		log.Info("keyring has tenants", "generation", f.Generation,
 			"tenants", len(f.Tenants), "destroyed", len(f.Tombstones))
+	}
+	if f.Generation > cfg.Keys.MinGeneration {
+		log.Warn("the keyring's generation is above keys.min_generation, so an older copy put "+
+			"back in its place would open; raise it once every instance serves this generation",
+			"generation", f.Generation, "min_generation", cfg.Keys.MinGeneration)
 	}
 	return keys.NewServed(f), nil
 }

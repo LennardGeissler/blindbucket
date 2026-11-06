@@ -252,6 +252,7 @@ upstream: { endpoint: %q, region: us-east-1, path_style: true, access_key_id: a,
 keys:
   provider: file
   keyring: %q
+  min_generation: 1
   tenants:
     gamma: { provider: file, passphrase_file: /nonexistent }
 clients: [{ name: tester, access_key_id: TESTCLIENT, secret_access_key: s, buckets: ["*"] }]
@@ -268,6 +269,7 @@ clients: [{ name: tester, access_key_id: TESTCLIENT, secret_access_key: s, bucke
 	}
 	for _, want := range []string{
 		"blindbucket_keyring_generation 2",
+		"blindbucket_keyring_min_generation 1",
 		`blindbucket_tenant_open{tenant="acme"} 0`,
 		`blindbucket_tenant_open{tenant="beta"} 1`,
 	} {
@@ -280,6 +282,7 @@ clients: [{ name: tester, access_key_id: TESTCLIENT, secret_access_key: s, bucke
 		`a tenant's keys did not open`, `"tenant":"acme"`,
 		`sealed under the deployment's lock`, `"tenant":"beta"`,
 		`keys.tenants names a tenant the keyring does not have","tenant":"gamma"`,
+		`above keys.min_generation`, `"generation":2,"min_generation":1`,
 	} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("no log line containing %s in:\n%s", want, logs)
