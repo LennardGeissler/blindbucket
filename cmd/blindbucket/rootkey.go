@@ -125,15 +125,26 @@ func openFile(
 	return f, data, nil
 }
 
-// unlockFile opens keyring bytes of either version whole.
+// unlockFile opens keyring bytes of either version whole, and refuses them
+// below keys.min_generation. The generation is checked once the file has
+// opened, since only the sealed directory's copy of it can be trusted.
 func unlockFile(
 	ctx context.Context, path string, data []byte, cfg config.Keys, pass *passphraseFlags, roots *tenantRoots,
 ) (*keys.File, error) {
-	return unlock(ctx, path, data, cfg, pass,
+	f, err := unlock(ctx, path, data, cfg, pass,
 		func(data, phrase []byte) (*keys.File, error) {
 			return keys.OpenFileWithPassphrase(data, phrase, roots.root)
 		},
 		func(data, root []byte) (*keys.File, error) { return keys.OpenFile(data, root, roots.root) })
+	if err != nil {
+		return nil, err
+	}
+	if err := f.CheckFloor(cfg.MinGeneration); err != nil {
+		return nil, fmt.Errorf("%s: %w (keys.min_generation); it may be an older copy put back in "+
+			"place of the newest keyring. Put the newest one back, or lower keys.min_generation "+
+			"to open this one on purpose", path, err)
+	}
+	return f, nil
 }
 
 // errNotNeeded is why a tenant a command did not ask for stays unopened.
