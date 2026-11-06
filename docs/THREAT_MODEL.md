@@ -1,8 +1,10 @@
 # Threat Model
 
-**Status:** Current as of `v1.8.0`, which brings one new party and narrows a guarantee
-of `v1.7.0`. With sign-in, the dashboard can be on the network, and the identity provider
-decides who reads it (§5.9). A review found that `v1.7.0` promised more for a destroyed
+**Status:** Current as of `v1.9.0`, which lets an operator refuse a keyring older than a
+generation set in the configuration, so that a copy put back in place of the newest no
+longer brings back what a later generation removed (§5.12). `v1.8.0` brought one new
+party and narrowed a guarantee of `v1.7.0`. With sign-in, the dashboard can be on the
+network, and the identity provider decides who reads it (§5.9). A review found that `v1.7.0` promised more for a destroyed
 tenant than it delivered: its census missed versions written before a bucket was
 versioned, now fixed
 ([GHSA-jh7c-j2m4-vm46](https://github.com/LennardGeissler/blindbucket/security/advisories/GHSA-jh7c-j2m4-vm46)), and audit
@@ -90,7 +92,7 @@ detection, binding to bucket and key), the HTTP surface, client authentication,
 and the multipart path including the manifest and the upload token. Where a
 mitigation is deferred rather than present, the entry says so and names the
 milestone.
-**Last updated:** 2026-11-03
+**Last updated:** 2026-11-06
 
 This document states precisely what blindbucket protects against and what it does not.
 It is deliberately explicit about residual risk. A security tool that overstates its

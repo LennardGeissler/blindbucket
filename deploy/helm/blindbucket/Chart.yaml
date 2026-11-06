@@ -6,8 +6,8 @@ type: application
 # gateway release it deploys by default, and moving it is a change to the chart
 # like any other -- a release commit bumps both. Every version is published to
 # ghcr.io once and never again with other contents (build/chart.sh).
-version: 0.1.12
-appVersion: "1.8.0"
+version: 0.1.13
+appVersion: "1.9.0"
 home: https://github.com/LennardGeissler/blindbucket
 sources:
   - https://github.com/LennardGeissler/blindbucket
@@ -23,7 +23,7 @@ annotations:
   artifacthub.io/category: security
   artifacthub.io/images: |
     - name: blindbucket
-      image: ghcr.io/lennardgeissler/blindbucket:1.8.0
+      image: ghcr.io/lennardgeissler/blindbucket:1.9.0
       platforms:
         - linux/amd64
         - linux/arm64
@@ -40,7 +40,9 @@ annotations:
       url: https://github.com/LennardGeissler/blindbucket/issues
   artifacthub.io/changes: |
     - kind: changed
-      description: Deploys blindbucket 1.8.0 by default, which fixes the census tenants destroy takes for versions written before a bucket was versioned.
+      description: Deploys blindbucket 1.9.0 by default.
     - kind: added
-      description: dashboard.oidc serves the status page behind sign-in through the organisation's identity provider, over TLS, on a Service of its own that keeps a client on one pod.
+      description: keys.minGeneration refuses a keyring older than the generation it names, set in the ConfigMap apart from the keyring's Secret.
+    - kind: added
+      description: An alert, BlindbucketKeyringFloorBehind, for a pod that has served a keyring generation above keys.minGeneration for a day.
 keywords: [s3, encryption, gateway, proxy]

@@ -16,6 +16,21 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-11-06
+
+**An older keyring can be refused.** A review before 1.8.0 found that a genuine older
+copy of the keyring opens like the newest one, and with it the tenants and tombstones of
+its day: a destroyed tenant's buckets served again, a live tenant's written under the
+default tenant's keys. `keys.min_generation` sets a floor in the configuration, apart
+from the keyring, and the gateway refuses anything below it
+([ADR-040](docs/adr/ADR-040-keyring-generation-floor.md)).
+
+**Upgrading:** nothing to do; without `keys.min_generation` nothing changes. With
+tenants, set it to the generation every instance serves, `blindbucket_keyring_generation`,
+and raise it after each rollout. The Helm chart takes it as `keys.minGeneration`, and
+`BlindbucketKeyringFloorBehind` alerts on a floor left behind for a day. A configuration
+that sets it is refused by older releases, so a downgrade drops the setting first.
+
 ### Added
 
 - **A floor on the keyring's generation.** A genuine older copy of the keyring, or a
@@ -25,6 +40,10 @@ version 1 would keep being readable.
   say to raise it, and the gateway, `doctor` and `blindbucket_keyring_min_generation`
   show when it lags ([ADR-040](docs/adr/ADR-040-keyring-generation-floor.md),
   [#223](https://github.com/LennardGeissler/blindbucket/issues/223)).
+- **The Helm chart sets the floor, and an alert watches it.** `keys.minGeneration`
+  writes `keys.min_generation` into the chart's ConfigMap, apart from the keyring's
+  Secret. `BlindbucketKeyringFloorBehind` fires when an instance has served a generation
+  above it for a day.
 
 ## [1.8.0] — 2026-11-03
 
@@ -1591,7 +1610,8 @@ figures and the methodology are in [bench/](bench/).
   of ten seconds, so the time is the provider's; why it behaves that way under
   this access pattern is not established.
 
-[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/LennardGeissler/blindbucket/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/LennardGeissler/blindbucket/compare/v1.5.1...v1.6.0
