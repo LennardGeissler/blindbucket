@@ -570,9 +570,14 @@ risk**:
   tenant was created or destroyed, or a version 2 file stripped down to a version 1 one.
   If the default tenant's keys are the same, it opens: tenants and tombstones are gone,
   and a destroyed tenant's buckets are served again under the default tenant's keys.
-  Nothing in the file can tell; [#223](https://github.com/LennardGeissler/blindbucket/issues/223)
-  proposes a floor on the generation, set outside it. Until then, the keyring's Secret
-  should be writable only by those who hold the root key.
+  Nothing in the file can tell. `keys.min_generation` refuses a keyring below the
+  generation it names, a version 1 file included
+  ([ADR-040](adr/ADR-040-keyring-generation-floor.md)). It lives in the configuration,
+  apart from the keyring, and stops only whoever can write the keyring but not the
+  configuration. It does not stop a rollback to a generation above it, which is every
+  generation since it was last raised, nor anything while it is unset; the gateway,
+  `doctor` and `blindbucket_keyring_min_generation` show when it lags. The keyring's
+  Secret should still be writable only by those who hold the root key.
 
 A destroyed tenant's buckets are refused, `403`, rather than falling back to the default
 tenant. Otherwise the first write after a destruction would store new data under keys
