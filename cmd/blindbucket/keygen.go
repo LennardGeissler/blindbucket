@@ -242,6 +242,7 @@ func addStandaloneKeys(
 	if withFresh {
 		fmt.Fprintf(os.Stderr, "added a rollback-index key to %s\n", path)
 	}
+	fmt.Fprint(os.Stderr, floorHint(updated))
 	if withAudit {
 		return printAuditPublicKey(ring)
 	}
@@ -382,6 +383,7 @@ func addKey(
 	if withFresh {
 		fmt.Fprintf(os.Stderr, "added a rollback-index key to %s\n", path)
 	}
+	fmt.Fprint(os.Stderr, floorHint(updated))
 	if withAudit {
 		return printAuditPublicKey(ring)
 	}

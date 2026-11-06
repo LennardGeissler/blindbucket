@@ -212,6 +212,7 @@ command, then run "blindbucket tenants activate".
 		"  Roll this keyring out to every instance and every running command. Once\n"+
 		"  blindbucket_keyring_generation is %d on every instance, run\n"+
 		"  `blindbucket tenants activate %s` and roll that out too.\n", f.Generation+1, name)
+	fmt.Fprint(os.Stderr, floorHint(sealed))
 	if *deployment {
 		fmt.Fprintf(os.Stderr, "warning: %s has keys of its own but no lock of its own. Any copy of this\n"+
 			"  keyring opens them with the deployment's root key, so destroying %s will not\n"+
@@ -260,6 +261,7 @@ tenant is active and every instance serves this keyring.
 		"  written under until they are rotated onto %s's. Roll this keyring out until\n"+
 		"  blindbucket_keyring_generation is %d on every instance.\n",
 		strings.Join(buckets, ", "), name, *t.keyring, f.Generation+1, name, name, f.Generation+1)
+	fmt.Fprint(os.Stderr, floorHint(sealed))
 	return nil
 }
 
@@ -307,6 +309,7 @@ that writes are never pointed at keys nothing has checked.
 		"  until blindbucket_keyring_generation is %d on every instance. Objects written\n"+
 		"  before stay on the keys they were written under until rotated.\n",
 		name, *t.keyring, f.Tenant(name).ActiveKID, f.Generation+1, name, f.Generation+1)
+	fmt.Fprint(os.Stderr, floorHint(sealed))
 	return nil
 }
 
@@ -769,9 +772,12 @@ Flags:
 		"  Its keys are gone from this file, and from no earlier copy yet.\n"+
 		"  1. Roll this keyring out until blindbucket_keyring_generation is %d on every\n"+
 		"     instance, and let every command started on an earlier keyring end.\n"+
-		"  2. Then destroy each lock %s was ever sealed under. Until the last is gone,\n"+
+		"  2. Raise keys.min_generation to %d on every instance. Until then a copy of the\n"+
+		"     keyring from before the destruction, put back in its place, serves %s's\n"+
+		"     buckets again.\n"+
+		"  3. Then destroy each lock %s was ever sealed under. Until the last is gone,\n"+
 		"     a copy of the keyring from before opens its keys.\n",
-		name, path, f.Generation+1, strings.Join(tomb.Buckets, ", "), f.Generation+1, name)
+		name, path, f.Generation+1, strings.Join(tomb.Buckets, ", "), f.Generation+1, f.Generation+1, name, name)
 	deployment, err := keys.ReadRootKeyRef(sealed)
 	if err != nil {
 		return err
@@ -780,7 +786,7 @@ Flags:
 		fmt.Fprintln(os.Stderr, "     "+line)
 	}
 	if _, ok := cfg.Keys.Tenants[name]; ok {
-		fmt.Fprintf(os.Stderr, "  3. Remove keys.tenants.%s from the configuration of every instance.\n", name)
+		fmt.Fprintf(os.Stderr, "  4. Remove keys.tenants.%s from the configuration of every instance.\n", name)
 	}
 	return nil
 }

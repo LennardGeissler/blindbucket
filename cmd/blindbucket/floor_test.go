@@ -76,3 +76,32 @@ func TestKeyringBelowTheFloorIsRefused(t *testing.T) {
 		})
 	}
 }
+
+// Every command that writes a keyring with a generation says to raise the
+// floor to it, and a version 1 keyring, which has none, gets no such hint
+// (ADR-040).
+func TestWritesSayToRaiseTheFloor(t *testing.T) {
+	path := setupKeyring(t, "2026-09")
+	for _, step := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"keygen", "--out", path, "--kid", "2026-10", "--add"}, ""},
+		{[]string{"tenants", "create", "--keyring", path, "--deployment-lock", "--kid", "acme-1", "acme", "acme-*"},
+			"raise keys.min_generation to 1"},
+		{[]string{"keygen", "--out", path, "--kid", "2026-11", "--add"}, "raise keys.min_generation to 2"},
+		{[]string{"tenants", "assign", "--keyring", path, "acme", "shared"}, "raise keys.min_generation to 3"},
+		{[]string{"tenants", "activate", "--keyring", path, "acme"}, "raise keys.min_generation to 4"},
+	} {
+		_, stderr, err := runCLI(t, step.args...)
+		if err != nil {
+			t.Fatalf("%v: %v", step.args, err)
+		}
+		switch {
+		case step.want == "" && strings.Contains(stderr, "min_generation"):
+			t.Errorf("%v on a version 1 keyring mentions the floor:\n%s", step.args, stderr)
+		case step.want != "" && !strings.Contains(stderr, step.want):
+			t.Errorf("%v does not say %q:\n%s", step.args, step.want, stderr)
+		}
+	}
+}

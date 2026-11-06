@@ -2,11 +2,28 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 )
+
+// floorHint is what a command that wrote data as the keyring says about
+// keys.min_generation: to raise it to the new generation once that is rolled
+// out, so that an older copy put back in its place is refused (ADR-040). A
+// version 1 keyring has no generation and gets no hint.
+func floorHint(data []byte) string {
+	var head struct {
+		Generation uint64 `json:"generation"`
+	}
+	if json.Unmarshal(data, &head) != nil || head.Generation == 0 {
+		return ""
+	}
+	return fmt.Sprintf("  Once every instance serves generation %d, raise keys.min_generation to %d,\n"+
+		"  so that an older copy of the keyring put back in its place is refused.\n",
+		head.Generation, head.Generation)
+}
 
 // A keyring file is the only copy of the keys that protect every object written
 // under it, so the two ways it is written are held to what that means.

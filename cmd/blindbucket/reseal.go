@@ -166,6 +166,7 @@ Flags:
 		"  Any other copy of the previous file still opens with %s.\n",
 		*keyring, describeRootKey(before), describeRootKey(after),
 		countKeys(ring), ring.ActiveKID(), describeRootKey(before))
+	fmt.Fprint(os.Stderr, floorHint(sealed))
 	return nil
 }
 
@@ -246,6 +247,7 @@ func resealTenant(
 		"  lock history, and destroying %s means destroying it as well.\n",
 		name, path, describeLock(before), describeLock(after), countKeys(t.Ring), f.Generation+1,
 		name, name, describeLock(before), name, name)
+	fmt.Fprint(os.Stderr, floorHint(sealed))
 	return nil
 }
 

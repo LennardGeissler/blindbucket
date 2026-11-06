@@ -461,7 +461,8 @@ func TestTenantsDestroy(t *testing.T) {
 	if !strings.Contains(stdout, bucket) || !strings.Contains(stdout, "(does not exist)") {
 		t.Errorf("destroy does not show its census:\n%s", stdout)
 	}
-	for _, want := range []string{"destroyed tenant acme", "generation 2", "a passphrase (salt", "forget it"} {
+	for _, want := range []string{"destroyed tenant acme", "generation 2", "Raise keys.min_generation to 2",
+		"a passphrase (salt", "forget it"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("destroy does not say %q:\n%s", want, stderr)
 		}

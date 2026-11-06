@@ -310,6 +310,7 @@ Flags:
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "removed key %q from %s (active key: %q)\n", kid, *keyring, ring.ActiveKID())
+	fmt.Fprint(os.Stderr, floorHint(updated))
 	return nil
 }
 
