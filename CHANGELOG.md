@@ -16,6 +16,16 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Added
+
+- **A floor on the keyring's generation.** A genuine older copy of the keyring, or a
+  version 2 file stripped down to version 1, opened like the newest one and dropped the
+  tenants and tombstones of later generations. `keys.min_generation` refuses a keyring
+  below it, on the gateway and in every command; the commands that write the keyring
+  say to raise it, and the gateway, `doctor` and `blindbucket_keyring_min_generation`
+  show when it lags ([ADR-040](docs/adr/ADR-040-keyring-generation-floor.md),
+  [#223](https://github.com/LennardGeissler/blindbucket/issues/223)).
+
 ## [1.8.0] — 2026-11-03
 
 **Sign-in for the status page, and the census of 1.7.0 fixed.** The dashboard can leave

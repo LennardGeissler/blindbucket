@@ -644,7 +644,9 @@ With tenants, `blindbucket_keyring_generation` is the keyring generation an inst
 loaded, and every instance reporting the same one is what a rollout waits for before
 the next step; `blindbucket_tenant_open{tenant}` is 0 for a tenant whose keys did not
 open, whose buckets then answer 503
-([ADR-038](docs/adr/ADR-038-tenants-and-crypto-shredding.md)).
+([ADR-038](docs/adr/ADR-038-tenants-and-crypto-shredding.md));
+`blindbucket_keyring_min_generation` is the floor `keys.min_generation` sets under it
+([ADR-040](docs/adr/ADR-040-keyring-generation-floor.md)).
 `BlindbucketKeyringGenerationSkew` and `BlindbucketTenantNotOpen` alert on the two.
 
 Those alerts are written out in
@@ -674,7 +676,8 @@ blindbucket tenants destroy --config blindbucket.yaml acme
 
 Every change is a new keyring generation that reaches an instance when it restarts,
 and the next step waits until every instance serves it; `blindbucket_keyring_generation`
-says when. [docs/guides/tenants.md](docs/guides/tenants.md) walks through the order, and
+says when. `keys.min_generation`, raised after each rollout, keeps an older copy of the
+keyring from opening in its place. [docs/guides/tenants.md](docs/guides/tenants.md) walks through the order, and
 [THREAT_MODEL §5.12](docs/THREAT_MODEL.md#512-tenants-and-their-destruction) says what a
 destruction promises and what it does not: key services keep a deleted key for a while,
 a passphrase is gone only once everyone forgets it, and the provider still sees what it

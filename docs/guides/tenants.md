@@ -27,6 +27,32 @@ that, and both are irreversible if taken too early:
 done when it is the same on all of them. `blindbucket doctor` and the status page show
 it too.
 
+## Then raise the floor
+
+A genuine older copy of the keyring, from a backup or a Secret's history, opens as well
+as the newest one, and with it the tenants and tombstones of its day: a destroyed
+tenant's buckets are served again, and a live tenant's are written under the default
+tenant's keys. `keys.min_generation` refuses every keyring below the generation it
+names, on the gateway and in every command
+([ADR-040](../adr/ADR-040-keyring-generation-floor.md)):
+
+```yaml
+keys:
+  keyring: /etc/blindbucket/keyring.json
+  min_generation: 7
+```
+
+Once a rollout is done, raise it to the generation every instance serves. Each tenant
+command ends by saying so. Raising it in the same change that rolls the keyring out is
+fine when both arrive together; set above the keyring's generation, it stops every
+instance from starting, with the reason. To restore an older keyring on purpose, lower
+it on purpose.
+
+It helps as far as the configuration is harder to write than the keyring: keep them in
+different places, a ConfigMap and a Secret, with the Secret writable only by those who
+hold the root key. Until it is raised, the gateway warns at start, `doctor` warns, and
+`blindbucket_keyring_min_generation` stays below `blindbucket_keyring_generation`.
+
 ## Creating a tenant
 
 Give the gateway the tenant's lock, under `keys.tenants` and by the tenant's name, as
@@ -160,7 +186,11 @@ destroyed.
 every instance, and every command started on an earlier keyring has ended. Until then
 they hold the tenant's keys in memory.
 
-**4. Destroy every lock the tenant ever had.** The command lists them, and what to do
+**4. Raise `keys.min_generation`** to the generation that destroyed the tenant. Until
+then a copy of the keyring from before, put back in its place, serves the tenant's
+buckets again.
+
+**5. Destroy every lock the tenant ever had.** The command lists them, and what to do
 for each. It does not do it itself, so that the gateway's credentials need no right to
 delete keys.
 - **AWS KMS:** schedule the key's deletion. That takes a key id, so resolve an alias

@@ -129,6 +129,10 @@ keys:
   keyring: keyring.json
   # passphrase_file: /run/secrets/keyring-passphrase
   # Otherwise the passphrase comes from $BLINDBUCKET_PASSPHRASE.
+  # The lowest keyring generation to open (ADR-040). With tenants, an older copy
+  # of the keyring opens as well as the newest; raise this to the generation
+  # every instance serves after each rollout. 0 opens any.
+  # min_generation: 0
 
   # provider: vault -- Vault decrypts the root key and never hands out the key
   # that does it. Revoking the transit key locks every instance out at its next
