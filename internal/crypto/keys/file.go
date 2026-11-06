@@ -684,3 +684,26 @@ func (f *File) Equal(g *File) bool {
 			slices.Equal(a.Locks, b.Locks) && a.Destroyed.Equal(b.Destroyed)
 	})
 }
+
+// ErrKeyringBelowFloor is a keyring whose generation is below the floor the
+// configuration names (ADR-040, FORMAT §18.6).
+var ErrKeyringBelowFloor = errors.New("keys: the keyring's generation is below the floor")
+
+// CheckFloor refuses a file whose generation is below floor. A version 1 file
+// counts as generation 0, so any floor refuses it; a floor of 0 refuses
+// nothing.
+//
+// A genuine older copy of the keyring, or a version 2 file stripped down to
+// version 1, opens like the newest one: nothing in the file tells them
+// apart, so the floor has to come from somewhere else.
+func (f *File) CheckFloor(floor uint64) error {
+	switch {
+	case f.Generation >= floor:
+		return nil
+	case f.Generation == 0:
+		return fmt.Errorf("%w: a version 1 keyring has no generation, and the floor is %d",
+			ErrKeyringBelowFloor, floor)
+	default:
+		return fmt.Errorf("%w: generation %d, and the floor is %d", ErrKeyringBelowFloor, f.Generation, floor)
+	}
+}

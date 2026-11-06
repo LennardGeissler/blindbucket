@@ -488,3 +488,43 @@ func TestAVersionFlipIsRefused(t *testing.T) {
 		t.Errorf("a genuine version 1 file: %v", err)
 	}
 }
+
+// A floor refuses an older copy and a file stripped down to version 1, and
+// nothing at or above it (ADR-040).
+func TestCheckFloor(t *testing.T) {
+	v1 := openV(t, v1File(t), fileRoot, nil)
+	gen1 := openV(t, withTenants(t), fileRoot, acmeRoots)
+	if err := gen1.Activate("acme", "acme-2026-10"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := gen1.MarshalWithRootKey(fileRoot, fileRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gen2 := openV(t, data, fileRoot, acmeRoots)
+	if gen1.Generation != 1 || gen2.Generation != 2 {
+		t.Fatalf("generations %d and %d, want 1 and 2", gen1.Generation, gen2.Generation)
+	}
+
+	for _, c := range []struct {
+		name  string
+		f     *File
+		floor uint64
+		ok    bool
+	}{
+		{"no floor, version 1", v1, 0, true},
+		{"no floor, version 2", gen1, 0, true},
+		{"version 1 under any floor", v1, 1, false},
+		{"an older copy", gen1, 2, false},
+		{"at the floor", gen2, 2, true},
+		{"above the floor", gen2, 1, true},
+	} {
+		err := c.f.CheckFloor(c.floor)
+		if c.ok && err != nil {
+			t.Errorf("%s: %v", c.name, err)
+		}
+		if !c.ok && !errors.Is(err, ErrKeyringBelowFloor) {
+			t.Errorf("%s: %v, want ErrKeyringBelowFloor", c.name, err)
+		}
+	}
+}
