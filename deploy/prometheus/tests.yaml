@@ -220,3 +220,39 @@ tests:
                 generation for 30 minutes; the newest is 3. Restart those behind.
                 Until they are, do not activate a tenant, take its census or
                 destroy its locks.
+
+  # gw1 serves generation 3 with the floor at 2 until the floor is raised
+  # after 26 hours: quiet for the first day, firing after it, quiet again once
+  # raised. gw2 has a keyring without tenants, at generation 0 with no floor,
+  # and never fires.
+  - interval: 1m
+    input_series:
+      - series: 'blindbucket_keyring_generation{instance="gw1",job="blindbucket"}'
+        values: '3x1800'
+      - series: 'blindbucket_keyring_min_generation{instance="gw1",job="blindbucket"}'
+        values: '2x1560 3x240'
+      - series: 'blindbucket_keyring_generation{instance="gw2",job="blindbucket"}'
+        values: '0x1800'
+      - series: 'blindbucket_keyring_min_generation{instance="gw2",job="blindbucket"}'
+        values: '0x1800'
+    alert_rule_test:
+      - eval_time: 23h
+        alertname: BlindbucketKeyringFloorBehind
+        exp_alerts: []
+      - eval_time: 25h
+        alertname: BlindbucketKeyringFloorBehind
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: gw1
+              job: blindbucket
+            exp_annotations:
+              summary: "gw1: keys.min_generation is below the keyring's generation"
+              description: >-
+                This instance has served keyring generation 3 for a day with
+                keys.min_generation below it, so an older copy of the keyring put
+                back in its place would open. Once every instance serves it, raise
+                keys.min_generation to 3.
+      - eval_time: 28h
+        alertname: BlindbucketKeyringFloorBehind
+        exp_alerts: []

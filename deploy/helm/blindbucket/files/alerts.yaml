@@ -151,3 +151,21 @@ groups:
             generation for 30 minutes; the newest is {{ $value }}. Restart those
             behind. Until they are, do not activate a tenant, take its census or
             destroy its locks.
+
+      # The keyring's generation has been above keys.min_generation for a day:
+      # a floor nobody raised after a rollout. Until it is, an older copy of
+      # the keyring put back in place of the newest opens, with the tenants
+      # and tombstones of its day (ADR-040). A keyring without tenants is at
+      # generation 0 and never fires.
+      - alert: BlindbucketKeyringFloorBehind
+        expr: blindbucket_keyring_generation > blindbucket_keyring_min_generation
+        for: 24h
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: keys.min_generation is below the keyring's generation"
+          description: >-
+            This instance has served keyring generation {{ $value }} for a day
+            with keys.min_generation below it, so an older copy of the keyring
+            put back in its place would open. Once every instance serves it,
+            raise keys.min_generation to {{ $value }}.
