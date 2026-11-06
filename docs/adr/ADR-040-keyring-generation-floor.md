@@ -1,6 +1,6 @@
 # ADR-040 — A floor on the keyring's generation, set in the configuration
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-11-06
 **Milestone:** post-M15
 **Implements:** [#223](https://github.com/LennardGeissler/blindbucket/issues/223)
@@ -62,7 +62,10 @@ The check sits where every command already opens the file, before any key is use
 applies to commands that only read as well. A refusal that depended on the command
 would leave a way around it, and an operator who restores a backup on purpose lowers
 the floor on purpose, which is the point: a rollback then takes two changes in two
-places, not one.
+places, not one. *Amended while writing it: the check is made once the file has
+opened, not before. The `generation` in clear can be raised by whoever edits the file;
+only the sealed directory's copy, which the open compares it against, can be trusted.
+No object key is used before the check, but the root key has been obtained.*
 
 `min_generation` is a setting of the deployment's keyring, not of a tenant. Under
 `keys.tenants.<name>`, which shares the type, it is refused.

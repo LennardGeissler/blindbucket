@@ -92,7 +92,10 @@ The keyring is the one artifact every instance and every command already has to
 share ([ADR-002](ADR-002-key-hierarchy.md)), and a sealed directory cannot be edited
 without the deployment's root key. A file that drops a tenant, moves a bucket or
 removes a tombstone fails to open instead of letting those buckets fall back to the
-default tenant.
+default tenant. *Amended after a review: that holds for a file that was edited, not
+for one replaced by a genuine older copy, which opens with the tenants of its day.
+[ADR-040](ADR-040-keyring-generation-floor.md) adds a floor on the generation, set in
+the configuration, for that.*
 
 ### Writing and reading
 
