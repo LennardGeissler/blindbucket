@@ -128,6 +128,14 @@ kubectl rollout status deployment/<release>-blindbucket
 `BlindbucketKeyringGenerationSkew` fires when a rollout has not ended within 30
 minutes.
 
+An older copy of the keyring Secret, put back in place of the newest, opens as well
+and brings back the tenants and tombstones of its day. Once a rollout is done, raise
+`keys.minGeneration` to the generation every pod serves, and the gateway refuses
+anything older ([ADR-040](../../../docs/adr/ADR-040-keyring-generation-floor.md)). It is
+in the chart's ConfigMap, apart from the Secret, so whoever can only replace the Secret
+cannot undo it. `BlindbucketKeyringFloorBehind` fires when it has been below the
+generation for a day. Needs gateway 1.9.0 or later.
+
 ## The status page
 
 `dashboard.enabled` serves the gateway's read-only status page

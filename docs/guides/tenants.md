@@ -142,7 +142,9 @@ default name key to the tenant's.
   `keys.tenants` the keyring does not have.
 - `blindbucket_tenant_open{tenant}` is 0 for a tenant whose keys did not open on an
   instance. The instance's log says why. `BlindbucketTenantNotOpen` alerts on it, and
-  `BlindbucketKeyringGenerationSkew` on a rollout that has not ended within 30 minutes
+  `BlindbucketKeyringGenerationSkew` on a rollout that has not ended within 30 minutes,
+  and `BlindbucketKeyringFloorBehind` on a `keys.min_generation` left below the
+  generation for a day
   ([deploy/prometheus/alerts.yaml](../../deploy/prometheus/alerts.yaml)).
 - The status page lists the tenants, the key their writes use, their lock, and whether
   each opened.
