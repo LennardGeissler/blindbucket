@@ -87,6 +87,9 @@ data:
     keys:
       provider: {{ .Values.keys.provider }}
       keyring: /etc/blindbucket/keys/keyring.json
+      {{- with .Values.keys.minGeneration }}
+      min_generation: {{ int64 . }}
+      {{- end }}
       {{- if eq .Values.keys.provider "file" }}
       passphrase_file: /etc/blindbucket/passphrase/passphrase
       {{- else if eq .Values.keys.provider "vault" }}

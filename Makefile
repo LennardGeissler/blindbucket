@@ -203,6 +203,11 @@ chart: ## Lint, render and validate the Helm chart.
 		--set keys.tenants.default.provider=file --set keys.tenants.default.passphraseSecret=x >/dev/null 2>&1 \
 		|| { echo "the chart rendered an entry for the default tenant"; exit 1; }
 	@echo "renders each tenant's lock, and refuses one without its Secret or named default: ok"
+	@# The floor on the keyring's generation, as a whole number, and none by default.
+	@grep -q 'min_generation: 1234567$$' bin/chart.yaml \
+		&& ! grep -q 'min_generation' bin/chart-eks.yaml \
+		|| { echo "keys.minGeneration did not render as it should"; exit 1; }
+	@echo "renders keys.minGeneration, and nothing without it: ok"
 
 .PHONY: app-nextcloud
 app-nextcloud: ## Run Nextcloud through the gateway (test/apps/nextcloud, M12).
