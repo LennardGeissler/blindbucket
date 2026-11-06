@@ -647,7 +647,8 @@ open, whose buckets then answer 503
 ([ADR-038](docs/adr/ADR-038-tenants-and-crypto-shredding.md));
 `blindbucket_keyring_min_generation` is the floor `keys.min_generation` sets under it
 ([ADR-040](docs/adr/ADR-040-keyring-generation-floor.md)).
-`BlindbucketKeyringGenerationSkew` and `BlindbucketTenantNotOpen` alert on the two.
+`BlindbucketKeyringGenerationSkew` and `BlindbucketTenantNotOpen` alert on the two, and
+`BlindbucketKeyringFloorBehind` on a floor left below the generation for a day.
 
 Those alerts are written out in
 [deploy/prometheus/alerts.yaml](deploy/prometheus/alerts.yaml), with the audit
