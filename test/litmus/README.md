@@ -118,3 +118,24 @@ Since 1.6 the gateway passes the conditions on and takes the store's
 semantics: enforced in front of MinIO, ignored in front of Garage. Overlapping
 writes keep the store's ranking in both versions, and the loser hears what the
 store tells it.
+
+## Through the gateway, 2026-11-06
+
+The same run through v1.9.0, in front of MinIO and of Garage, five repetitions
+each, with the stores measured directly alongside as the control
+([`results/2026-11-06/`](results/2026-11-06/)), configured and signed as on
+2026-10-30.
+
+| Test | MinIO | v1.9.0 → MinIO | Garage | v1.9.0 → Garage |
+|---|---|---|---|---|
+| `cond-put-inm` | enforced | enforced | ignored | ignored |
+| `cond-put-im` | enforced | enforced | ignored | ignored |
+| `cond-complete-im` | enforced | enforced | ignored | ignored |
+| `cond-complete-inm` | enforced | enforced | ignored | ignored |
+| `copy-source-im` | enforced | enforced | enforced | enforced |
+| `overlap-mpu-mpu` | last completed | last completed | last created; loser refused | the same |
+| `overlap-mpu-put` | last completed | last completed | last begun; loser refused | the same |
+| `read-after-write` | consistent | consistent | consistent | consistent |
+
+Every cell 5/5, and no error inside a `200` anywhere. Nothing changed since
+1.6: the gateway still takes the store's semantics for every test here.

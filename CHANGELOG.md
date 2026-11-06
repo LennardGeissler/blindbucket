@@ -16,6 +16,10 @@ version 1 would keep being readable.
 
 ## [Unreleased]
 
+### Measured
+
+- **The litmus tests, through 1.9.0.** `test/litmus/` was run again through the gateway, now v1.9.0, in front of MinIO and of Garage, five times each, with the stores directly as the control. Every result is the one 1.6.0 gave: the gateway takes the store's semantics, conditions enforced in front of MinIO and ignored in front of Garage ([test/litmus/README.md](test/litmus/README.md#through-the-gateway-2026-11-06)).
+
 ## [1.9.0] — 2026-11-06
 
 **An older keyring can be refused.** A review before 1.8.0 found that a genuine older

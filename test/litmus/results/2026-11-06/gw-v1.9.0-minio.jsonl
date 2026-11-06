@@ -1,0 +1,40 @@
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-put-inm", "repeat": 1, "error_in_200": [], "time": "2026-11-06T15:31:28.610641+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-put-im", "repeat": 1, "error_in_200": [], "time": "2026-11-06T15:31:28.641584+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-complete-im", "repeat": 1, "error_in_200": [], "time": "2026-11-06T15:31:28.683109+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-complete-inm", "repeat": 1, "error_in_200": [], "time": "2026-11-06T15:31:28.715804+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "copy-source-im", "repeat": 1, "error_in_200": [], "time": "2026-11-06T15:31:28.740153+00:00"}
+{"B": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "gw-v1.9.0-minio", "test": "overlap-mpu-mpu", "repeat": 1, "error_in_200": [], "time": "2026-11-06T15:31:29.952194+00:00"}
+{"PUT": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "gw-v1.9.0-minio", "test": "overlap-mpu-put", "repeat": 1, "error_in_200": [], "time": "2026-11-06T15:31:31.136150+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "gw-v1.9.0-minio", "test": "read-after-write", "repeat": 1, "error_in_200": [], "time": "2026-11-06T15:31:31.310287+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-put-inm", "repeat": 2, "error_in_200": [], "time": "2026-11-06T15:31:31.320674+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-put-im", "repeat": 2, "error_in_200": [], "time": "2026-11-06T15:31:31.333686+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-complete-im", "repeat": 2, "error_in_200": [], "time": "2026-11-06T15:31:31.354598+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-complete-inm", "repeat": 2, "error_in_200": [], "time": "2026-11-06T15:31:31.378172+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "copy-source-im", "repeat": 2, "error_in_200": [], "time": "2026-11-06T15:31:31.402871+00:00"}
+{"B": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "gw-v1.9.0-minio", "test": "overlap-mpu-mpu", "repeat": 2, "error_in_200": [], "time": "2026-11-06T15:31:32.607561+00:00"}
+{"PUT": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "gw-v1.9.0-minio", "test": "overlap-mpu-put", "repeat": 2, "error_in_200": [], "time": "2026-11-06T15:31:33.773583+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "gw-v1.9.0-minio", "test": "read-after-write", "repeat": 2, "error_in_200": [], "time": "2026-11-06T15:31:34.246362+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-put-inm", "repeat": 3, "error_in_200": [], "time": "2026-11-06T15:31:34.262947+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-put-im", "repeat": 3, "error_in_200": [], "time": "2026-11-06T15:31:34.282463+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-complete-im", "repeat": 3, "error_in_200": [], "time": "2026-11-06T15:31:34.321324+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-complete-inm", "repeat": 3, "error_in_200": [], "time": "2026-11-06T15:31:34.366655+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "copy-source-im", "repeat": 3, "error_in_200": [], "time": "2026-11-06T15:31:34.405166+00:00"}
+{"B": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "gw-v1.9.0-minio", "test": "overlap-mpu-mpu", "repeat": 3, "error_in_200": [], "time": "2026-11-06T15:31:35.622215+00:00"}
+{"PUT": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "gw-v1.9.0-minio", "test": "overlap-mpu-put", "repeat": 3, "error_in_200": [], "time": "2026-11-06T15:31:36.791001+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "gw-v1.9.0-minio", "test": "read-after-write", "repeat": 3, "error_in_200": [], "time": "2026-11-06T15:31:37.286713+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-put-inm", "repeat": 4, "error_in_200": [], "time": "2026-11-06T15:31:37.298989+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-put-im", "repeat": 4, "error_in_200": [], "time": "2026-11-06T15:31:37.317231+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-complete-im", "repeat": 4, "error_in_200": [], "time": "2026-11-06T15:31:37.347113+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-complete-inm", "repeat": 4, "error_in_200": [], "time": "2026-11-06T15:31:37.378188+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "copy-source-im", "repeat": 4, "error_in_200": [], "time": "2026-11-06T15:31:37.405715+00:00"}
+{"B": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "gw-v1.9.0-minio", "test": "overlap-mpu-mpu", "repeat": 4, "error_in_200": [], "time": "2026-11-06T15:31:38.605222+00:00"}
+{"PUT": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "gw-v1.9.0-minio", "test": "overlap-mpu-put", "repeat": 4, "error_in_200": [], "time": "2026-11-06T15:31:39.780690+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "gw-v1.9.0-minio", "test": "read-after-write", "repeat": 4, "error_in_200": [], "time": "2026-11-06T15:31:40.298289+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-put-inm", "repeat": 5, "error_in_200": [], "time": "2026-11-06T15:31:40.319451+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-put-im", "repeat": 5, "error_in_200": [], "time": "2026-11-06T15:31:40.338110+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-complete-im", "repeat": 5, "error_in_200": [], "time": "2026-11-06T15:31:40.371534+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "cond-complete-inm", "repeat": 5, "error_in_200": [], "time": "2026-11-06T15:31:40.405114+00:00"}
+{"response": "412/PreconditionFailed", "verdict": "enforced", "provider": "gw-v1.9.0-minio", "test": "copy-source-im", "repeat": 5, "error_in_200": [], "time": "2026-11-06T15:31:40.434006+00:00"}
+{"B": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "gw-v1.9.0-minio", "test": "overlap-mpu-mpu", "repeat": 5, "error_in_200": [], "time": "2026-11-06T15:31:41.631342+00:00"}
+{"PUT": "200", "A": "200", "holds": "A", "verdict": "last-completed", "provider": "gw-v1.9.0-minio", "test": "overlap-mpu-put", "repeat": 5, "error_in_200": [], "time": "2026-11-06T15:31:42.823209+00:00"}
+{"writes": 20, "misses": 0, "verdict": "consistent", "provider": "gw-v1.9.0-minio", "test": "read-after-write", "repeat": 5, "error_in_200": [], "time": "2026-11-06T15:31:43.253030+00:00"}
