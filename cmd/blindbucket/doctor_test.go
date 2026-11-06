@@ -153,6 +153,30 @@ func TestDoctorKeyring(t *testing.T) {
 			t.Errorf("keyring = %+v", c)
 		}
 	})
+	t.Run("a floor below the generation", func(t *testing.T) {
+		conf := doctorSetup(t, unreachable, "b")
+		keyring := filepath.Join(filepath.Dir(conf), initKeyringName)
+		keyringCheck := func() doctorCheckJSON {
+			t.Helper()
+			doc, _ := runDoctorJSON(t, "--config", conf)
+			return find(t, doc, doctor.NameKeyring, "")
+		}
+		if c := keyringCheck(); c.Outcome != "ok" || strings.Contains(c.Detail, "min_generation") {
+			t.Errorf("version 1, which has no generation: %+v", c)
+		}
+		if _, _, err := runCLI(t, "tenants", "create", "--keyring", keyring, "--deployment-lock", "beta", "beta-*"); err != nil {
+			t.Fatal(err)
+		}
+		if c := keyringCheck(); c.Outcome != "warning" ||
+			!strings.Contains(c.Detail, "generation 1, keys.min_generation 0") ||
+			!strings.Contains(c.Fix, "raise keys.min_generation") {
+			t.Errorf("generation 1 without a floor: %+v", c)
+		}
+		editConfig(t, conf, "\nkeys:\n", "\nkeys:\n  min_generation: 1\n")
+		if c := keyringCheck(); c.Outcome != "ok" || !strings.Contains(c.Detail, "keys.min_generation 1") {
+			t.Errorf("generation 1 at the floor: %+v", c)
+		}
+	})
 	t.Run("missing", func(t *testing.T) {
 		conf := doctorSetup(t, unreachable, "b")
 		if err := os.Remove(filepath.Join(filepath.Dir(conf), initKeyringName)); err != nil {

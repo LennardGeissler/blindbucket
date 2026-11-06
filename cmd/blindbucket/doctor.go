@@ -283,12 +283,23 @@ func checkKeyring(ctx context.Context, cfg *config.Config, pass *passphraseFlags
 
 	ring := f.Default
 	detail := fmt.Sprintf("sealed by %s; %s, %s active", sealedBy(cfg.Keys), pluralize(len(ring.KIDs()), "key"), ring.ActiveKID())
+	var fixes []string
 	if f.Generation > 0 {
-		detail += fmt.Sprintf("; generation %d", f.Generation)
+		detail += fmt.Sprintf("; generation %d, keys.min_generation %d", f.Generation, cfg.Keys.MinGeneration)
+		// A floor below the generation is what every rollout passes through,
+		// and what a floor nobody raised looks like (ADR-040).
+		if f.Generation > cfg.Keys.MinGeneration {
+			fixes = append(fixes, fmt.Sprintf("once every instance serves generation %d, raise "+
+				"keys.min_generation to it: until then an older copy of the keyring put back in its "+
+				"place opens", f.Generation))
+		}
 	}
 	if mode := info.Mode().Perm(); mode&0o077 != 0 {
-		return f, doctor.Warn(doctor.NameKeyring, fmt.Sprintf("%s; mode %04o", detail, mode),
-			fmt.Sprintf("chmod 600 %s: it is readable beyond its owner", path))
+		detail += fmt.Sprintf("; mode %04o", mode)
+		fixes = append(fixes, fmt.Sprintf("chmod 600 %s: it is readable beyond its owner", path))
+	}
+	if len(fixes) > 0 {
+		return f, doctor.Warn(doctor.NameKeyring, detail, strings.Join(fixes, "; "))
 	}
 	return f, doctor.Ok(doctor.NameKeyring, detail)
 }
