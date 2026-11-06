@@ -68,6 +68,7 @@ type Metrics struct {
 	keyringKeys         prometheus.Gauge
 	keyringCreated      *prometheus.GaugeVec
 	keyringGeneration   prometheus.Gauge
+	keyringFloor        prometheus.Gauge
 	tenantOpen          *prometheus.GaugeVec
 }
 
@@ -198,6 +199,15 @@ func NewMetrics(reg prometheus.Registerer, cfg MetricsConfig) *Metrics {
 				"without tenants. A keyring change reaches an instance when it restarts.",
 		}),
 
+		// The floor ADR-040 sets on the generation. A generation above it
+		// for long is a floor nobody raised, under which an older copy of
+		// the keyring put back in place of the newest would still open.
+		keyringFloor: factory.gauge(prometheus.GaugeOpts{
+			Name: "blindbucket_keyring_min_generation",
+			Help: "keys.min_generation, the lowest keyring generation this instance " +
+				"opens; 0 for none.",
+		}),
+
 		tenantOpen: factory.gaugeVec(prometheus.GaugeOpts{
 			Name: "blindbucket_tenant_open",
 			Help: "1 for a tenant whose keys opened at startup, 0 for one whose lock " +
@@ -241,6 +251,14 @@ func (m *Metrics) KeyringLoaded(ring KeyringInfo) {
 		}
 		m.keyringCreated.WithLabelValues(kid, active).Set(float64(created.Unix()))
 	}
+}
+
+// KeyringFloor records keys.min_generation, once, at startup.
+func (m *Metrics) KeyringFloor(floor uint64) {
+	if m == nil {
+		return
+	}
+	m.keyringFloor.Set(float64(floor))
 }
 
 // TenantsLoaded records the generation of the keyring the gateway started

@@ -39,6 +39,7 @@ var metricContract = map[string]struct {
 	"blindbucket_keyring_keys":                          {dto.MetricType_GAUGE, ""},
 	"blindbucket_keyring_key_created_timestamp_seconds": {dto.MetricType_GAUGE, "active,kid"},
 	"blindbucket_keyring_generation":                    {dto.MetricType_GAUGE, ""},
+	"blindbucket_keyring_min_generation":                {dto.MetricType_GAUGE, ""},
 	"blindbucket_tenant_open":                           {dto.MetricType_GAUGE, "tenant"},
 }
 
@@ -69,6 +70,7 @@ func TestMetricsAreAContract(t *testing.T) {
 	m.AuditFailure()
 	m.KeyringLoaded(contractRing{})
 	m.TenantsLoaded(1, map[string]bool{"acme": true})
+	m.KeyringFloor(1)
 
 	families, err := registry.Gather()
 	if err != nil {

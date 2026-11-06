@@ -155,11 +155,13 @@ func TestTenantMetrics(t *testing.T) {
 	registry := prometheus.NewRegistry()
 	m := NewMetrics(registry, MetricsConfig{})
 	m.TenantsLoaded(7, map[string]bool{"acme": true, "globex": false})
+	m.KeyringFloor(5)
 
 	h := handlerFor(t, AdminConfig{Registry: registry})
 	_, body := get(t, h, "/metrics")
 	for _, want := range []string{
 		`blindbucket_keyring_generation 7`,
+		`blindbucket_keyring_min_generation 5`,
 		`blindbucket_tenant_open{tenant="acme"} 1`,
 		`blindbucket_tenant_open{tenant="globex"} 0`,
 	} {
