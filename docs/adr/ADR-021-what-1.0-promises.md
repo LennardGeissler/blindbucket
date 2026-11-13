@@ -7,6 +7,11 @@
 **Amended by:** [ADR-022](ADR-022-migrating-to-encrypted-names.md) — `migrate-names --json`
 joins the JSON documents, from 1.1
 **Amended by:** [ADR-028](ADR-028-scrub.md) — `scrub --json` joins the JSON documents, from 1.3
+**Amended by:** [ADR-031](ADR-031-doctor.md) — `doctor --json` joins the JSON documents, from 1.4
+**Amended by:** [ADR-034](ADR-034-encrypting-existing-objects.md) — `encrypt-existing --json`
+joins the JSON documents, from 1.5
+**Amended by:** [ADR-038](ADR-038-tenants-and-crypto-shredding.md) — `tenants census --json`
+joins the JSON documents, from 1.7
 **Amended by:** [#69](https://github.com/LennardGeissler/blindbucket/issues/69) — `audit verify --json` joins the JSON documents, from 1.10
 
 ## Context
@@ -46,7 +51,7 @@ An inventory of what exists, taken from the code rather than from memory:
 | Freshness index | `internal/freshness` | file version `1` |
 | Configuration | `blindbucket.example.yaml`, `internal/config` | — |
 | CLI: commands, flags, exit codes 0 / 1 / 2 / 130 | `cmd/blindbucket` | — |
-| JSON documents: `keys list`, `gc`, `rotate`, `probe`, `migrate-names`, `inspect`, `scrub`, `encrypt-existing`, `audit verify` | `cmd/blindbucket` | — |
+| JSON documents: `keys list`, `gc`, `rotate`, `probe`, `migrate-names`, `inspect`, `scrub`, `doctor`, `encrypt-existing`, `tenants census`, `audit verify` | `cmd/blindbucket` | — |
 | Metrics: 14 names | `internal/obs` | — |
 | Admin endpoints: `/healthz`, `/readyz`, `/metrics`, `/debug/pprof/` | `internal/obs` | — |
 | The dashboard's address and paths, `/` and `/style.css`, not what the page shows ([ADR-035](ADR-035-dashboard.md)) | `internal/dashboard` | — |
@@ -98,11 +103,15 @@ fact long before it was in the table.
   interrupted. New commands and flags may be added.
 - **The JSON documents** of `keys list`, `gc`, `rotate`, `probe`,
   `migrate-names` (from 1.1, [ADR-022](ADR-022-migrating-to-encrypted-names.md)),
-  `inspect` (from 1.2), `scrub` (from 1.3, [ADR-028](ADR-028-scrub.md)) and
+  `inspect` (from 1.2), `scrub` (from 1.3, [ADR-028](ADR-028-scrub.md)),
+  `doctor` (from 1.4, [ADR-031](ADR-031-doctor.md)), `encrypt-existing` (from
+  1.5, [ADR-034](ADR-034-encrypting-existing-objects.md)), `tenants census`
+  (from 1.7, [ADR-038](ADR-038-tenants-and-crypto-shredding.md)) and
   `audit verify` (from 1.10,
   [#69](https://github.com/LennardGeissler/blindbucket/issues/69)). A field is
-  never removed, renamed, or given a different type or meaning. New fields may be added in a minor release, so **a
-  consumer must ignore fields it does not know**, which each command's help says.
+  never removed, renamed, or given a different type or meaning. New fields may
+  be added in a minor release, so **a consumer must ignore fields it does not
+  know**, which each command's help says.
   Times stay RFC 3339 in UTC and durations stay seconds.
 - **Metrics.** The names, their types, and their label names. New metrics and
   new label *values* may appear; a label name is never added to an existing
