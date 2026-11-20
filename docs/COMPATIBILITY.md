@@ -5,16 +5,15 @@ it. Every result below came from a real client against a real MinIO, not from
 reading a specification.
 
 **Measured:** the client matrix on 2026-09-12 against `v0.2.0`, with object names
-in the clear. **AWS CLI and boto3 are re-run against every commit** by the
-`Client compatibility` CI job, so their rows are current for `v1.9.0`. The other
-clients were measured on the date their row gives; rclone's multipart uploads were
-re-measured on 2026-10-28, the rest of its row stands from `v0.2.0`.
+in the clear. **AWS CLI and boto3 are re-run against every commit in both naming
+modes** by the `Client compatibility` CI matrix, so their rows are current for
+`v1.9.0` both in the clear and with `names.encrypt: true`. The other clients were
+measured on the date their row gives; rclone's multipart uploads were re-measured
+on 2026-10-28, the rest of its row stands from `v0.2.0`.
 
-The **object-name encryption** rows were verified on 2026-09-16 with the AWS CLI
-against a real MinIO — a 40 MiB multipart round trip and a server-side copy of it
-with matching SHA-256, 250 objects listed complete and in order across 13 pages,
-and `aws s3 sync --delete` run twice with the second run doing nothing. They are
-not a re-run of the whole matrix, and this document does not claim they are.
+The **object-name encryption** hand check of the AWS CLI on 2026-09-16 has been
+superseded by this CI matrix, which now runs the AWS CLI and boto3 scenarios in
+both naming modes on every commit.
 
 **Setup:** `docker compose up -d`, `blindbucket serve`, path-style, 64 KiB chunks.
 
@@ -41,13 +40,13 @@ not measured yet.
 
 ## Summary
 
-| Client | Version tested | Status | Last measured | Required settings |
-|---|---|---|---|---|
-| AWS CLI v2 | 2.36.43 | **Works** | every commit, in CI | none |
-| boto3 | 1.43.92 | **Works** | every commit, in CI | none |
-| MinIO client (`mc`) | RELEASE.2025-08-13 | **Works** | 2026-09-28, after `v1.0.0` | none since 1.3; before, `allow_unsigned_payload: true` for multipart |
-| rclone | 1.75.1 | **Works with settings** | 2026-10-28, multipart; the rest `v0.2.0` | `--ignore-checksum`; `--size-only` for `check`; before 1.6.1 also `--s3-no-check-bucket` for multipart; before 1.3 also `allow_unsigned_payload: true` |
-| s5cmd | 2.3.0 | **Works** | 2026-10-03, main `8cdb03a` | none, `--endpoint-url` only |
+| Client | Version tested | Naming mode | Status | Last measured | Required settings |
+|---|---|---|---|---|---|
+| AWS CLI v2 | 2.36.43 | clear + encrypted | **Works** | every commit, in CI | none |
+| boto3 | 1.43.92 | clear + encrypted | **Works** | every commit, in CI | none |
+| MinIO client (`mc`) | RELEASE.2025-08-13 | clear only | **Works** | 2026-09-28, after `v1.0.0` | none since 1.3; before, `allow_unsigned_payload: true` for multipart |
+| rclone | 1.75.1 | clear only | **Works with settings** | 2026-10-28, multipart; the rest `v0.2.0` | `--ignore-checksum`; `--size-only` for `check`; before 1.6.1 also `--s3-no-check-bucket` for multipart; before 1.3 also `allow_unsigned_payload: true` |
+| s5cmd | 2.3.0 | clear only | **Works** | 2026-10-03, main `8cdb03a` | none, `--endpoint-url` only |
 
 **HTTP and HTTPS are different code paths.** A client chooses how to frame the
 body by the endpoint's scheme. Over HTTP the AWS CLI signs the whole body; over

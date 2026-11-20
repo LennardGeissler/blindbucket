@@ -58,6 +58,12 @@ def check(name: str, condition: bool, detail: str = "") -> None:
     print(f"  FAIL  {name}{': ' + detail if detail else ''}")
 
 
+def listed_object(key: str) -> dict | None:
+    """Find an object by its plaintext key using a listable parent prefix."""
+    listing = s3.list_objects_v2(Bucket=BUCKET, Prefix=PREFIX)
+    return next((obj for obj in listing.get("Contents", []) if obj["Key"] == key), None)
+
+
 def scenario(fn):
     """Run one scenario, turning an exception into a failure rather than a crash."""
     print(f"\n{fn.__name__}")
@@ -96,9 +102,10 @@ def sizes_are_plaintext_sizes():
     check("head_object size", head["ContentLength"] == len(payload),
           f"got {head['ContentLength']}")
 
-    listing = s3.list_objects_v2(Bucket=BUCKET, Prefix=key)
-    entry = listing["Contents"][0]
-    check("list_objects_v2 size", entry["Size"] == len(payload), f"got {entry['Size']}")
+    entry = listed_object(key)
+    check("list_objects_v2 finds the object", entry is not None)
+    if entry is not None:
+        check("list_objects_v2 size", entry["Size"] == len(payload), f"got {entry['Size']}")
     s3.delete_object(Bucket=BUCKET, Key=key)
 
 
@@ -257,9 +264,11 @@ def multipart_round_trip():
           head["ContentLength"] == len(payload), str(head["ContentLength"]))
     check("the ETag carries a part count", "-" in head["ETag"], head["ETag"])
 
-    listed = s3.list_objects_v2(Bucket=BUCKET, Prefix=key)["Contents"][0]
-    check("the listing reports the plaintext size",
-          listed["Size"] == len(payload), str(listed["Size"]))
+    listed = listed_object(key)
+    check("the listing finds the multipart object", listed is not None)
+    if listed is not None:
+        check("the listing reports the plaintext size",
+              listed["Size"] == len(payload), str(listed["Size"]))
 
     # A range that straddles a part boundary is the one the prefix sums have to
     # get right; inside a part it is the ordinary single-segment mapping.

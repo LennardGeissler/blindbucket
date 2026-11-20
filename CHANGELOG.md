@@ -30,6 +30,8 @@ version 1 would keep being readable.
 
 ### Measured
 
+- **AWS CLI and boto3 with encrypted object names.** The client compatibility CI job runs both clients in the clear and with `names.encrypt: true` on every commit. Boto3 listings and the AWS CLI multipart size check use parent prefixes and match the returned plaintext key, so the same scenarios exercise both naming modes (issue [#66](https://github.com/LennardGeissler/blindbucket/issues/66)).
+
 - **The litmus tests, through 1.9.0.** `test/litmus/` was run again through the gateway, now v1.9.0, in front of MinIO and of Garage, five times each, with the stores directly as the control. Every result is the one 1.6.0 gave: the gateway takes the store's semantics, conditions enforced in front of MinIO and ignored in front of Garage ([test/litmus/README.md](test/litmus/README.md#through-the-gateway-2026-11-06)).
 
 ## [1.9.0] — 2026-11-06

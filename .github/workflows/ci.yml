@@ -430,8 +430,12 @@ jobs:
           docker logs kms || true
 
   clients:
-    name: Client compatibility (AWS CLI, boto3)
+    name: Client compatibility (names.encrypt=${{ matrix.encrypt_names }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        encrypt_names: [false, true]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -468,7 +472,8 @@ jobs:
         run: |
           make build
           ./bin/blindbucket init --non-interactive --dir . --kid ci \
-            --endpoint http://localhost:9002 --bucket blindbucket-dev
+            --endpoint http://localhost:9002 --bucket blindbucket-dev \
+            --encrypt-names=${{ matrix.encrypt_names }}
           sed -n "s/^\([A-Z_]*\)='\(.*\)'$/\1=\2/p" blindbucket.env >> "$GITHUB_ENV"
           set -a; . ./blindbucket.env; set +a
           ./bin/blindbucket serve --config blindbucket.yaml > gateway.log 2>&1 &
@@ -625,7 +630,10 @@ jobs:
 
           # The listing must report the plaintext size, recovered from the
           # ciphertext size and the part count in the ETag alone.
-          test "$(aws s3 ls s3://blindbucket-dev/ci/big.bin | awk '{print $3}')" = "41943040"
+                    # List the parent prefix: encrypted-name listings require a segment boundary.
+          listed_size=$(aws s3api list-objects-v2 --bucket blindbucket-dev --prefix ci/ \
+            --query "Contents[?Key=='ci/big.bin'].Size | [0]" --output text)
+          test "$listed_size" = "41943040"
 
           # A range that straddles a part boundary exercises the prefix sums.
           aws s3api get-object --bucket blindbucket-dev --key ci/big.bin \
